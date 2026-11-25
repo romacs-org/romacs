@@ -170,6 +170,24 @@ fn content_length_header_limit_whatever_the_reads() {
 }
 
 #[test]
+fn content_length_header_at_the_limit_whatever_its_delimiter_split() {
+    let mut header = b"Content-Length: 2\r\nX-Pad: ".to_vec();
+    header.resize(HEADER_LIMIT, b'p');
+    let stream = [header.clone(), b"\r\n\r\n{}".to_vec()].concat();
+    for cut in HEADER_LIMIT - 1..=HEADER_LIMIT + 4 {
+        let (a, b) = stream.split_at(cut);
+        assert_eq!(frames(Kind::ContentLength, None, &[a, b]), vec![bytes("{}")], "cut at {cut}");
+    }
+}
+
+#[test]
+fn content_length_of_any_size_never_overflows() {
+    let stream = format!("Content-Length: {}\r\n\r\n{{}}", usize::MAX);
+    assert!(frames(Kind::ContentLength, None, &[stream.as_bytes()]).is_empty());
+    assert_eq!(frames(Kind::ContentLength, Some(10), &[stream.as_bytes()]), vec![Frame::Over]);
+}
+
+#[test]
 fn content_length_rest_keeps_its_header() {
     // Framing stopped in a body gives back the header with the body so far.
     let mut framer = Framer::new(Kind::ContentLength, None);

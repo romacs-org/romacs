@@ -3037,7 +3037,8 @@ inside itself.  Its end, once seen, waits for them
 \(`romacs-agent--sentinel')."
   (when (romacs-agent--let-go-p process)
     ;; What replaced it is replayed them, from the last record seen.
-    (process-put process 'frames nil))
+    (process-put process 'frames nil)
+    (process-put process 'frames-tail nil))
   (unless (process-get process 'draining)
     (process-put process 'draining t)
     (let ((until (+ (float-time) romacs-agent--drain-turn)))

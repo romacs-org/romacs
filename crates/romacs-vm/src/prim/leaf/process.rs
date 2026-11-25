@@ -455,7 +455,7 @@ impl Leaf<'_> {
             }
             match wake {
                 Wake::Read => readable.push(proc),
-                Wake::Write => self.process_flush_waited(proc)?,
+                Wake::Write => self.process_flush_waited(proc),
                 Wake::Connect => connected.push(proc),
                 Wake::Handshake => match self.gnutls_handshake_poll(proc) {
                     super::gnutls::Handshake::Pending => {}
@@ -586,13 +586,10 @@ impl Leaf<'_> {
         };
         let nbytes = match read {
             Ok(n) => n,
-            // A pty's end is EIO, not end of file: a framed line left
-            // unended is still delivered, once.
+            // A pty's end is EIO, not end of file: what is held (a framed
+            // line left unended, a framing's rest) is still delivered, once.
             Err(error) if error.raw_os_error() == Some(libc::EIO)
-                && self.channel(proc).is_some_and(|c| c.framer.is_some() && !c.last_block) =>
-            {
-                return self.process_read_framed(proc, &[]);
-            }
+                && self.channel(proc).is_some_and(|c| !c.last_block && (c.framer.is_some() || !c.carryover.is_empty())) => 0,
             Err(error) => {
                 let errno = error.raw_os_error().unwrap_or(libc::EIO);
                 return Ok(self.cons(fixnum(-1), fixnum(errno.into())));

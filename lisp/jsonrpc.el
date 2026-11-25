@@ -820,24 +820,31 @@ leaves the rest for a timer, so no message is lost or moved."
               (process-get proc 'jsonrpc-mqueue))))))
 
 (defun jsonrpc--dispatch (proc)
-  "Hand each message PROC's queue holds to its connection, in order.
+  "Hand the messages PROC's queue holds to its connection, in order.
 Very often `jsonrpc-connection-receive' will exit non-locally (typically
-the reply to a request), so each is handled in a timer of its own."
-  (cl-loop
-   ;; `timer-activate' orders timers by time, which is an very expensive
-   ;; operation when jsonrpc-mqueue is large, therefore the time object
-   ;; is reused for each timer created.
-   with conn = (process-get proc 'jsonrpc-connection)
-   with time = (current-time)
-   for msg = (pop (process-get proc 'jsonrpc-mqueue)) while msg
-   do (let ((timer (timer-create)))
+the reply to a request), so each is handled in a timer of its own; the
+messages wait in PROC's deliveries, oldest first, and each timer hands
+over the oldest, so they are received in order whichever timer runs
+first."
+  (let ((messages (nreverse (process-get proc 'jsonrpc-mqueue)))
+        ;; `timer-activate' orders timers by time, which is an very
+        ;; expensive operation when jsonrpc-mqueue is large, therefore the
+        ;; time object is reused for each timer created.
+        (time (current-time)))
+    (process-put proc 'jsonrpc-mqueue nil)
+    (process-put proc 'jsonrpc-deliveries
+                 (nconc (process-get proc 'jsonrpc-deliveries) messages))
+    (dolist (_ messages)
+      (let ((timer (timer-create)))
         (timer-set-time timer time)
-        (timer-set-function timer
-                            (lambda (conn msg)
-                              (with-temp-buffer
-                                (jsonrpc-connection-receive conn msg)))
-                            (list conn msg))
-        (timer-activate timer))))
+        (timer-set-function timer #'jsonrpc--deliver (list proc))
+        (timer-activate timer)))))
+
+(defun jsonrpc--deliver (proc)
+  "Hand the oldest message PROC's deliveries hold to its connection."
+  (when-let* ((msg (pop (process-get proc 'jsonrpc-deliveries))))
+    (with-temp-buffer
+      (jsonrpc-connection-receive (process-get proc 'jsonrpc-connection) msg))))
 
 (defun jsonrpc--remove (conn id &optional deferred-spec)
   "Cancel CONN's continuations for ID, including its timer, if it exists.

@@ -133,21 +133,22 @@ PROCESS, a listener, has no output of its own to wait for."
     (should (equal (cadr got) '("{}")))
     (delete-process process)))
 
-(ert-deftest process-framing-a-failed-queued-write-is-a-status-change ()
-  ;; The child closes its input with its output still open: what the wait
-  ;; could not write ends the process, as GNU's EPIPE does, and its
-  ;; sentinel is told; nothing signals in the wait.
-  (let* ((events nil)
+(ert-deftest process-framing-a-failed-queued-write-closes-only-the-output ()
+  ;; The child closes its input and goes on: what the wait could not write
+  ;; is dropped and the output closed, as GNU's EPIPE does; nothing signals
+  ;; in the wait, the next send does, and the child's last words still come.
+  (let* ((said "")
          (process (make-process :name "process-framing-epipe"
-                                :command '("sh" "-c" "head -c 1 >/dev/null; exec 0<&-; sleep 10")
+                                :command '("sh" "-c" "head -c 1 >/dev/null; exec 0<&-; sleep 1; echo bye")
                                 :noquery t :connection-type 'pipe :coding 'no-conversion
-                                :sentinel (lambda (_p event) (push event events)))))
+                                :filter (lambda (_p s) (setq said (concat said s))))))
     (unwind-protect
         (progn
           (romacs-process-send-nowait process (make-string (* 1024 1024) ?z))
-          (process-framing-tests--until process (lambda () events))
-          (should-not (process-live-p process))
-          (should (equal (process-status process) 'exit)))
+          (process-framing-tests--until process (lambda () (= (romacs-process-unsent-bytes process) 0)))
+          (should (process-live-p process))
+          (should-error (romacs-process-send-nowait process "more"))
+          (process-framing-tests--until process (lambda () (equal said "bye\n"))))
       (delete-process process))))
 
 ;;; The agent protocol's connection
@@ -182,6 +183,34 @@ PROCESS, a listener, has no output of its own to wait for."
           ;; A line over the limit from a peer that does not check closes it.
           (process-send-string client (concat (make-string 5000 ?q) "\n"))
           (process-framing-tests--until server (lambda () closed)))
+      (delete-process client)
+      (delete-process server)
+      (ignore-errors (delete-file socket)))))
+
+(ert-deftest process-framing-rpc-keeps-a-peer-that-read-again ()
+  ;; The queue's limit holds what is left once the socket took what it
+  ;; could: a peer that has read since is not closed for what it read.
+  (let* ((socket (make-temp-name (expand-file-name "pf-rpc-" temporary-file-directory)))
+         (peer nil)
+         (server (make-network-process :name "process-framing-rpc-reader" :family 'local :service socket
+                                       :server t :noquery t :coding 'no-conversion
+                                       :log (lambda (_server p _m) (setq peer p))))
+         (client (make-network-process :name "process-framing-rpc-writer" :family 'local :service socket
+                                       :noquery t :coding 'no-conversion :filter #'ignore))
+         (rpc (romacs-agent-rpc-make client)))
+    (unwind-protect
+        (progn
+          (process-framing-tests--until server (lambda () peer))
+          ;; Filled with no wait, so nothing is written behind the sends.
+          (while (= (romacs-process-unsent-bytes client) 0)
+            (romacs-agent-rpc-send rpc (romacs-agent-rpc-object "pad" (make-string 16384 ?p))))
+          ;; The peer reads all, outside any wait: the queue is as it was.
+          (let ((unsent (romacs-process-unsent-bytes client)))
+            (while (> (car (romacs--proc-read peer)) 0))
+            (should (= (romacs-process-unsent-bytes client) unsent))
+            (let ((romacs-agent-rpc-queue-limit (+ unsent 100)))
+              (should (romacs-agent-rpc-send rpc (romacs-agent-rpc-object "pad" (make-string 1024 ?p))))
+              (should (process-live-p client)))))
       (delete-process client)
       (delete-process server)
       (ignore-errors (delete-file socket)))))

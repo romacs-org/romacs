@@ -111,7 +111,7 @@ impl Framer {
         if self.kind == Kind::Lines && self.state == State::Frame && !self.buf.is_empty() {
             out.push(Frame::Bytes(std::mem::take(&mut self.buf)));
         }
-        self.buf.clear();
+        self.buf = Vec::new();
         self.start = 0;
         self.scan = 0;
     }
@@ -174,7 +174,9 @@ impl Framer {
                     Some((len, header)) => self.state = State::Body(len, header),
                     None => return,
                 },
-                State::Body(len, header) if avail >= header + len => {
+                // The header is in the buffer: only the body is compared,
+                // so no declared length can overflow.
+                State::Body(len, header) if avail - header >= len => {
                     let body = self.start + header;
                     out.push(Frame::Bytes(self.buf[body..body + len].to_vec()));
                     self.start = body + len;
@@ -206,7 +208,8 @@ impl Framer {
         loop {
             let from = self.scan.saturating_sub(3).max(self.start);
             let end = memchr::memmem::find(&self.buf[from..], b"\r\n\r\n").map(|at| from + at);
-            let block = end.unwrap_or(self.buf.len()) - self.start;
+            // A delimiter's start ending the read is not the block's.
+            let block = end.unwrap_or(self.buf.len() - delimiter_start(&self.buf[self.start..])) - self.start;
             if block > HEADER_LIMIT {
                 out.push(Frame::Malformed);
                 self.state = State::Broken;
@@ -225,6 +228,11 @@ impl Framer {
             }
         }
     }
+}
+
+/// How many bytes ending BYTES begin a CRLF CRLF delimiter.
+fn delimiter_start(bytes: &[u8]) -> usize {
+    (1..=3).rev().find(|&n| bytes.ends_with(&b"\r\n\r\n"[..n])).unwrap_or(0)
 }
 
 /// The Content-Length of a header BLOCK (CRLF-separated `Name: value'

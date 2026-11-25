@@ -62,7 +62,8 @@ impl Leaf<'_> {
         Ok(self.cons(kind, limit))
     }
 
-    /// The bytes PROC's channel holds unsent, written as its peer reads.
+    /// The bytes PROC's channel holds unsent, written as its peer reads:
+    /// its own queue, not the records a TLS session holds for the socket.
     pub(crate) fn process_unsent(&mut self, proc: Value) -> Out {
         self.process(proc)?;
         fixnum(self.channel(proc).map_or(0, |c| c.pending.len()))
@@ -112,21 +113,16 @@ impl Leaf<'_> {
     /// Whether CODING leaves bytes as they are: nil, or raw text with Unix
     /// line ends (`no-conversion', `binary').
     /// The wait's write of what PROC holds unsent, its peer ready.  One
-    /// that fails is PROC's status change, never an error in whatever
-    /// happened to wait: as send_process on EPIPE, PROC is closed, its
-    /// status (exit 256) when it ran, and its sentinel told.
-    pub(super) fn process_flush_waited(&mut self, proc: Value) -> Result<()> {
-        if self.process_flush(proc).is_ok() {
-            return Ok(());
+    /// that fails closes PROC's output, as send_process does on EPIPE: what
+    /// it held is dropped, its next send signals, and its output and child
+    /// are left as they are.  Never an error in whatever happened to wait.
+    pub(super) fn process_flush_waited(&mut self, proc: Value) {
+        if self.process_flush(proc).is_err()
+            && let Some(channel) = self.channel_mut(proc)
+        {
+            channel.outfd = None;
+            channel.pending.clear();
         }
-        self.process_tick(proc);
-        if self.process(proc)?.get(Slot::Status) == self.intern("run") {
-            let exit = self.sym("exit");
-            let status = self.list(&[exit, fixnum(256)?]);
-            self.process_mut(proc).set(Slot::Status, status);
-        }
-        self.deactivate_process(proc);
-        Ok(())
     }
 
     fn coding_raw(&mut self, coding: Value) -> Result<bool> {

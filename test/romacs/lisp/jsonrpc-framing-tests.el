@@ -14,40 +14,50 @@
 (require 'cl-lib)
 (require 'jsonrpc)
 
-(defmacro jsonrpc-framing-tests--with-proc (proc dispatched &rest body)
-  "Run BODY with PROC a framed jsonrpc process and DISPATCHED the ids its
-messages were handed to timers with, in order."
+(defmacro jsonrpc-framing-tests--with-proc (proc received &rest body)
+  "Run BODY with PROC a framed jsonrpc process and RECEIVED the ids of the
+messages its connection received, newest first.  Every dispatch has one
+time, as two reads in the same clock tick would."
   (declare (indent 2))
   `(let* ((,proc (make-pipe-process :name "jsonrpc-framing" :noquery t))
-          (,dispatched nil))
+          (,received nil)
+          (now (current-time)))
      (set-process-buffer ,proc (generate-new-buffer " *jsonrpc-framing*" t))
      (unwind-protect
-         (cl-letf (((symbol-function 'timer-activate)
-                    (lambda (timer &rest _)
-                      (push (plist-get (cadr (timer--args timer)) :id) ,dispatched))))
+         (cl-letf (((symbol-function 'jsonrpc-connection-receive)
+                    (lambda (_conn msg) (push (plist-get msg :id) ,received)))
+                   ((symbol-function 'current-time) (lambda () now)))
            ,@body)
        (kill-buffer (process-buffer ,proc))
        (delete-process ,proc))))
 
+(defun jsonrpc-framing-tests--run-timers (done)
+  "Run timers until DONE says t, at most five seconds."
+  (with-timeout (5 (error "Messages never received"))
+    (while (not (funcall done)) (accept-process-output nil 0.01))))
+
+(ert-deftest jsonrpc-framing-two-reads-are-received-in-order ()
+  ;; Two reads' messages, their timers at one time, are received as sent.
+  (jsonrpc-framing-tests--with-proc proc received
+    (jsonrpc--process-filter proc (list "{\"id\":1}" "{\"id\":2}"))
+    (jsonrpc--process-filter proc (list "{\"id\":3}"))
+    (jsonrpc-framing-tests--run-timers (lambda () (= (length received) 3)))
+    (should (equal (reverse received) '(1 2 3)))))
+
 (ert-deftest jsonrpc-framing-a-read-inside-the-reading-keeps-the-order ()
-  (jsonrpc-framing-tests--with-proc proc dispatched
+  (jsonrpc-framing-tests--with-proc proc received
     (cl-letf (((symbol-function 'jsonrpc--warn)
                (lambda (&rest _) (jsonrpc--process-filter proc (list "{\"id\":4}")))))
       (jsonrpc--process-filter proc (list "{\"id\":1}" "not json" "{\"id\":2}" "{\"id\":3}")))
-    ;; Timers fire newest first among equal times: the list is the order.
-    (should (equal dispatched '(1 2 3 4)))))
+    (jsonrpc-framing-tests--run-timers (lambda () (= (length received) 4)))
+    (should (equal (reverse received) '(1 2 3 4)))))
 
 (ert-deftest jsonrpc-framing-a-read-cut-short-loses-nothing ()
-  (jsonrpc-framing-tests--with-proc proc dispatched
-    (let ((due nil))
-      (cl-letf (((symbol-function 'jsonrpc--warn) (lambda (&rest _) (throw 'cut nil)))
-                ((symbol-function 'run-at-time)
-                 (lambda (_time _repeat function &rest args) (push (cons function args) due))))
-        (catch 'cut (jsonrpc--process-filter proc (list "{\"id\":1}" "not json" "{\"id\":2}"))))
-      (should (equal dispatched '(1)))
-      (should (= (length due) 1))
-      (apply (caar due) (cdar due))
-      (should (equal dispatched '(2 1))))))
+  (jsonrpc-framing-tests--with-proc proc received
+    (cl-letf (((symbol-function 'jsonrpc--warn) (lambda (&rest _) (throw 'cut nil))))
+      (catch 'cut (jsonrpc--process-filter proc (list "{\"id\":1}" "not json" "{\"id\":2}"))))
+    (jsonrpc-framing-tests--run-timers (lambda () (= (length received) 2)))
+    (should (equal (reverse received) '(1 2)))))
 
 (provide 'jsonrpc-framing-tests)
 ;;; jsonrpc-framing-tests.el ends here
