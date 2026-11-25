@@ -94,10 +94,10 @@ impl Vm {
         } else {
             vec![KeyEvent { value: self.canonical_key_event_symbol(event)?, input_index: 0 }]
         };
-        self.keymap_filters.clear();
-        self.keymap_pending_filter = None;
+        self.mutator.keymap_filters.clear();
+        self.mutator.keymap_pending_filter = None;
         let binding = self.lookup_keymap_key(map, &events, defaults);
-        self.keymap_pending_filter = None;
+        self.mutator.keymap_pending_filter = None;
         let binding = binding?;
         Ok(if binding.integer_value().is_some() { Value::NIL } else { binding })
     }
@@ -105,12 +105,12 @@ impl Vm {
     /// the binding, or the first filter still to run.
     pub(crate) fn lookup_key_walk(&mut self, map: Value, key: Value, defaults: bool, filters: Vec<(Value, Value)>)
         -> Result<std::result::Result<Value, (Value, Value, Value)>> {
-        self.keymap_filters = filters;
-        self.keymap_pending_filter = None;
+        self.mutator.keymap_filters = filters;
+        self.mutator.keymap_pending_filter = None;
         let result = self.key_events(key).and_then(|events| self.lookup_keymap_key(map, &events, defaults));
-        self.keymap_filters.clear();
+        self.mutator.keymap_filters.clear();
         match result {
-            Err(e) if e == KEYMAP_FILTER_PENDING => Ok(Err(self.keymap_pending_filter.take().expect("pending filter"))),
+            Err(e) if e == KEYMAP_FILTER_PENDING => Ok(Err(self.mutator.keymap_pending_filter.take().expect("pending filter"))),
             other => other.map(Ok),
         }
     }
@@ -196,10 +196,10 @@ impl Vm {
                 }
                 value = match filter {
                     None => object,
-                    Some(filter) => match self.keymap_filters.iter().find(|(i, _)| *i == item) {
+                    Some(filter) => match self.mutator.keymap_filters.iter().find(|(i, _)| *i == item) {
                         Some(&(_, result)) => result,
                         None => {
-                            self.keymap_pending_filter = Some((item, filter, object));
+                            self.mutator.keymap_pending_filter = Some((item, filter, object));
                             return Err(KEYMAP_FILTER_PENDING.into());
                         }
                     },
@@ -662,7 +662,7 @@ impl Vm {
         self.ensure_keymaps();
         let valid = match p { MakeSparseKeymap => n <= 1, Keymapp | UseLocalMap | Kbd => n == 1, DefineKey => (3..=4).contains(&n), LookupKey => (2..=3).contains(&n), GlobalSetKey => n == 2, CurrentGlobalMap => n == 0, _ => false };
         if !valid { return Err("wrong primitive arity".into()); }
-        let args = self.stack[start..start + n].to_vec();
+        let args = self.mutator.stack[start..start + n].to_vec();
         match p {
             MakeSparseKeymap => Ok(self.sparse_keymap(args.first().copied().unwrap_or(Value::NIL))),
             Keymapp => Ok(if self.resolve_keymap(args[0]).is_some() || self.autoloaded_keymap(args[0]) { Value::TRUE } else { Value::NIL }),

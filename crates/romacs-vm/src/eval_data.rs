@@ -17,8 +17,8 @@ impl Vm {
                     return Err("wrong primitive arity".into());
                 }
                 // Polled only inside its own call target's scope.
-                let (a, b) = (self.stack[start], self.stack[start + 1]);
-                let equal = if self.native_quit { self.equal_primitive(a, b)? } else { self.equal_text(a, b)? };
+                let (a, b) = (self.mutator.stack[start], self.mutator.stack[start + 1]);
+                let equal = if self.mutator.native_quit { self.equal_primitive(a, b)? } else { self.equal_text(a, b)? };
                 Ok(if equal { Value::TRUE } else { Value::NIL })
             }
             Min => self.min_max::<false>(start, n, std::cmp::Ordering::Less),
@@ -36,7 +36,7 @@ impl Vm {
         }
         let mut prefix = Vec::new();
         for i in 0..n - 1 {
-            let v = self.stack[start + i];
+            let v = self.mutator.stack[start + i];
             if self.str_view(v).is_some() {
                 self.append_string_codes::<SCOPED>(v, &mut prefix)?;
             } else {
@@ -59,7 +59,7 @@ impl Vm {
         }
         // The new list is the caller's only once it returns: a quit
         // between chunks drops it. One chunk polls not at all.
-        let mut tail = self.stack[start + n - 1];
+        let mut tail = self.mutator.stack[start + n - 1];
         for (i, chunk) in prefix.rchunks(KERNEL_CHUNK).enumerate() {
             if i > 0 { self.kernel_poll::<SCOPED>()?; }
             for &value in chunk.iter().rev() {
@@ -862,7 +862,7 @@ impl Vm {
         if n == 0 {
             return Err("wrong primitive arity".into());
         }
-        let args = self.stack[start..start + n].to_vec();
+        let args = self.mutator.stack[start..start + n].to_vec();
         self.minmax::<SCOPED>(&args, better)
     }
 }

@@ -55,8 +55,8 @@ pub(super) fn release_control(e: &mut Engine<'_>, control: &Control) {
         _ => control.registry,
     };
     if let Some(mark) = mark {
-        debug_assert!(mark <= e.vm.signal_handlers.len());
-        e.vm.signal_handlers.truncate(mark);
+        debug_assert!(mark <= e.vm.mutator.signal_handlers.len());
+        e.vm.mutator.signal_handlers.truncate(mark);
     }
 }
 
@@ -98,10 +98,10 @@ pub(super) fn prepare_signal<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b
 /// the hook hears that signal now (and again at the reach, if it does not).
 pub(super) fn speculative(e: &mut Engine<'_>, condition: Value) -> bool {
     let conditions = e.vm.signal_conditions(condition);
-    let mut at = e.vm.signal_handlers.len();
+    let mut at = e.vm.mutator.signal_handlers.len();
     while at != 0 {
         at -= 1;
-        match e.vm.signal_handlers[at] {
+        match e.vm.mutator.signal_handlers[at] {
             SignalHandler::Mask(skip) => at = skip,
             SignalHandler::Boundary => return true,
             SignalHandler::Condition(choices) | SignalHandler::Bind { conditions: choices, .. }
@@ -120,7 +120,7 @@ pub(super) fn speculative(e: &mut Engine<'_>, condition: Value) -> bool {
 /// `romacs--call-debugger-p' (lisp/vm/prelude.el) makes the rest.
 fn debugger_wanted(e: &mut Engine<'_>) -> bool {
     let Some(Escape::Error { conditions, target, .. }) = e.escape.as_ref() else { return false; };
-    let (conditions, clause) = match target.and_then(|at| e.vm.signal_handlers.get(at)) {
+    let (conditions, clause) = match target.and_then(|at| e.vm.mutator.signal_handlers.get(at)) {
         // A compile-time expansion's escape: GNU signals it at the form's
         // reach, where the debugger is considered then.
         Some(SignalHandler::Boundary) => return false,
@@ -159,11 +159,11 @@ enum Found {
 // SAFETY: a root frame and indices.
 unsafe impl Plain for Found {}
 fn search<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>) -> bool {
-    let mut at = m.leaf((), |e, ()| e.vm.signal_handlers.len());
+    let mut at = m.leaf((), |e, ()| e.vm.mutator.signal_handlers.len());
     while at != 0 {
         at -= 1;
         let found = m.leaf(at, |e, at| {
-            let handler = e.vm.signal_handlers[at].clone();
+            let handler = e.vm.mutator.signal_handlers[at].clone();
             let Some(Escape::Error { condition, object, conditions, .. }) = e.escape.as_ref() else { return Found::Stop };
             let (condition, conditions, object) = (*condition, *conditions, *object);
             match handler {
@@ -201,16 +201,16 @@ fn search<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>) -> bool {
 /// the error object rooted in FRAME.
 fn handler_callback<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, frame: RootFrame, group: usize) -> bool {
     let (mask, saved_depth, token) = m.leaf(group, |e, group| {
-        let mask = e.vm.signal_handlers.len();
-        e.vm.signal_handlers.push(SignalHandler::Mask(group));
-        let saved_depth = std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len());
+        let mask = e.vm.mutator.signal_handlers.len();
+        e.vm.mutator.signal_handlers.push(SignalHandler::Mask(group));
+        let saved_depth = std::mem::replace(&mut e.vm.mutator.eval_depth, e.depth_base + e.frames.len());
         (mask, saved_depth, e.vm.max_ensure_room(200))
     });
     let (escaped, hooked, depth) = lend::callback(m, gc.by_ref(), &frame, (), |e, (), result| {
-        let replacement = e.vm.propagated_escape.take();
-        let hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-        let depth = e.vm.propagated_eval_depth.take();
-        e.fatal_image_failure |= e.vm.execution_fatal;
+        let replacement = e.vm.mutator.propagated_escape.take();
+        let hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
+        let depth = e.vm.mutator.propagated_eval_depth.take();
+        e.fatal_image_failure |= e.vm.mutator.execution_fatal;
         e.code.resize_with(e.vm.functions.len(), Code::none);
         let escaped = match (result, replacement) {
             (_, Some(escape)) => { e.escape = Some(escape); true }
@@ -228,8 +228,8 @@ fn handler_callback<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, frame:
     if escaped { prepare_signal(m, gc, hooked, depth); }
     m.leaf((token, saved_depth, mask), |e, (token, saved_depth, mask)| {
         if let Some(old) = token { e.vm.restore_stack_limits(old); }
-        e.vm.eval_depth = saved_depth;
-        e.vm.signal_handlers.truncate(mask);
+        e.vm.mutator.eval_depth = saved_depth;
+        e.vm.mutator.signal_handlers.truncate(mask);
     });
     escaped
 }

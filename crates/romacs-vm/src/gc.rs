@@ -270,7 +270,7 @@ impl Lap {
     /// Charge the time since the last lap to PHASE of TIMES.
     pub(crate) fn lap(&mut self, times: &mut GcTimes, phase: Phase) {
         let Some(at) = self.0 else { return };
-        // HOST(Instant::now): a collection's phase clock (`romacs--gc-phases'), running only once
+        // HOST(Instant::now, pure): a collection's phase clock (`romacs--gc-phases'), running only once
         // `host::collection_clock' started it, which no builder does, its heap being the image
         let now = std::time::Instant::now();
         times.ns[phase as usize] += (now - at).as_nanos() as u64;
@@ -413,21 +413,21 @@ pub(crate) fn deferral(p: f64) -> f64 {
 
 impl Stress {
     pub(crate) fn from_env() -> Self {
-        // HOST(std::env::var): the collector's thread count for a test (ROMACS_GC_WORKERS): what a
+        // HOST(std::env::var, pure): the collector's thread count for a test (ROMACS_GC_WORKERS): what a
         // collection leaves is the same at any count; invisible to Lisp, read again on restore
         // (Stress::rearm)
         let every = std::env::var("ROMACS_GC_STRESS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
-        // HOST(std::env::var_os): the collector's in-place stress mode (ROMACS_GC_INPLACE): stress
+        // HOST(std::env::var_os, pure): the collector's in-place stress mode (ROMACS_GC_INPLACE): stress
         // collections free in place instead of moving; invisible to Lisp, read again on restore
         // (Stress::rearm)
         let verify = std::env::var_os("ROMACS_GC_VERIFY").is_some_and(|v| !v.is_empty() && v != "0");
-        // HOST(std::env::var): the collector's test mode (ROMACS_GC_STRESS): collections are
+        // HOST(std::env::var, pure): the collector's test mode (ROMACS_GC_STRESS): collections are
         // invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
         let threads = std::env::var("ROMACS_GC_WORKERS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
-        // HOST(std::env::var_os): the collector's verify mode (ROMACS_GC_VERIFY): freed entries are
+        // HOST(std::env::var_os, pure): the collector's verify mode (ROMACS_GC_VERIFY): freed entries are
         // poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
         let inplace = std::env::var_os("ROMACS_GC_INPLACE").is_some_and(|v| !v.is_empty() && v != "0");
-        // HOST(std::env::var_os): whether automatic collections may be minors (ROMACS_GC_MINOR): a
+        // HOST(std::env::var_os, pure): whether automatic collections may be minors (ROMACS_GC_MINOR): a
         // minor frees only what nothing reaches, as a full does; invisible to Lisp, read again on
         // restore (Stress::rearm)
         let minor = std::env::var_os("ROMACS_GC_MINOR").is_none_or(|v| v != "0");
@@ -512,6 +512,7 @@ pub fn assert_no_retention_growth(
         report.sizes.push(n);
         report.objects.push(s.live_objects);
         report.bytes.push(s.live_bytes);
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!(
             "retention size={n} collections={} objects={} bytes={} capacity={}",
             s.collections, s.live_objects, s.live_bytes, s.capacity_bytes
@@ -555,7 +556,7 @@ impl Vm {
     /// handlers made since are popped, without their watchers, and no cleanup
     /// runs; what they owned (`romacs--post-gc-owned`, `inhibit-quit`, a job's
     /// claim) ends with them, and a variable whose watchers were running is
-    /// trapped again (`Vm::retrap`).
+    /// trapped again (`Mutator::retrap`).
     ///
     /// # Errors
     /// The panic's payload, if BODY panicked.
@@ -563,16 +564,16 @@ impl Vm {
     /// # Panics
     /// If an engine is running: a panic is caught outside any.
     pub fn catching<T>(&mut self, body: impl FnOnce(&mut Vm) -> T) -> std::thread::Result<T> {
-        assert_eq!(self.running_engines, 0, "a panic is caught outside any engine");
+        assert_eq!(self.mutator.running_engines, 0, "a panic is caught outside any engine");
         let mark = NestingMark {
-            roots: self.external_roots.len(),
-            holds: self.gc_holds,
-            dynamic: self.dynamic.len(),
-            retrap: self.retrap.len(),
-            handlers: self.signal_handlers.len(),
-            backtrace: self.backtrace.frames.len(),
-            eval_depth: self.eval_depth,
-            native_quit: self.native_quit,
+            roots: self.mutator.external_roots.len(),
+            holds: self.mutator.gc_holds,
+            dynamic: self.mutator.dynamic.len(),
+            retrap: self.mutator.retrap.len(),
+            handlers: self.mutator.signal_handlers.len(),
+            backtrace: self.mutator.backtrace.frames.len(),
+            eval_depth: self.mutator.eval_depth,
+            native_quit: self.mutator.native_quit,
             macro_record: self.macro_record.mark(),
         };
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(self)));
@@ -582,27 +583,27 @@ impl Vm {
         caught
     }
     fn restore_nesting(&mut self, mark: &NestingMark) {
-        self.native_quit = mark.native_quit;
+        self.mutator.native_quit = mark.native_quit;
         // Unwind bindings while the backtrace still names them.
         let trapped = std::mem::take(&mut self.trapped);
-        self.unwind(self.dynamic.len().saturating_sub(mark.dynamic));
+        self.unwind(self.mutator.dynamic.len().saturating_sub(mark.dynamic));
         self.trapped = trapped;
-        for base in self.retrap.drain(mark.retrap.min(self.retrap.len())..) { self.trapped.insert(base); }
-        self.external_roots.truncate(mark.roots);
-        self.gc_holds = mark.holds;
-        self.signal_handlers.truncate(mark.handlers);
-        self.backtrace.leave(mark.backtrace);
-        self.eval_depth = mark.eval_depth;
+        for base in self.mutator.retrap.drain(mark.retrap.min(self.mutator.retrap.len())..) { self.trapped.insert(base); }
+        self.mutator.external_roots.truncate(mark.roots);
+        self.mutator.gc_holds = mark.holds;
+        self.mutator.signal_handlers.truncate(mark.handlers);
+        self.mutator.backtrace.leave(mark.backtrace);
+        self.mutator.eval_depth = mark.eval_depth;
         self.macro_record.restore(&mark.macro_record);
         // Outside any engine, these are all at rest.
-        self.suspended.clear();
-        self.stack.reset();
-        self.running_engines = 0;
-        self.unwinding = 0;
-        self.aftermath_runs = 0;
-        self.rooted_write = false;
-        self.deferred_writes.clear();
-        self.site_leaf = (0, 0);
+        self.mutator_rest.suspended.clear();
+        self.mutator.stack.reset();
+        self.mutator.running_engines = 0;
+        self.mutator.unwinding = 0;
+        self.mutator.aftermath_runs = 0;
+        self.mutator.rooted_write = false;
+        self.mutator.deferred_writes.clear();
+        self.mutator_rest.site_leaf = (0, 0);
         // A panic in a host wait drops its host, as it did when the wait
         // kept it on the native stack.
         self.host_wait = None;
@@ -614,24 +615,24 @@ impl Vm {
         self.promote_all();
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
-        let base = self.external_roots.len();
-        self.external_roots.extend_from_slice(values);
+        let base = self.mutator.external_roots.len();
+        self.mutator.external_roots.extend_from_slice(values);
         RootFrame { base, len: values.len(), vm: std::ptr::from_ref(self) }
     }
     pub(crate) fn rooted(&self, frame: &RootFrame, i: usize) -> Value {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
         assert!(i < frame.len, "root frame index");
-        self.external_roots[frame.base + i]
+        self.mutator.external_roots[frame.base + i]
     }
     pub(crate) fn set_rooted(&mut self, frame: &RootFrame, i: usize, value: Value) {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
         assert!(i < frame.len, "root frame index");
-        self.external_roots[frame.base + i] = value;
+        self.mutator.external_roots[frame.base + i] = value;
     }
     /// FRAME's values, forwarded.
     pub(crate) fn rooted_values(&self, frame: &RootFrame) -> &[Value] {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
-        &self.external_roots[frame.base..frame.base + frame.len]
+        &self.mutator.external_roots[frame.base..frame.base + frame.len]
     }
     /// Release FRAME, returning its forwarded values.
     pub(crate) fn release_frame<const N: usize>(&mut self, frame: RootFrame) -> [Value; N] {
@@ -642,8 +643,8 @@ impl Vm {
     }
     pub(crate) fn drop_frame(&mut self, frame: RootFrame) {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
-        assert_eq!(self.external_roots.len(), frame.base + frame.len, "root frames are released in reverse order");
-        self.external_roots.truncate(frame.base);
+        assert_eq!(self.mutator.external_roots.len(), frame.base + frame.len, "root frames are released in reverse order");
+        self.mutator.external_roots.truncate(frame.base);
     }
     /// GNU's `garbage_collection_inhibited`, derived from its owners: a
     /// collection may run only when no frame keeps heap Values in untraced
@@ -655,24 +656,24 @@ impl Vm {
     /// storage: a binding, a `#:` slot or a [`RootFrame`]
     /// (tests/fixtures/reentry-sites.txt lists each call site).
     pub(crate) fn may_collect(&self, own: usize) -> bool {
-        self.gc_holds == 0 && self.deferred_writes.is_empty()
-            && self.running_engines.saturating_sub(self.suspended.len()) == own
+        self.mutator.gc_holds == 0 && self.mutator.deferred_writes.is_empty()
+            && self.mutator.running_engines.saturating_sub(self.mutator_rest.suspended.len()) == own
     }
     /// Set the register stack aside (`Registers::suspend`).
     pub(crate) fn suspend_stack(&mut self) {
-        self.stack.suspend();
+        self.mutator.stack.suspend();
     }
     pub(crate) fn resume_stack(&mut self) {
-        self.stack.resume();
+        self.mutator.stack.resume();
     }
     /// RUN on ARGS in the reused kernel file, the current one set aside beneath
     /// it, still traced, its allocation unmoved: the one way a native borrows
     /// register slots (a storage kernel, a property query) without touching a
     /// running engine's. RUN gets the arguments' count; they start at 0.
     pub(crate) fn with_kernel_stack<T>(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> T) -> T {
-        self.stack.enter_kernel(args);
+        self.mutator.stack.enter_kernel(args);
         let out = run(self, args.len());
-        self.stack.leave_kernel();
+        self.mutator.stack.leave_kernel();
         out
     }
     /// SLOTS as a dense membership table over every symbol slot.
@@ -767,7 +768,7 @@ impl Vm {
     pub(crate) fn minor_chosen(&self) -> bool {
         // Owed where it can be paid: only a collection at a request's
         // boundary retires request code and starts the count again.
-        let code = self.stack.at_rest()
+        let code = self.mutator.stack.at_rest()
             && self.request_code.since_collection >= self.code_collection_threshold();
         !self.full_due() && !code && (self.minor_due() || (self.gc_stress.shift && self.minor_allowed()))
     }
@@ -967,7 +968,7 @@ impl Vm {
     /// engine answers for its own cleanups (`Engine::safe_runner`), and an
     /// engine that is neither fails `may_collect`.
     pub(crate) fn aftermath_held(&self) -> bool {
-        self.unwinding != 0 || self.aftermath_runs != 0 || self.suspended.iter().any(threaded::Suspended::in_cleanup)
+        self.mutator.unwinding != 0 || self.mutator.aftermath_runs != 0 || self.mutator_rest.suspended.iter().any(threaded::Suspended::in_cleanup)
     }
     /// alloc.c queue_doomed_finalizers and mark_finalizer_list: the
     /// finalizers marking has not reached are marked, with their functions,
@@ -1328,11 +1329,11 @@ impl Vm {
     fn rewrite_root_slots(&mut self, roots: &mut [Value], rewrite: &mut impl FnMut(&mut Value)) {
         // The traced register slots (`register_roots`); above the tops is NIL.
         let tops = self.register_tops();
-        let registers = self.stack.files_mut().zip(tops);
+        let registers = self.mutator.stack.files_mut().zip(tops);
         for v in roots
             .iter_mut()
             .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
-            .chain(self.external_roots.iter_mut())
+            .chain(self.mutator.external_roots.iter_mut())
             .chain(self.terminal_bindings.iter_mut().flat_map(|binding| std::iter::once(&mut binding.buffer).chain(binding.away.iter_mut()).chain(binding.unremapped_maps.iter_mut())))
         {
             rewrite(v);
@@ -1354,7 +1355,7 @@ impl Vm {
         // The one funnel: no collection while a hold is open or an engine runs
         // unsuspended, whatever reached here. Raw code cannot suspend its own
         // engine (only the engine's lends do), so it cannot make this pass.
-        debug_assert!(self.suspended.len() <= self.running_engines, "suspended engines outnumber running ones");
+        debug_assert!(self.mutator_rest.suspended.len() <= self.mutator.running_engines, "suspended engines outnumber running ones");
         if !self.may_collect(0) {
             return false;
         }
@@ -1403,11 +1404,11 @@ impl Vm {
         lap.lap(&mut self.gc_times, Phase::Retire);
         // The code this collection traced, for the next one's pacing.
         self.gc_code = code_marks.iter().zip(&self.functions).filter(|&(&live, _)| live).map(|(_, f)| f.code.len()).sum::<usize>()
-            + self.execution.code_len()
-            + self.suspended.iter().map(threaded::Suspended::code_len).sum::<usize>();
+            + self.mutator_rest.execution.code_len()
+            + self.mutator_rest.suspended.iter().map(threaded::Suspended::code_len).sum::<usize>();
         // Only a collection with no request running retires live request
         // code; one inside an engine must not postpone the next of those.
-        if self.stack.at_rest() {
+        if self.mutator.stack.at_rest() {
             self.reset_code_count();
         }
         // Unmarked regions go now: no surviving value names one, and no weak
@@ -1495,16 +1496,16 @@ impl Vm {
         });
         self.cells.collector_compact(&maps[2], |v| rewrite(v));
         self.rewrite_root_slots(roots, &mut rewrite);
-        if let Some(escape) = &mut self.propagated_escape {
+        if let Some(escape) = &mut self.mutator.propagated_escape {
             escape.visit_values(&mut |v| rewrite(v));
         }
-        for v in &mut self.thrown_no_catch {
+        for v in &mut self.mutator.thrown_no_catch {
             rewrite(v);
         }
-        for handler in &mut self.signal_handlers {
+        for handler in &mut self.mutator.signal_handlers {
             handler.visit_values(&mut |v| rewrite(v));
         }
-        self.backtrace.visit_values(&mut |v| rewrite(v));
+        self.mutator.backtrace.visit_values(&mut |v| rewrite(v));
         self.profiler.visit_values(&mut |v| rewrite(v));
         for (slot, name) in &mut self.obarray_symbol_names {
             if obarray_symbols_live.contains(*slot) { rewrite(name); }
@@ -1522,7 +1523,7 @@ impl Vm {
         for v in self.finalizers.iter_mut().chain(self.doomed_finalizers.iter_mut()) { rewrite(v); }
         self.charsets.rewrite(&rewrite);
         // HOST(dynamic:saved): collector: marks the saved values
-        for (_, v, buffer, _) in &mut self.dynamic {
+        for (_, v, buffer, _) in &mut self.mutator.dynamic {
             rewrite(v);
             rewrite(buffer);
         }
@@ -1601,10 +1602,10 @@ impl Vm {
                 body.values.iter_mut().for_each(|v| rewrite(v));
             }
         }
-        for program in std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut()) {
+        for program in std::iter::once(&mut self.mutator_rest.execution).chain(self.mutator_rest.spare_programs.iter_mut()) {
             program.visit_values(&mut |v| rewrite(v));
         }
-        for engine in &mut self.suspended {
+        for engine in &mut self.mutator_rest.suspended {
             engine.visit_values(&mut |v| rewrite(v));
         }
         self.conditions.visit_values(&mut |v| rewrite(v));
@@ -1645,8 +1646,8 @@ impl Vm {
     fn drop_weak(&mut self, weak_tables: &[usize], untraced_lists: Vec<u64>, symbols: &KeptSymbols, regions: &[bool]) {
         // A throw's no-catch mark is weak: an error object nothing else
         // reaches is carried by no escape, so its mark goes.
-        let thrown = std::mem::take(&mut self.thrown_no_catch);
-        self.thrown_no_catch = thrown
+        let thrown = std::mem::take(&mut self.mutator.thrown_no_catch);
+        self.mutator.thrown_no_catch = thrown
             .into_iter()
             .filter(|&object| self.survives(symbols, regions, object))
             .collect();
@@ -1944,14 +1945,14 @@ impl Vm {
     pub(crate) fn clear_collection_caches(&mut self) {
         // Buffers move (`Places`).
         self.forwarded.collection_epoch = self.forwarded.collection_epoch.wrapping_add(1);
-        self.resolved_buffer = None;
+        self.mutator.resolved_buffer = None;
         // Patterns kept for a table name it by a Value this may move.
         self.forget_table_bound_patterns();
         // A view's rows are the Values of its table's entries.
         self.flat_tables.forget();
         // Finished nested runs' programs are caches: relowering what is used
         // again costs less than tracing, retiring and forwarding every copy.
-        for program in &mut self.spare_programs {
+        for program in &mut self.mutator_rest.spare_programs {
             program.forget_code();
         }
     }
@@ -1979,13 +1980,13 @@ impl Vm {
         let undo_limits = self.undo_view();
         let mut pending = self.mark_roots(roots, in_obarray, matches!(r#for, MarkFor::Minor));
         // HOST(dynamic:saved): collector: forwards the saved values
-        for &(slot, old, buffer, _) in &self.dynamic {
+        for &(slot, old, buffer, _) in &self.mutator.dynamic {
             // Both saved and active values stay roots even if Lisp switches
             // away from their buffer during the dynamic extent.
             pending.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
         }
         let mut code_marks: Vec<std::sync::atomic::AtomicBool> = self.functions.iter().map(|_| false.into()).collect();
-        let active = !self.stack.at_rest();
+        let active = !self.mutator.stack.at_rest();
         let minor_changed = matches!(r#for, MarkFor::Minor).then(|| self.minor_code(&mut code_marks));
         // A minor reads the functions changed since the last collection, and
         // no other code root.
@@ -2091,8 +2092,8 @@ impl Vm {
     fn mark_roots(&mut self, roots: &[Value], in_obarray: &[bool], minor: bool) -> Vec<Value> {
         let keep = |v: &Value| traced(*v, in_obarray);
         let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
-        pending.extend_from_slice(&self.external_roots);
-        for engine in &mut self.suspended {
+        pending.extend_from_slice(&self.mutator.external_roots);
+        for engine in &mut self.mutator_rest.suspended {
             engine.visit_state_values(&mut |v| if keep(v) { pending.push(*v) });
         }
         pending.extend(self.doomed_finalizers.iter().copied());
@@ -2108,13 +2109,13 @@ impl Vm {
         // The order holds its buffers itself: a name slot is a symbol Lisp
         // can set, so it is no root to rely on.
         self.buffer_order.visit_values(&mut |v| pending.push(*v));
-        if let Some(escape) = &mut self.propagated_escape {
+        if let Some(escape) = &mut self.mutator.propagated_escape {
             escape.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         }
-        for handler in &mut self.signal_handlers {
+        for handler in &mut self.mutator.signal_handlers {
             handler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         }
-        self.backtrace.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        self.mutator.backtrace.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         self.profiler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         // GNU's C globals and `buffer_defaults`: roots outside every value
         // cell (forwarded.rs). Per-buffer values are traced with their buffer.
@@ -2149,7 +2150,7 @@ impl Vm {
     /// minor (CHANGED given) reads lowered code as it reads functions, that
     /// of the changed alone (`Suspended::minor_values`).
     fn lowered_roots(&self, changed: Option<&[usize]>, value: &mut impl FnMut(Value)) {
-        for engine in &self.suspended {
+        for engine in &self.mutator_rest.suspended {
             match changed {
                 None => engine.code_values(value),
                 Some(changed) => engine.minor_values(changed, value),
@@ -2642,7 +2643,7 @@ mod tests {
         let function = vm.closures[usize::try_from(caller.payload()).unwrap()].function;
         let young = vm.eval_source_raw("(let ((held (list 1 2))) #'(lambda () held))").unwrap();
         assert!(!vm.closures.old(usize::try_from(young.payload()).unwrap()), "made since the collection");
-        assert!(vm.execution.plant_entry(function, young), "the caller has lowered code in the idle program");
+        assert!(vm.mutator_rest.execution.plant_entry(function, young), "the caller has lowered code in the idle program");
         vm.collect_minor(&[]);
     }
 
@@ -2765,7 +2766,7 @@ mod tests {
     #[test]
     fn catching_restores_native_quit_permission() {
         let mut vm = Vm::new();
-        assert!(vm.quit.interrupt());
+        assert!(vm.mutator.quit.interrupt());
         let panic: fn(&mut Vm) = |vm| std::panic::panic_any(vm.native_stop_due());
 
         let caught = vm.catching(|vm| vm.inside_quit_scope(panic));

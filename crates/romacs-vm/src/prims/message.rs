@@ -28,6 +28,7 @@ fn message(cx, format_string: Value; rest args) -> Step {
         if !inhibited(cx)? {
             show(cx, Value::NIL)?;
             let noninteractive = cx.intern("noninteractive");
+            // HOST(escape): `message` on stderr in batch: a send
             if cx.variable_value(noninteractive)?.unwrap_or(Value::NIL) != Value::NIL { eprintln!(); }
         }
         // message3 first ends a part line printing left in the log; only
@@ -94,7 +95,9 @@ fn logged(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
         show(cx, text)?;
         let noninteractive = cx.intern("noninteractive");
         if crate::host::messages_to_stderr() || cx.variable_value(noninteractive)?.unwrap_or(Value::NIL) != Value::NIL {
+            // HOST(escape): `message` on stderr in batch: a send
             let mut err = std::io::stderr().lock();
+            // HOST(escape): `message` on stderr in batch: a send
             let _ = err.write_all(&cx.string_bytes(text)?).and_then(|()| err.write_all(b"\n"));
         }
     }

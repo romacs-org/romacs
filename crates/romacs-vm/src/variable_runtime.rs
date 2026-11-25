@@ -237,16 +237,16 @@ impl Vm {
     /// excluded. Saved values are already traced by `dynamic`.
     pub(super) fn default_toplevel_binding(&mut self, slot: usize) -> Option<usize> {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        self.dynamic.iter().position(|&(bound, _, _, kind)| bound == slot && kind != Let::Local)
+        self.mutator.dynamic.iter().position(|&(bound, _, _, kind)| bound == slot && kind != Let::Local)
     }
 
     /// GNU eval.c:766: the oldest SPECPDL_LET_LOCAL of exactly this symbol
     /// in BUFFER, by the symbol each binding recorded and its owner buffer.
     pub(super) fn local_toplevel_binding(&mut self, slot: usize, buffer: Value) -> Option<usize> {
         let symbol = Value::reference(slot + 1, 7);
-        self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
+        self.mutator.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
             // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-            let (_, _, owner, kind) = self.dynamic[at];
+            let (_, _, owner, kind) = self.mutator.dynamic[at];
             owner == buffer && kind == Let::Local
         })
     }
@@ -388,7 +388,7 @@ impl Vm {
         // its originating buffer, not to a newly created local entry.
         let current = self.slots[self.buffer_slot].value;
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        let shadowed = self.dynamic.iter().rev().any(|(bound, _, owner, kind)| {
+        let shadowed = self.mutator.dynamic.iter().rev().any(|(bound, _, owner, kind)| {
             *kind == Let::Default && *bound == slot && (*owner == current || (*owner == Value::NIL && self.names.get("#:vm2-buffer:*scratch*").is_some_and(|i| self.slots[*i].value == current)))
         });
         if shadowed { return Ok(Binding::Default); }
@@ -600,7 +600,7 @@ impl Vm {
         if matches!(self.forwarding(slot), Some(forwarded::Fwd::Bool(_)))
             // HOST(dynamic:saved): reads saved values of a localized Boolean, which the tracking never
             // holds
-            && self.dynamic.iter().any(|(bound, old, _, _)| *bound == slot && *old != Value::NIL && *old != Value::TRUE) {
+            && self.mutator.dynamic.iter().any(|(bound, old, _, _)| *bound == slot && *old != Value::NIL && *old != Value::TRUE) {
             return Err(format!("VM2 localized Boolean default requires nil or t: {}", self.symbol_names[slot]));
         }
         if !self.localized(slot) {
@@ -632,10 +632,10 @@ impl Vm {
             }
         };
         if base != self.buffer_slot {
-            self.backtrace.bind(self.dynamic.len(), Value::reference(base + 1, 7));
+            self.mutator.backtrace.bind(self.mutator.dynamic.len(), Value::reference(base + 1, 7));
         }
         // HOST(dynamic:saved): specbind: pushes a new binding, saving the value it shadows
-        self.dynamic.push(binding);
+        self.mutator.dynamic.push(binding);
         let mut value = value;
         if self.variable_trapped(base) {
             // The value is rooted across its watchers and read back.
@@ -704,7 +704,7 @@ impl Vm {
     pub(super) fn variable_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
         if n != if matches!(p, DefvarSetDefault | Set) { 2 } else { 1 } { return Err("wrong primitive arity".into()); }
-        let symbol = self.stack[start];
+        let symbol = self.mutator.stack[start];
         if symbol == Value::NIL || symbol == Value::TRUE {
             return match p {
                 SymbolValue => Ok(symbol),
@@ -735,10 +735,10 @@ impl Vm {
                 // ORIGINAL, not the resolved base: an alias of nil, t or a
                 // keyword is itself constant (GNU copies trapped_write).
                 if self.protected_variable_slot(original) || self.interned_keyword_slot(slot) { return Err("setting constant".into()); }
-                let value = if p == Set { self.stack[start+1] } else { Value::UNBOUND };
+                let value = if p == Set { self.mutator.stack[start+1] } else { Value::UNBOUND };
                 // A write nothing hears stores at once; a heard one waits for
                 // its engine's drain (`Vm::write_from_native`).
-                if self.deferred_writes.is_empty() && !self.variable_trapped(slot) {
+                if self.mutator.deferred_writes.is_empty() && !self.variable_trapped(slot) {
                     self.assign_variable(slot, value)?;
                 } else {
                     self.write_from_native(crate::watchers::NativeWrite::set(slot, value)).map_err(crate::watchers::fault_text)?;
@@ -780,7 +780,7 @@ impl Vm {
             DefvarBoundp if self.native_forwarding(slot).is_some() => Ok(Value::TRUE),
             DefvarSetDefault if self.native_forwarding(slot).is_some() => {
                 let fwd = self.native_forwarding(slot).unwrap();
-                let value = self.stack[start+1];
+                let value = self.mutator.stack[start+1];
                 self.set_forwarded_default(slot, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text)?;
                 Ok(value)
             }
@@ -789,7 +789,7 @@ impl Vm {
             DefvarBoundp => {
                 // HOST(dynamic:saved): saved-binding accessor: defvar's boundp; variable_primitive
                 // checks a tracked variable first (F2)
-                let shadowed_unbound = self.dynamic.iter().find(|(s,_,_,kind)| *s==slot && *kind != Let::Local).is_some_and(|(_,v,_,_)| *v == Value::UNBOUND);
+                let shadowed_unbound = self.mutator.dynamic.iter().find(|(s,_,_,kind)| *s==slot && *kind != Let::Local).is_some_and(|(_,v,_,_)| *v == Value::UNBOUND);
                 Ok(truth(self.slots[slot].value != Value::UNBOUND && !shadowed_unbound))
             }
             // GNU Fdefvar without a value at a loading file's own level: the
@@ -797,7 +797,7 @@ impl Vm {
             // `macroexp--dynvars' records it as macroexpand--all-toplevel does.
             DefvarFileLocal => {
                 let name = self.symbol_names[original].clone();
-                if self.file_specials.insert(name) {
+                if self.mutator.file_specials.insert(name) {
                     let dynvars = self.slot("macroexp--dynvars");
                     let declared = self.variable_value(dynvars)?;
                     let declared = self.keymap_cons(symbol, declared);
@@ -811,11 +811,11 @@ impl Vm {
             // A current binding the value itself bound is set, as GNU sets it
             // where no let shadowed (DefvarBoundp decided before the value ran).
             DefvarSetDefault => {
-                let value = self.stack[start+1];
+                let value = self.mutator.stack[start+1];
                 let shadow = if self.slots[slot].value == Value::UNBOUND { None } else {
                     // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
                     // variable_primitive checks a tracked variable first (F2)
-                    self.dynamic.iter_mut().find(|(s,_,_,kind)| *s==slot && *kind != Let::Local).filter(|(_,v,_,_)| *v == Value::UNBOUND)
+                    self.mutator.dynamic.iter_mut().find(|(s,_,_,kind)| *s==slot && *kind != Let::Local).filter(|(_,v,_,_)| *v == Value::UNBOUND)
                 };
                 if let Some((_,old,_,_)) = shadow { *old = value; }
                 else {

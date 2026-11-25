@@ -97,6 +97,7 @@ fn undertaker() -> &'static rayon::ThreadPool {
 /// Where a collection has no threads, here.
 pub(super) fn trim_after_graves(asked: usize) {
     if threads(asked) == 1 { return crate::world::arena::trim(); }
+    // HOST(pure): schedules work on the graves' Rayon pool of this process, no outside resource (rule 5)
     undertaker().spawn(|| {
         crate::world::arena::trim();
         #[cfg(test)]
@@ -262,7 +263,7 @@ impl Vm {
             written_slots,
             slots: &self.slots, variable_redirects: &self.variable_redirects, functions: &self.functions,
             generated_symbols: &self.generated_symbols, cell_pairs: &self.cell_pairs,
-            execution: &self.execution, spare_programs: &self.spare_programs,
+            execution: &self.mutator_rest.execution, spare_programs: &self.mutator_rest.spare_programs,
             stacks: self.register_roots(),
             in_obarray, code_marks,
         }
@@ -413,6 +414,7 @@ impl Marking {
     pub(super) fn crew<R>(&self, view: &MarkView<'_>, work: impl FnOnce() -> R) -> R {
         if self.n == 1 { return work(); }
         pool(self.n - 1).in_place_scope(|scope| {
+            // HOST(pure): schedules work in a Rayon scope of this process, no outside resource (rule 5)
             for _ in 1..self.n { scope.spawn(|_| self.serve(view)); }
             let _leaving = Leaving(self);
             work()
@@ -432,6 +434,7 @@ impl Marking {
         if self.n == 1 { return run(own); }
         pool(self.n - 1).in_place_scope(|scope| {
             for _ in 1..self.n {
+                // HOST(pure): schedules work in a Rayon scope of this process, no outside resource (rule 5)
                 scope.spawn(|_| {
                     let mut w = Worker::default();
                     run(&mut w);
@@ -473,6 +476,7 @@ impl Marking {
         if DROPPING.swap(true, Ordering::AcqRel) { return drop(batch); }
         #[cfg(test)]
         self.buried.fetch_add(batch.iter().map(Vec::len).sum(), Ordering::AcqRel);
+        // HOST(pure): schedules work on the graves' Rayon pool of this process, no outside resource (rule 5)
         undertaker().spawn(move || {
             #[cfg(test)]
             test::slow_drop();
@@ -614,6 +618,7 @@ impl Marking {
         let mut waits = 0;
         while !self.stop.load(Ordering::Acquire) {
             let Some(work) = self.take() else {
+                // HOST(pure): waits on a thread of this process, no outside peer (rule 5)
                 self.wait(&mut waits, || !self.queue.is_empty());
                 continue;
             };
@@ -662,6 +667,7 @@ impl Marking {
                 // A key press is looked for while the other threads work too.
                 if self.n > 1 && key() { return false; }
                 // What it waits for: a chunk, a hand-over, or the last chunk's end.
+                // HOST(pure): waits on a thread of this process, no outside peer (rule 5)
                 self.wait(&mut waits, || !self.queue.is_empty() || !self.serial.lock().unwrap().is_empty() || self.drained());
                 continue;
             };
@@ -1278,11 +1284,11 @@ mod tests {
         let stale = vm.alloc_cons(Value::NIL, Value::NIL);
         vm.collect_garbage();
         let collections = vm.heap_stats().collections;
-        vm.external_roots.push(stale);
+        vm.mutator.external_roots.push(stale);
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.collect_garbage()));
         assert!(unwound.is_err(), "verify refuses a stale reference");
         assert_eq!(vm.heap_stats().collections, collections, "nothing was collected");
-        vm.external_roots.pop();
+        vm.mutator.external_roots.pop();
         vm.collect_garbage();
         assert_eq!(vm.heap_stats().collections, collections + 1);
     }

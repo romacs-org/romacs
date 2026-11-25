@@ -1003,8 +1003,8 @@ fn reader_numbered_aliases_keep_identity() {
 fn reader_callback_partials_and_source_survive_compaction() {
     let mut vm = Vm::new();
     let function=vm.eval_source_raw(r#"(let ((s "(\"first\" [\"second\"] (\"third\"))") (i 0)) (lambda (&optional c) (if c (setq i (1- i)) (if (< i (length s)) (prog1 (aref s i) (setq i (1+ i))) nil))))"#).unwrap();
-    let root = vm.external_roots.len();
-    vm.external_roots.push(function);
+    let root = vm.mutator.external_roots.len();
+    vm.mutator.external_roots.push(function);
     let shown = crate::threaded::toplevel(&mut vm, root, |mut m, gc, root| {
         let mut reader = Reader {
             m: &mut m,
@@ -1021,7 +1021,7 @@ fn reader_callback_partials_and_source_survive_compaction() {
             chunk: Chunk::default(),
         };
         let value = reader.form(0).and_then(|value| reader.finish().map(|()| value));
-        m.leaf(value, |vm, value| value.and_then(|root| vm.display(vm.external_roots[root])))
+        m.leaf(value, |vm, value| value.and_then(|root| vm.display(vm.mutator.external_roots[root])))
     });
     assert_eq!(shown, Ok(r#"("first" ["second"] ("third"))"#.to_owned()));
 }

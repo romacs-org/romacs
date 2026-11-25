@@ -246,7 +246,7 @@ impl Vm {
     }
     pub(super) fn add_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         let mut sum = 0i64;
-        for value in &self.stack[start..start + n] {
+        for value in &self.mutator.stack[start..start + n] {
             let Some(next) = value.integer_value().and_then(|v| sum.checked_add(v)) else {
                 return self.numeric_primitive(p, start, n);
             };
@@ -268,7 +268,7 @@ impl Vm {
             return Err("wrong primitive arity".into());
         }
         if matches!(p, Less | Equal) {
-            for pair in self.stack[start..start + n].windows(2) {
+            for pair in self.mutator.stack[start..start + n].windows(2) {
                 if self.numeric_cmp(pair[0], pair[1])?
                     != Some(if p == Less {
                         Ordering::Less
@@ -284,7 +284,7 @@ impl Vm {
         if n == 0 {
             return Value::integer(if p == Mul { 1 } else { 0 });
         }
-        let first = self.coerce_number(self.stack[start], p != Abs)?;
+        let first = self.coerce_number(self.mutator.stack[start], p != Abs)?;
         if n == 1 && matches!(p, Add | Mul) {
             return Ok(first);
         }
@@ -299,7 +299,7 @@ impl Vm {
         }
         let mut accumulator = self.arithmetic_number(first, false)?;
         if p == Div
-            && self.stack[start + 2.min(n)..start + n]
+            && self.mutator.stack[start + 2.min(n)..start + n]
                 .iter()
                 .any(|v| matches!(self.object_if(*v), Some(data::Object::Float(_))))
         {
@@ -333,7 +333,7 @@ impl Vm {
             };
         } else {
             for index in start + 1..start + n {
-                let next = self.arithmetic_number(self.stack[index], true)?;
+                let next = self.arithmetic_number(self.mutator.stack[index], true)?;
                 accumulator = match (accumulator, next) {
                     (Number::Integer(x), Number::Integer(y)) => Number::Integer(match p {
                         Add => x + y,

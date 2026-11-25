@@ -76,7 +76,7 @@ impl Vm {
     pub(crate) fn signal_error(&mut self, condition: &str, data: &[Value], text: String) -> String {
         let condition = self.intern(condition);
         let data = self.list_value(data);
-        self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+        self.mutator.propagated_escape = Some(threaded::Escape::Signal(condition, data));
         text
     }
     /// GNU `Findirect_function (FUNNAME, Qnil)`: the end of the alias chain,
@@ -180,11 +180,11 @@ impl Vm {
         let match_data = self.save_match_data_for_load()?;
         let saved = self.root_frame(&[match_data]);
         let queue = self.slot(QUEUE);
-        let mark = self.dynamic.len();
+        let mark = self.mutator.dynamic.len();
         let buffer = self.slots[self.buffer_slot].value;
         // record_unwind_protect (un_autoload, Vautoload_queue); Vautoload_queue = Qt;
         // HOST(dynamic:saved): specbind: pushes a new binding, saving the value it shadows
-        self.dynamic.push((queue, self.slots[queue].value, buffer, crate::Let::Plain));
+        self.mutator.dynamic.push((queue, self.slots[queue].value, buffer, crate::Let::Plain));
         self.slots[queue].value = Value::TRUE;
         Ok((mark, saved))
     }

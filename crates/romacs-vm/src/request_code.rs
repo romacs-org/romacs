@@ -356,19 +356,19 @@ impl Vm {
     }
 
     pub(super) fn finish_request(&mut self, mut outcome: Result<Value>) -> Result<Value> {
-        if self.eval_depth == 0 {
-            self.propagated_escape = None;
-            self.propagated_escape_hooked = false;
-            self.propagated_eval_depth = None;
+        if self.mutator.eval_depth == 0 {
+            self.mutator.propagated_escape = None;
+            self.mutator.propagated_escape_hooked = false;
+            self.mutator.propagated_eval_depth = None;
             self.drop_deferred_escapes();
         }
         // A request boundary: no engine's registers are live here, and any
         // suspended frame or caller below holds its Values in traced storage
         // unless it holds collection (`Vm::may_collect`). Only an outermost
         // request retires request code, so only one collects for its count.
-        let outermost = self.stack.depth() == 0;
+        let outermost = self.mutator.stack.depth() == 0;
         if self.may_collect(0)
-            && self.stack.is_empty()
+            && self.mutator.stack.is_empty()
             && (self.collection_due()
                 || (outermost && self.request_code.since_collection >= self.code_collection_threshold()))
         {
@@ -377,13 +377,13 @@ impl Vm {
                 Err(_) => self.collect(&mut []),
             }
             // A nested request's caller polls soon for what this left.
-            if self.eval_depth > 0 && self.aftermath_pending() { self.request_poll(); }
+            if self.mutator.eval_depth > 0 && self.aftermath_pending() { self.request_poll(); }
         }
         // An embedder's request ends here: a safe point for what collections
         // left pending, its result rooted (VM2-GC-FINALIZER). The run's
         // failures are its own (its finalizers' are logged).
-        debug_assert!(self.eval_depth > 0 || !self.aftermath_held(), "no engine runs at a request's end");
-        if self.eval_depth == 0 && let Some(runner) = self.safe_runner(0) {
+        debug_assert!(self.mutator.eval_depth > 0 || !self.aftermath_held(), "no engine runs at a request's end");
+        if self.mutator.eval_depth == 0 && let Some(runner) = self.safe_runner(0) {
             let frame = self.root_frame(&[*outcome.as_ref().unwrap_or(&Value::NIL)]);
             let _ = self.run_aftermath(runner, false);
             let [value] = self.release_frame(frame);
@@ -773,7 +773,7 @@ mod tests {
             }
             assert_eq!(vm.eval_source_raw("(retire-keeper 1)").unwrap().as_integer().unwrap(), 2);
             vm.collect(&mut []);
-            sizes.push((vm.execution.sites(), vm.caches.len()));
+            sizes.push((vm.mutator_rest.execution.sites(), vm.caches.len()));
         }
         // Natural collections land anywhere in a round; kept code would add 200 caches a round.
         assert!(sizes[5].0 < sizes[1].0 * 2 && sizes[5].1 < sizes[1].1 * 2, "sites and caches grew across rounds: {sizes:?}");
@@ -822,7 +822,7 @@ mod tests {
         assert!(vm.caches.len() <= 1024, "IR caches grow");
         vm.collect(&mut []);
         assert!(vm.request_code.live.iter().all(|live| !live));
-        assert!(vm.execution.code_is_empty());
+        assert!(vm.mutator_rest.execution.code_is_empty());
     }
     #[test]
     fn request_roots_preserve_definitions_closures_literals_and_warm_calls() {

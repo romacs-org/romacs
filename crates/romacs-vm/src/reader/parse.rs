@@ -972,7 +972,7 @@ impl Reader<'_, '_, '_, '_, '_> {
 /// past whitespace and comments, which a read that failed has too.
 pub(super) fn read_input<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Option<Gc<'_, 'b>>, input: Input<'_>, b: B,
     then: impl FnOnce(&mut Vm, B, super::Read, usize) -> R + Copy + 'static) -> R {
-    let mark = m.leaf((), |vm, ()| vm.external_roots.len());
+    let mark = m.leaf((), |vm, ()| vm.mutator.external_roots.len());
     let initial_byte = match &input { Input::String { byte, .. } => *byte, _ => 0 };
     let mut reader = Reader {
         m,
@@ -1008,13 +1008,13 @@ pub(super) fn read_input<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Opt
     };
     reader.m.leaf(((result, begin), reader.signal, mark, b), move |vm, ((result, begin), signal, mark, b)| {
         let read = match result {
-            Ok(found) => Ok(found.map(|(root, begin, end)| (vm.external_roots[root], begin, end))),
+            Ok(found) => Ok(found.map(|(root, begin, end)| (vm.mutator.external_roots[root], begin, end))),
             Err(message) => {
-                let signal = signal.and_then(|root| vm.cons_pair(vm.external_roots[root]).ok());
+                let signal = signal.and_then(|root| vm.cons_pair(vm.mutator.external_roots[root]).ok());
                 Err((message, signal.or_else(|| vm.pending_eval_escape())))
             }
         };
-        vm.external_roots.truncate(mark);
+        vm.mutator.external_roots.truncate(mark);
         then(vm, b, read, begin)
     })
 }
@@ -1039,7 +1039,7 @@ mod tests {
         let mut vm = Vm::new();
         let shown = crate::threaded::toplevel(&mut vm, (), |mut m, gc, ()| {
             let source = r#"("first" ["second" ("third")] '"fourth" . "tail")"#;
-            let mark = m.leaf((), |vm, ()| vm.external_roots.len());
+            let mark = m.leaf((), |vm, ()| vm.mutator.external_roots.len());
             let mut reader = Reader {
                 m: &mut m,
                 gc: Some(gc),
@@ -1056,8 +1056,8 @@ mod tests {
             };
             let root = reader.form(0);
             m.leaf((root, mark), |vm, (root, mark)| {
-                let shown = root.and_then(|root| vm.display(vm.external_roots[root]));
-                vm.external_roots.truncate(mark);
+                let shown = root.and_then(|root| vm.display(vm.mutator.external_roots[root]));
+                vm.mutator.external_roots.truncate(mark);
                 shown
             })
         });
@@ -1152,8 +1152,8 @@ mod tests {
         let read = |vm: &mut Vm| -> u8 {
             let string = vm.make_lisp_string(text.clone().into_bytes(), false);
             let end = vm.str_view(string).unwrap().len();
-            vm.external_roots.push(string);
-            let root = vm.external_roots.len() - 1;
+            vm.mutator.external_roots.push(string);
+            let root = vm.mutator.external_roots.len() - 1;
             let outcome = crate::threaded::toplevel(vm, (root, end), |mut m, gc, (root, end)| {
                 super::super::read_string(&mut m, Some(gc), (root, 0, end), (), |vm, (), read| match read {
                     Ok(Some(_)) => 0,
@@ -1161,13 +1161,13 @@ mod tests {
                     _ => 2,
                 })
             });
-            vm.external_roots.truncate(root);
+            vm.mutator.external_roots.truncate(root);
             outcome
         };
         assert!(signal.interrupt(), "a busy evaluator takes the press");
         assert_eq!(read(&mut vm), 1, "the read did not quit between elements");
-        vm.quit_unwinding = false;
-        vm.propagated_escape = None;
+        vm.mutator.quit_unwinding = false;
+        vm.mutator.propagated_escape = None;
         vm.eval_source_raw("(setq inhibit-quit t)").unwrap();
         assert!(signal.interrupt(), "a busy evaluator takes the press");
         assert_eq!(read(&mut vm), 0, "under inhibit-quit the read ends");

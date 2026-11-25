@@ -210,11 +210,11 @@ impl Vm {
                 if !(1..=2).contains(&n) {
                     return Err("wrong primitive arity".into());
                 }
-                let string = self.stack[start];
+                let string = self.mutator.stack[start];
                 self.str_view(string).ok_or("string required")?;
                 let old = self.annotation_variable("kill-ring");
                 let values = self.list_values(old)?;
-                let ring = if n == 2 && self.stack[start + 1] != Value::NIL && old != Value::NIL {
+                let ring = if n == 2 && self.mutator.stack[start + 1] != Value::NIL && old != Value::NIL {
                     let at = self.writable_cons(old)?;
                     self.conses.set_car(at, string);
                     old
@@ -259,9 +259,9 @@ impl Vm {
                     }
                     tail = self.cons_pair(tail)?.1;
                 }
-                let at = (offset as i64 + self.stack[start].as_integer()?)
+                let at = (offset as i64 + self.mutator.stack[start].as_integer()?)
                     .rem_euclid(values.len() as i64) as usize;
-                if n == 1 || self.stack[start + 1] == Value::NIL {
+                if n == 1 || self.mutator.stack[start + 1] == Value::NIL {
                     let mut tail = ring;
                     for _ in 0..at {
                         tail = self.cons_pair(tail)?.1;
@@ -274,7 +274,7 @@ impl Vm {
                 if n != 1 {
                     return Err("wrong primitive arity".into());
                 }
-                let source = self.stack[start];
+                let source = self.mutator.stack[start];
                 let text = self.str_view(source).ok_or("string required")?.to_owned();
                 let properties = if let Some(Object::String(s) | Object::RawString(s)) =
                     self.object_if(source)
@@ -344,11 +344,11 @@ impl Vm {
                 }
                 let index = self.buffer_index()?;
                 let object = self.slots[self.buffer_slot].value;
-                let a = usize::try_from(self.stack[start].as_integer()?)
+                let a = usize::try_from(self.mutator.stack[start].as_integer()?)
                     .map_err(|_| "index out of range")?;
-                let end = usize::try_from(self.stack[start + 1].as_integer()?)
+                let end = usize::try_from(self.mutator.stack[start + 1].as_integer()?)
                     .map_err(|_| "index out of range")?;
-                let key = self.stack[start + 2];
+                let key = self.mutator.stack[start + 2];
                 let value = self.annotation_resolve(&self.annotation_raw(object, a)?, key)?;
                 let Object::Buffer(t) = &self.objects[index] else {
                     return Err("text buffer required".into());
@@ -378,7 +378,7 @@ impl Vm {
                 if n != 3 {
                     return Err("wrong primitive arity".into());
                 }
-                let value = self.stack[start];
+                let value = self.mutator.stack[start];
                 if value == Value::NIL
                     || p == YankFontLockFace
                         && self.annotation_variable("font-lock-defaults") != Value::NIL
@@ -409,8 +409,8 @@ impl Vm {
                             .ok_or("index out of range")?,
                     ))
                 };
-                let a = t.byte_of_char(offset(self.stack[start + 1])?)?;
-                let b = t.byte_of_char(offset(self.stack[start + 2])?)?;
+                let a = t.byte_of_char(offset(self.mutator.stack[start + 1])?)?;
+                let b = t.byte_of_char(offset(self.mutator.stack[start + 2])?)?;
                 let range = a.min(b)..a.max(b);
                 if range.start < t.accessible().start || range.end > t.accessible().end {
                     return Err("index out of range".into());
@@ -442,8 +442,8 @@ impl Vm {
                 if n != 4 {
                     return Err("wrong primitive arity".into());
                 }
-                let fields = self.list_values(self.stack[start + 2])?;
-                let noexclude = self.stack[start + 3] == Value::NIL;
+                let fields = self.list_values(self.mutator.stack[start + 2])?;
+                let noexclude = self.mutator.stack[start + 3] == Value::NIL;
                 let excluded = if noexclude {
                     Some(vec![])
                 } else if let Some(i) = self.names.get("yank-excluded-properties") {
@@ -473,8 +473,8 @@ impl Vm {
                             .ok_or("index out of range")?,
                     ))
                 };
-                let a = t.byte_of_char(offset(self.stack[start])?)?;
-                let b = t.byte_of_char(offset(self.stack[start + 1])?)?;
+                let a = t.byte_of_char(offset(self.mutator.stack[start])?)?;
+                let b = t.byte_of_char(offset(self.mutator.stack[start + 1])?)?;
                 let range = a.min(b)..a.max(b);
                 if !noexclude {
                     if let Some(keys) = excluded {
@@ -1070,8 +1070,8 @@ impl Vm {
             if n != 2 {
                 return Err("wrong primitive arity".into());
             }
-            let a = self.scalar_position(self.stack[start])?;
-            let b = self.scalar_position(self.stack[start + 1])?;
+            let a = self.scalar_position(self.mutator.stack[start])?;
+            let b = self.scalar_position(self.mutator.stack[start + 1])?;
             let index = self.buffer_index()?;
             if let Object::ByteBuffer(bb) = &self.objects[index] {
                 // A unibyte buffer's substring is unibyte, its positions
@@ -1108,12 +1108,12 @@ impl Vm {
             if n != if p == Get { 2 } else { 3 } {
                 return Err("wrong primitive arity".into());
             }
-            let symbol = self.stack[start];
-            let key = self.stack[start + 1];
+            let symbol = self.mutator.stack[start];
+            let key = self.mutator.stack[start + 1];
             if p == Get {
                 return self.symbol_property(symbol, key);
             }
-            let value = self.stack[start + 2];
+            let value = self.mutator.stack[start + 2];
             return self.put_symbol_property(symbol, key, value);
         }
         let raw_query = p == RawPropertiesAt;
@@ -1125,7 +1125,7 @@ impl Vm {
             return Err("wrong primitive arity".into());
         }
         let object = if n == if raw_query { 2 } else { 3 } {
-            self.stack[start + n - 1]
+            self.mutator.stack[start + n - 1]
         } else {
             Value::NIL
         };
@@ -1133,7 +1133,7 @@ impl Vm {
         let current = if object == Value::NIL { Some(self.buffer_index()?) } else { None };
         // validate_interval_range: CHECK_FIXNUM_COERCE_MARKER.
         let at =
-            usize::try_from(self.scalar_position(self.stack[start])?).map_err(|_| "index out of range")?;
+            usize::try_from(self.scalar_position(self.mutator.stack[start])?).map_err(|_| "index out of range")?;
         let place = match current {
             Some(index) => Self::annotation_place_in(&self.objects[index], at)?,
             None => self.annotation_place(object, at)?,
@@ -1145,7 +1145,7 @@ impl Vm {
             }
             Ok(self.list_value(&values))
         } else {
-            self.annotation_resolve(&place, self.stack[start + 1])
+            self.annotation_resolve(&place, self.mutator.stack[start + 1])
         }
     }
 }

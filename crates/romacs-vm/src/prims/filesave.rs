@@ -615,6 +615,7 @@ fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(errno(cx, "Read error", &[file], e)),
             };
+            // HOST(escape): writes `write-region`'s bytes
             output.write_all(&buffer[..count]).map_err(|e| errno(cx, "Write error", &[newname], e))?;
         }
     }
@@ -640,12 +641,15 @@ fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         Some(default)
     };
     if let Some(mode) = mode {
+        // HOST(escape): `write-region`'s mode on the file it wrote: metadata others see, with no inverse
         output.set_permissions(std::fs::Permissions::from_mode(mode))
             .map_err(|e| errno(cx, "Copying permissions to", &[newname], e))?;
     }
     if keep_time != Value::NIL {
         let times = status.accessed().and_then(|atime| Ok(std::fs::FileTimes::new()
+            // HOST(pure): builds the times as a value; set_times below applies them
             .set_accessed(atime).set_modified(status.modified()?)));
+        // HOST(escape): `copy-file`'s preserved times on the copy: metadata others see
         if times.and_then(|times| output.set_times(times)).is_err() {
             let message = cx.string("Cannot set file date");
             let data = cx.cons(newname, Value::NIL);

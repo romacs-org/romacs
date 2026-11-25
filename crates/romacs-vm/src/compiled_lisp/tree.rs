@@ -117,6 +117,7 @@ pub(super) fn pool<T: Send, R: Send>(items: VecDeque<T>, jobs: usize, work: impl
     let done = Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..jobs.max(1) {
+            // HOST(pure): starts a thread of this process, no outside resource (rule 5)
             scope.spawn(|| loop {
                 // The queue's lock is released before the work runs.
                 let Some(item) = queue.lock().unwrap().pop_front() else { break };

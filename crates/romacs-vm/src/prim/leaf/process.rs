@@ -793,6 +793,7 @@ impl Leaf<'_> {
             if let Some(fd) = &channel.outfd
                 && network
             {
+                // HOST(escape): the peer sees the end of input (`process-send-eof`)
                 let _ = rustix::net::shutdown(fd, rustix::net::Shutdown::Write);
             }
             channel.pending.clear();
@@ -1030,6 +1031,7 @@ impl Leaf<'_> {
             return Ok(Value::NIL);
         }
         let size = rustix::termios::Winsize { ws_row: height, ws_col: width, ws_xpixel: 0, ws_ypixel: 0 };
+        // HOST(escape): a pty's window size, which the child sees (`set-process-window-size`)
         let set = self.channel(proc).and_then(|c| c.infd.as_ref()).map(|fd| rustix::termios::tcsetwinsize(fd, size));
         Ok(if set.is_some_and(|set| set.is_ok()) { Value::TRUE } else { Value::NIL })
     }
@@ -1265,7 +1267,7 @@ impl Leaf<'_> {
         let quit_symbol = self.sym("quit");
         match quit {
             Fault::Signal(condition, _) if condition == quit_symbol && !bytes.is_empty() => {
-                self.vm.quit_unwinding = false;
+                self.vm.mutator.quit_unwinding = false;
                 self.issue_requit(token);
                 let quit = self.cons(quit_symbol, token);
                 let text = self.make_string(bytes, false);

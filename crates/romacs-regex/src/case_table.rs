@@ -16,7 +16,10 @@ use std::any::Any;
 /// [`crate::CaseTranslation`] memoizes what it reads through this table; the
 /// memos are invalidated by [`Self::write_tick`], so an implementation whose
 /// entries can change in place MUST move the tick on every change.
-pub trait CaseTable: std::fmt::Debug {
+///
+/// `Send + Sync`: a compiled pattern holds its table, and the host's VM, with
+/// its pattern cache, may move to another thread.
+pub trait CaseTable: std::fmt::Debug + Send + Sync {
     /// The canonical (case-folded) form of character code `c`
     /// (GNU `translate_char` on the canon table).
     fn translate(&self, c: u32) -> u32;

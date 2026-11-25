@@ -5,7 +5,7 @@ impl Vm {
     fn macroexpand_fault<T>(&mut self, name: &str, data: &[Value]) -> Result<T> {
         let condition = self.intern(name);
         let data = self.list_value(data);
-        self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+        self.mutator.propagated_escape = Some(threaded::Escape::Signal(condition, data));
         Err(format!("{name} in macroexpand"))
     }
 
@@ -50,10 +50,10 @@ impl Vm {
             let entry = self.compile_request(&form)?.0;
             // ARGS are rooted across making the closure and read back.
             let frame = self.root_frame(args);
-            self.propagate_next = true;
+            self.mutator.propagate_next = true;
             let result = self.execute_raw(entry);
             self.release_request_entry(entry);
-            self.propagate_next = false;
+            self.mutator.propagate_next = false;
             let args: Vec<Value> = (0..args.len()).map(|i| self.rooted(&frame, i)).collect();
             self.drop_frame(frame);
             return self.reader_call(result?, &args);

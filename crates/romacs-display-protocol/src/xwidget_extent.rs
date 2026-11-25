@@ -109,8 +109,20 @@ impl XwidgetContentExtent {
 /// carrying a branded value prevents a caller from accidentally passing the
 /// content width where a cropped glyph width is required.
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
 pub struct XwidgetLayoutAdvance(Px);
+
+impl<'de> serde::Deserialize<'de> for XwidgetLayoutAdvance {
+    /// Through [`Self::new`], so a serialized frame cannot carry an
+    /// advance the constructor would refuse.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let px = <Px as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(px).ok_or_else(|| {
+            serde::de::Error::custom("an xwidget layout advance is finite and greater than zero")
+        })
+    }
+}
 
 impl XwidgetLayoutAdvance {
     /// Construct a finite, strictly positive glyph advance.
@@ -131,7 +143,8 @@ impl XwidgetLayoutAdvance {
 /// frame-space geometry; child-frame ingestion translates it into root-surface
 /// geometry.  The intrinsic content extent and cropped layout advance remain
 /// different types throughout that conversion.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "")]
 pub struct XwidgetPresentationGeometry<Space> {
     origin: GeometryPoint<Space, LogicalPixels>,
     content: XwidgetContentExtent,

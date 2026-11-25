@@ -10,6 +10,7 @@ use romacs_display_protocol::font::{
     FontReplay, FontSlantKind, ResolvedFont, ResolvedFontAdvance, ResolvedFontId,
     ResolvedFontIdentity,
 };
+use romacs_display_protocol::pane_picture::{owner_slot_base, OWNER_SLOT_SPAN};
 use rustc_hash::FxHashMap;
 
 /// Builders provide observations, never the identity fields owned by the key.
@@ -40,12 +41,61 @@ struct InternedFontInstance {
     record: Option<ResolvedFont>,
 }
 
-#[derive(Default)]
+/// Where an interner's ids start and the range they stay in: the
+/// master's, below owner slot 0's first id, or one owner slot's
+/// (`romacs_display_protocol::pane_picture::owner_slot_base`), so no two
+/// owners and no owner and the master share a font id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FontIdBase {
+    first: u32,
+    count: u32,
+}
+
+impl FontIdBase {
+    /// The master's: ids 1 up to, not including, slot 0's first.
+    pub const MASTER: Self = Self { first: 1, count: OWNER_SLOT_SPAN - 1 };
+
+    /// Owner slot SLOT's: its slot's ids. None for a slot past the last.
+    #[must_use]
+    pub fn owner(slot: u8) -> Option<Self> {
+        owner_slot_base(slot).map(|first| Self { first, count: OWNER_SLOT_SPAN })
+    }
+
+    /// The id of instance INDEX in order of interning (from 0), or None
+    /// when it would leave the range.
+    #[must_use]
+    pub fn id(self, index: usize) -> Option<ResolvedFontId> {
+        let index = u32::try_from(index).ok().filter(|&index| index < self.count)?;
+        Some(ResolvedFontId(self.first + index))
+    }
+}
+
 pub struct FontInstanceInterner {
+    base: FontIdBase,
     instances: FxHashMap<FontInstanceKey, InternedFontInstance>,
 }
 
+impl Default for FontInstanceInterner {
+    /// The master's interner.
+    fn default() -> Self {
+        Self::with_base(FontIdBase::MASTER)
+    }
+}
+
 impl FontInstanceInterner {
+    /// An interner whose ids are BASE's, in order of first interning.
+    #[must_use]
+    pub fn with_base(base: FontIdBase) -> Self {
+        Self { base, instances: FxHashMap::default() }
+    }
+
+    /// The font IDENTITY, REPLAY and `pixel_size` name, under the id it was
+    /// first interned with, or the next of the base's; its record observed
+    /// by OBSERVE if the catalog changed since or it is new.
+    ///
+    /// # Panics
+    ///
+    /// When the base's ids are spent.
     pub fn intern(
         &mut self,
         identity: ResolvedFontIdentity,
@@ -58,17 +108,12 @@ impl FontInstanceInterner {
             replay: replay.clone(),
             pixel_size_bits: pixel_size.to_bits(),
         };
-        let allocated = self.instances.len();
+        let (allocated, base) = (self.instances.len(), self.base);
         let instance = self
             .instances
             .entry(key)
             .or_insert_with(|| InternedFontInstance {
-                id: ResolvedFontId(
-                    u32::try_from(allocated)
-                        .ok()
-                        .and_then(|count| count.checked_add(1))
-                        .expect("resolved font ID space exhausted"),
-                ),
+                id: base.id(allocated).expect("resolved font ID space exhausted"),
                 record: None,
             });
         instance
@@ -103,5 +148,49 @@ impl FontInstanceInterner {
         for instance in self.instances.values_mut() {
             instance.record = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FontIdBase, FontInstanceInterner, FontInstanceProperties, OWNER_SLOT_SPAN};
+    use romacs_display_protocol::font::{
+        FontFileAsset, FontOutlineAsset, FontReplay, FontSlantKind, FontUnderline,
+        ResolvedFontAdvance, ResolvedFontId, ResolvedFontIdentity,
+    };
+
+    #[test]
+    #[should_panic(expected = "resolved font ID space exhausted")]
+    fn interning_refuses_to_reach_the_first_owner_slot() {
+        // Use only the last master id so the next allocation hits the real boundary.
+        let last_master_id = OWNER_SLOT_SPAN - 1;
+        let mut interner = FontInstanceInterner::with_base(FontIdBase {
+            first: last_master_id,
+            count: 1,
+        });
+        let mut intern = |file: &str| {
+            let identity = ResolvedFontIdentity::from_file(file, 0, None);
+            let asset = FontFileAsset::new(file, 0).unwrap();
+            interner.intern(
+                identity,
+                FontReplay::Swash { asset: FontOutlineAsset::File(asset) },
+                14.0,
+                || FontInstanceProperties {
+                    family: "Test".into(),
+                    full_name: None,
+                    postscript_name: None,
+                    weight: 400,
+                    slant: FontSlantKind::Normal,
+                    width: 5,
+                    ascent_px: 11.0,
+                    descent_px: 3.0,
+                    space_advance_px: 8.0,
+                    glyph_advance: ResolvedFontAdvance::default(),
+                    underline: FontUnderline::default(),
+                },
+            )
+        };
+        assert_eq!(intern("/fonts/a.ttf").id, ResolvedFontId(last_master_id));
+        intern("/fonts/b.ttf");
     }
 }

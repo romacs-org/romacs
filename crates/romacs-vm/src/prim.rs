@@ -329,10 +329,10 @@ mod leaf {
             })
         }
         fn watcher_fault(&mut self, text: String) -> Fault {
-            match self.vm.propagated_escape {
+            match self.vm.mutator.propagated_escape {
                 Some(crate::threaded::Escape::Signal(..) | crate::threaded::Escape::Error { .. }) => Fault::Escape,
                 Some(crate::threaded::Escape::Throw(..)) => {
-                    self.vm.propagated_escape = None;
+                    self.vm.mutator.propagated_escape = None;
                     Fault::Error("VM2 throw out of a variable watcher of a native write is unsupported".into())
                 }
                 _ => Fault::Error(text),
@@ -474,14 +474,14 @@ mod leaf {
             if let Some(buffer) = self.vm.named_buffer(&name) { return Ok((buffer, false)); }
             if !create { return Err(Fault::Error(format!("No buffer named {name}"))); }
             let buffer = self.vm.create_named_buffer(&name, false).map_err(|error| {
-                match self.vm.propagated_escape.take() {
+                match self.vm.mutator.propagated_escape.take() {
                     Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
                     Some(crate::threaded::Escape::Error { condition, object, .. }) => {
                         let (_, data) = self.vm.cons_pair(object).expect("normalized signal object");
                         Fault::Signal(condition, data)
                     }
                     escape => {
-                        self.vm.propagated_escape = escape;
+                        self.vm.mutator.propagated_escape = escape;
                         Fault::Error(error)
                     }
                 }
@@ -498,17 +498,17 @@ mod leaf {
             let marker = self.vm.save_excursion_data().map_err(Fault::Error)?;
             // The excursion is its caller's: not this primitive's own
             // activation, when the call recorded one.
-            let frames = &self.vm.backtrace.frames;
+            let frames = &self.vm.mutator.backtrace.frames;
             let own = frames.last().is_some_and(|frame| crate::prim::name(frame.function) == Some("romacs--save-excursion"));
             let frames = frames.len() - usize::from(own);
-            let dynamic = self.vm.dynamic.len();
+            let dynamic = self.vm.mutator.dynamic.len();
             // Only `backtrace-eval` reads it: a frame without windows records none.
             let window = self.vm.excursion_window().unwrap_or(Value::NIL);
-            self.vm.backtrace.excursion_begin(marker, window, frames, dynamic);
+            self.vm.mutator.backtrace.excursion_begin(marker, window, frames, dynamic);
             Ok(marker)
         }
         pub(crate) fn restore_excursion_data(&mut self, data: Value) -> std::result::Result<Value, Fault> {
-            self.vm.backtrace.excursion_end(data);
+            self.vm.mutator.backtrace.excursion_end(data);
             self.vm.restore_excursion_data(data).map_err(Fault::Error)
         }
         pub(crate) fn save_restriction_data(&mut self) -> std::result::Result<Value, Fault> {
@@ -755,51 +755,95 @@ mod leaf {
             let whole = bytes.get(..width)?;
             whole[1..].iter().all(|b| b & 0xc0 == 0x80).then(|| crate::lstring::string_char(whole))
         }
-        pub fn concat_result(&mut self, bytes: Vec<u8>, multibyte: bool, parts: &[(Value, usize)]) -> Value {
+        pub fn concat_result(&mut self, bytes: Vec<u8>, multibyte: bool, parts: &[(Value, usize)]) -> super::Out {
+            let properties = match self.concat_properties::<true>(parts, multibyte) {
+                Ok(properties) => properties,
+                Err(crate::quit::Stopped) => {
+                    self.quittable(Self::native_poll)?;
+                    self.concat_properties::<false>(parts, multibyte).unwrap_or_else(|_| unreachable!())
+                }
+            };
+            let mut string = if bytes.len() <= crate::quit::KERNEL_CHUNK {
+                data::LispString::from_bytes(bytes, multibyte)
+            } else {
+                data::LispString::from_bytes_polled(bytes, multibyte, || self.quittable(Self::native_poll))?
+            };
+            string.properties = properties;
+            Ok(self.vm.allocate_object(string.into_concat_object()))
+        }
+
+        pub(super) fn concat_properties<const POLL: bool>(&self, parts: &[(Value, usize)], multibyte: bool)
+            -> std::result::Result<crate::properties::Properties, crate::quit::Stopped> {
             let mut properties = crate::properties::Properties::new();
+            let mut width = crate::buffer::widened_widths(|| POLL && self.vm.own_stop_due());
             for &(value, offset) in parts {
                 if let Some(data::Object::String(s) | data::Object::RawString(s)) = self.vm.object_if(value) {
                     if s.properties.is_empty() { continue; }
                     if multibyte && !s.is_multibyte() {
-                        // A unibyte part widened: its runs stretch with it.
-                        crate::buffer::widened_properties(&s.properties, s.bytes(), offset, &mut properties);
+                        crate::buffer::widened_properties_polled(
+                            &s.properties, s.bytes(), offset, &mut properties, &mut width,
+                        )?;
                     } else {
                         properties.copy_into(crate::coordinates::ByteOffset(offset), &s.properties);
                     }
                 }
             }
-            if properties.is_empty() { return self.vm.make_lisp_string(bytes, multibyte); }
-            let mut string = data::LispString::from_bytes(bytes, multibyte);
-            string.properties = properties;
-            let object = if string.is_utf8() { data::Object::String(Box::new(string)) }
-                else { data::Object::RawString(Box::new(string)) };
-            self.vm.allocate_object(object)
+            Ok(properties)
         }
         pub fn concat_ascii(&mut self, args: &[Value]) -> Option<Value> {
-            self.concat_ascii_joined(args, None)
+            self.concat_ascii_joined::<false>(args, None).unwrap_or_else(|_| unreachable!())
         }
-        /// `concat_ascii` of ARGS with SEPARATOR between each two, or `None`
-        /// when one is not an ASCII string. Each part is looked up once.
-        pub fn concat_ascii_joined(&mut self, args: &[Value], separator: Option<Value>) -> Option<Value> {
+        /// Join ASCII parts, or return None to use concat's general path.
+        /// The result-list caller can stop while assembling its long output.
+        pub fn concat_ascii_joined<const POLL: bool>(&mut self, args: &[Value], separator: Option<Value>)
+            -> std::result::Result<Option<Value>, Fault> {
+            use crate::quit::{KERNEL_CHUNK, POLL_STEPS};
+            // ASCII validation scans a whole part or separator before the
+            // copy polls. Whole-call costs reached 0.803 s/GB for concat-list
+            // and 2.63 s/GB for concat's unpolled ASCII path.
             let ascii = |view: &crate::lstring::StrView<'_>| (view.is_multibyte() && view.len() == view.bytes().len()) || view.bytes().is_ascii();
+            let append = |bytes: &mut Vec<u8>, text: &[u8]| {
+                if POLL && text.len() > KERNEL_CHUNK {
+                    for (index, chunk) in text.chunks(KERNEL_CHUNK).enumerate() {
+                        if index != 0 && self.vm.own_stop_due() { return false; }
+                        bytes.extend_from_slice(chunk);
+                    }
+                } else {
+                    bytes.extend_from_slice(text);
+                }
+                true
+            };
             let mut parts = Vec::with_capacity(2 * args.len());
             let mut bytes = Vec::new();
-            {
+            let copied = 'join: {
                 let separator = match separator {
-                    Some(value) => Some((value, self.vm.str_view(value).filter(|view| ascii(view))?.bytes())),
+                    Some(value) => {
+                        let Some(view) = self.vm.str_view(value).filter(|view| ascii(view)) else { return Ok(None) };
+                        Some((value, view.bytes()))
+                    }
                     None => None,
                 };
                 for (index, &arg) in args.iter().enumerate() {
+                    if POLL && index != 0 && index.is_multiple_of(POLL_STEPS as usize) && self.vm.own_stop_due() {
+                        break 'join false;
+                    }
                     if let (Some((value, text)), true) = (separator, index > 0) {
                         parts.push((value, bytes.len()));
-                        bytes.extend_from_slice(text);
+                        if !append(&mut bytes, text) { break 'join false; }
                     }
-                    let view = self.vm.str_view(arg).filter(|view| ascii(view))?;
+                    let Some(view) = self.vm.str_view(arg).filter(|view| ascii(view)) else { return Ok(None) };
                     parts.push((arg, bytes.len()));
-                    bytes.extend_from_slice(view.bytes());
+                    if !append(&mut bytes, view.bytes()) { break 'join false; }
                 }
+                true
+            };
+            if !copied {
+                self.quittable(Self::native_poll)?;
+                return Ok(None);
             }
-            Some(self.concat_result(bytes, false, &parts))
+            let mut string = data::LispString::from_ascii(bytes, false);
+            string.properties = self.concat_properties::<false>(&parts, false).unwrap_or_else(|_| unreachable!());
+            Ok(Some(self.vm.allocate_object(data::string_object(string))))
         }
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
             if Vm::image_value(value) { return Err(self.read_only(value)); }
@@ -814,7 +858,23 @@ mod leaf {
             Ok(Value::NIL)
         }
         pub fn sxhash(&self, value: Value) -> Value {
-            Value::integer((self.vm.public_sxhash(value) & ((1u64 << 60)-1)) as i64).unwrap()
+            let hash = self.vm.public_sxhash::<false>(value).unwrap_or_else(|| unreachable!());
+            Self::sxhash_fixnum(hash)
+        }
+        pub fn sxhash_quittable(&mut self, value: Value) -> super::Out {
+            match self.vm.public_sxhash::<true>(value) {
+                Some(hash) => Ok(Self::sxhash_fixnum(hash)),
+                None => self.finish_sxhash_stop(value),
+            }
+        }
+        #[cold]
+        #[inline(never)]
+        fn finish_sxhash_stop(&mut self, value: Value) -> super::Out {
+            self.quittable(Self::native_poll)?;
+            Ok(self.sxhash(value))
+        }
+        fn sxhash_fixnum(hash: u64) -> Value {
+            Value::fixnum((hash & ((1u64 << 60) - 1)) as i64).unwrap_or_else(|| unreachable!())
         }
         pub fn string_to_syntax(&mut self, string: Value) -> super::Out {
             let description = self.string_view(string)?;
@@ -1083,7 +1143,7 @@ mod leaf {
         }
         /// The registers of match group N, if it matched.
         pub(crate) fn match_group(&self, n: usize) -> Option<(usize, usize)> {
-            self.vm.regexp.groups.get(n).copied().flatten()
+            self.vm.mutator.regexp.groups.get(n).copied().flatten()
         }
         pub fn translate_match_data(&mut self, delta: i64) {
             self.vm.regexp_translate_match_data(delta);
@@ -1164,7 +1224,7 @@ mod leaf {
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(None) };
             self.vm.tracked_saved(slot, binding, crate::world::Access::SavedRead);
             // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
-            let value = self.vm.dynamic[binding].1;
+            let value = self.vm.mutator.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
         /// Update only the oldest saved default, leaving all active cells intact.
@@ -1175,7 +1235,7 @@ mod leaf {
             self.vm.tracked_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
             // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
-            self.vm.dynamic[binding].1 = value;
+            self.vm.mutator.dynamic[binding].1 = value;
             Ok(true)
         }
         pub fn provide_feature(&mut self, feature: Value, subfeatures: Value) -> std::result::Result<(), Fault> {
@@ -1188,7 +1248,7 @@ mod leaf {
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
             self.vm.tracked_saved(slot, binding, crate::world::Access::SavedRead);
             // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
-            let value = self.vm.dynamic[binding].1;
+            let value = self.vm.mutator.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
         /// Replace that saved value; false when there is no such let.
@@ -1198,7 +1258,7 @@ mod leaf {
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
             self.vm.tracked_saved(slot, binding, crate::world::Access::SavedWrite);
             // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
-            self.vm.dynamic[binding].1 = value;
+            self.vm.mutator.dynamic[binding].1 = value;
             Ok(true)
         }
         /// Resolve the current buffer's binding, including dynamic/local redirects.
@@ -1284,7 +1344,7 @@ mod leaf {
             }
             let slot = self.vm.indirect_variable(self.symbol_slot(v)?);
             // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-            Ok(self.vm.dynamic.iter().any(|(bound, ..)| *bound == slot))
+            Ok(self.vm.mutator.dynamic.iter().any(|(bound, ..)| *bound == slot))
         }
         /// GNU `find_symbol_value`: the current binding through aliases,
         /// `None` when void. nil and t are their own values.
@@ -1437,6 +1497,7 @@ mod leaf {
         }
         /// GNU calls `display-warning`, which writes to stderr in batch.
         pub fn batch_warning(&self, kind: &str, text: &str) {
+            // HOST(escape): stdout and stderr are sends another process reads
             eprintln!("Warning ({kind}): {text}");
         }
         /// The slot whose function cell symbol V names: `nil` and `t`, which
@@ -2367,7 +2428,7 @@ pub(crate) fn call_native_watcher(vm: &mut Vm, watcher: Value, args: &[Value]) -
         }
     };
     // funcall_subr passes the watcher's own signal through the write.
-    vm.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+    vm.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
     Err(format!("variable watcher {} signalled", d.name))
 }
 /// Tag-6 payloads at or above `PRIMITIVES.len()` name generated primitives.
@@ -2420,7 +2481,7 @@ impl Vm {
             Ok(home) => home,
             Err(fault) => {
                 let (condition, data) = self.fault(fault);
-                self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                self.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
                 return Err("expand-file-name signalled".into());
             }
         };
@@ -2440,7 +2501,7 @@ impl Vm {
             Ok(None) => Err("VM2 expand-file-name matching file name handler is unsupported".into()),
             Err(fault) => {
                 let (condition, data) = self.fault(fault);
-                self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                self.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
                 Err("expand-file-name signalled".into())
             }
         }
@@ -2477,7 +2538,7 @@ impl Vm {
         decoded.map_err(|fault| {
             let (condition, data) = self.fault(fault);
             let text = format!("source coding detection signalled {}", self.display(condition).unwrap_or_default());
-            self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+            self.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
             text
         })
     }
@@ -2507,17 +2568,17 @@ impl Vm {
         argc: usize,
     ) -> std::result::Result<Step, Option<(Value, Value)>> {
         let d = generated(target).expect("generated primitive");
-        debug_assert!(!self.native_quit, "{} entered inside a caller's quit scope", d.name);
+        debug_assert!(!self.mutator.native_quit, "{} entered inside a caller's quit scope", d.name);
         self.arity_check(d, target, argc)?;
         // Copied off the register stack, which the body may widen; on the
         // native stack for the common argument counts.
         let mut small = [Value::NIL; 8];
         let heap;
         let args: &[Value] = if argc <= small.len() {
-            small[..argc].copy_from_slice(&self.stack[start..start + argc]);
+            small[..argc].copy_from_slice(&self.mutator.stack[start..start + argc]);
             &small[..argc]
         } else {
-            heap = self.stack[start..start + argc].to_vec();
+            heap = self.mutator.stack[start..start + argc].to_vec();
             &heap
         };
         let step = crate::gap_probe::within(self, move || d.name, |vm| no_collection(vm, |vm| {
@@ -2555,7 +2616,7 @@ impl Vm {
     /// ARGS must point at ARGC live values.
     #[inline(never)]
     pub(crate) unsafe fn leaf_value(&mut self, f: LeafBody, args: *const Value, argc: usize, fault: &mut Option<Fault>) -> Value {
-        debug_assert!(!self.native_quit, "a site leaf entered inside a caller's quit scope");
+        debug_assert!(!self.mutator.native_quit, "a site leaf entered inside a caller's quit scope");
         let mut small = [Value::NIL; LEAF_ARGUMENTS];
         unsafe { std::ptr::copy_nonoverlapping(args, small.as_mut_ptr(), argc) };
         match no_collection(self, |vm| f(&mut Leaf::new(vm), &small[..argc])) {
@@ -2587,7 +2648,7 @@ impl Vm {
     /// signalled afresh, by callers that cannot resume it.
     pub(super) fn fault(&mut self, fault: Fault) -> (Value, Value) {
         match fault {
-            Fault::Escape => match self.propagated_escape.take() {
+            Fault::Escape => match self.mutator.propagated_escape.take() {
                 Some(crate::threaded::Escape::Signal(condition, data)) => (condition, data),
                 Some(crate::threaded::Escape::Error { condition, object, .. }) => {
                     (condition, self.cons_pair(object).expect("normalized signal object").1)

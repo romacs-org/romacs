@@ -66,9 +66,9 @@ impl Vm {
     /// would drain this queue inside that call.
     pub(crate) fn write_from_native(&mut self, write: NativeWrite) -> std::result::Result<(), Fault> {
         let heard = write.kind == WriteKind::Defalias || self.variable_trapped(self.indirect_variable(write.slot));
-        if !self.deferred_writes.is_empty() || (heard && self.running_engines > self.suspended.len()) {
+        if !self.mutator.deferred_writes.is_empty() || (heard && self.mutator.running_engines > self.mutator_rest.suspended.len()) {
             let buffer = self.slots[self.buffer_slot].value;
-            self.deferred_writes.push((write, buffer));
+            self.mutator.deferred_writes.push((write, buffer));
             return Ok(());
         }
         if !heard && write.kind == WriteKind::Set {
@@ -79,8 +79,8 @@ impl Vm {
     /// The queue, for a drain whose watchers may collect: a frame holding each
     /// write's symbol, value, buffer and kind, and how many writes.
     pub(crate) fn take_deferred(&mut self) -> Option<(RootFrame, usize)> {
-        if self.deferred_writes.is_empty() { return None; }
-        let writes = std::mem::take(&mut self.deferred_writes);
+        if self.mutator.deferred_writes.is_empty() { return None; }
+        let writes = std::mem::take(&mut self.mutator.deferred_writes);
         let values: Vec<Value> = writes.iter().flat_map(|(write, buffer)| {
             let kind = WRITE_KINDS.iter().position(|&kind| kind == write.kind).expect("every kind is listed");
             [Value::reference(write.slot + 1, 7), write.value, *buffer, Value::integer(i64::try_from(kind).expect("a small index")).expect("a small index")]
@@ -97,7 +97,7 @@ impl Vm {
         // A queued `set`'s own store fault keeps GNU's condition, as the legacy
         // call's text did (`forwarded_condition`); the value is the queue's, rooted.
         match self.perform_queued(frame, i) {
-            Err(Fault::Error(error)) if self.propagated_escape.is_none() && self.queued_kind(frame, i) == WriteKind::Set => {
+            Err(Fault::Error(error)) if self.mutator.propagated_escape.is_none() && self.queued_kind(frame, i) == WriteKind::Set => {
                 let value = self.rooted(frame, 4 * i + 1);
                 Err(self.forwarded_condition(&error, value).map_or_else(|| Fault::Error(error), |(condition, data)| Fault::Signal(condition, data)))
             }
@@ -228,9 +228,9 @@ impl Vm {
         // and traps it again as they end; a panic out of them, by whatever
         // catches it (`Vm::catching`).
         self.trapped.remove(&base);
-        self.retrap.push(base);
-        let held = usize::from(!self.rooted_write);
-        self.gc_holds += held;
+        self.mutator.retrap.push(base);
+        let held = usize::from(!self.mutator.rooted_write);
+        self.mutator.gc_holds += held;
         // The list, the value and the place are rooted and read back after
         // each watcher. The live list's next link is read after each call:
         // a watcher removed by an earlier one is not called.
@@ -248,8 +248,8 @@ impl Vm {
             self.set_rooted(&frame, 0, rest);
         }
         self.drop_frame(frame);
-        self.gc_holds -= held;
-        let owed = self.retrap.pop();
+        self.mutator.gc_holds -= held;
+        let owed = self.mutator.retrap.pop();
         debug_assert_eq!(owed, Some(base), "the re-trap owed by this call");
         self.trapped.insert(base);
         result
@@ -267,9 +267,9 @@ impl Vm {
     /// left in `propagated_escape' for the writer; an escape already pending
     /// there survives a FUNCTION that returns, rooted across it.
     pub(crate) fn call_lisp_at_write(&mut self, watcher: Value, args: &[Value]) -> Result<()> {
-        let mut pending = self.propagated_escape.take();
-        let hooked = std::mem::take(&mut self.propagated_escape_hooked);
-        let depth = self.propagated_eval_depth.take();
+        let mut pending = self.mutator.propagated_escape.take();
+        let hooked = std::mem::take(&mut self.mutator.propagated_escape_hooked);
+        let depth = self.mutator.propagated_eval_depth.take();
         let mut held = vec![];
         if let Some(escape) = &mut pending { escape.visit_values(&mut |v| held.push(*v)); }
         let frame = self.root_frame(&held);
@@ -278,9 +278,9 @@ impl Vm {
         if let Some(escape) = &mut pending { escape.visit_values(&mut |v| { *v = self.rooted(&frame, i); i += 1; }); }
         self.drop_frame(frame);
         if result.is_ok() {
-            self.propagated_escape = pending;
-            self.propagated_escape_hooked = hooked;
-            self.propagated_eval_depth = depth;
+            self.mutator.propagated_escape = pending;
+            self.mutator.propagated_escape_hooked = hooked;
+            self.mutator.propagated_eval_depth = depth;
         }
         result.map(|_| ())
     }
@@ -289,9 +289,9 @@ impl Vm {
     /// survives). Called where `call_lisp_at_write' may be; its callers are
     /// leaves, whose unsuspended engine holds collection.
     pub(crate) fn safe_call(&mut self, function: Value, args: &[Value]) -> Value {
-        let pending = (self.propagated_escape.take(), std::mem::take(&mut self.propagated_escape_hooked), self.propagated_eval_depth.take());
+        let pending = (self.mutator.propagated_escape.take(), std::mem::take(&mut self.mutator.propagated_escape_hooked), self.mutator.propagated_eval_depth.take());
         let result = self.reader_call(function, args);
-        (self.propagated_escape, self.propagated_escape_hooked, self.propagated_eval_depth) = pending;
+        (self.mutator.propagated_escape, self.mutator.propagated_escape_hooked, self.mutator.propagated_eval_depth) = pending;
         result.unwrap_or(Value::NIL)
     }
 }

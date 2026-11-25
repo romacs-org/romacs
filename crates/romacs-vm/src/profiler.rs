@@ -164,7 +164,7 @@ impl Vm {
         if self.profiler.active {
             self.hooked_leave(mark);
         }
-        self.backtrace.leave(mark)
+        self.mutator.backtrace.leave(mark)
     }
     /// The hooks of leaving the entries from MARK: the profilers sample,
     /// and the leaving activations' debug-on-exit flags drop.
@@ -173,7 +173,7 @@ impl Vm {
     pub(super) fn hooked_leave(&mut self, mark: usize) {
         self.profile_boundary();
         if self.profiler.exit_flags {
-            self.backtrace.drop_exit_flags_from(mark);
+            self.mutator.backtrace.drop_exit_flags_from(mark);
             self.debug_hooks_changed();
         }
     }
@@ -186,7 +186,7 @@ impl Vm {
             self.world_version = self.world_version.saturating_add(1);
         }
         self.profiler.next_call = next_call;
-        self.profiler.exit_flags = self.backtrace.has_exit_flags();
+        self.profiler.exit_flags = self.mutator.backtrace.has_exit_flags();
         self.profiler.update_active();
     }
     /// Charge what the meters took since the last boundary to the stack.
@@ -226,7 +226,8 @@ impl Vm {
         }
     }
     fn profile_record(&mut self, which: Which, count: i64) {
-        let Vm { profiler, backtrace, closures, .. } = self;
+        let Vm { profiler, mutator, closures, .. } = self;
+        let backtrace = &mutator.backtrace;
         let Profiler { cpu_log, memory_log, scratch, .. } = profiler;
         let Some(log) = (match which { Which::Cpu => cpu_log, Which::Memory => memory_log }) else { return };
         // profiler.c get_backtrace: innermost first, padded with nil.

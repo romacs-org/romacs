@@ -153,7 +153,7 @@ const UTF8: u8 = 4;
 /// Unibyte text as an object: ASCII keeps the string slot, which every
 /// reader of text takes; only bytes above 127 are a byte string.
 pub(crate) fn unibyte_object(bytes: Vec<u8>) -> Object {
-    if bytes.is_ascii() { string_object(LispString::from_bytes(bytes, false)) } else { Object::Bytes(bytes) }
+    if bytes.is_ascii() { string_object(LispString::from_ascii(bytes, false)) } else { Object::Bytes(bytes) }
 }
 
 pub(crate) fn string_object(string: LispString) -> Object {
@@ -175,43 +175,54 @@ impl LispString {
             flag_scanned: std::cell::Cell::new(0),
         }
     }
-    pub fn from_bytes(bytes: Vec<u8>, multibyte: bool) -> Self {
-        if bytes.is_ascii() {
-            let chars=bytes.len();
-            return Self {
-                bytes, chars, flags: ASCII | UTF8 | if multibyte { MULTIBYTE } else { 0 },
-                properties: crate::properties::Properties::new(),
-                cursors:[std::cell::Cell::new((0,0)),std::cell::Cell::new((chars,chars))],
-                #[cfg(test)]
-                scanned: std::cell::Cell::new(0),
-            #[cfg(test)]
-            flag_scanned: std::cell::Cell::new(0),
-            };
-        }
-        let utf8 = std::str::from_utf8(&bytes);
-        let is_utf8 = bytes.is_ascii() || (multibyte && utf8.is_ok());
-        let chars = if !multibyte {
-            bytes.len()
-        } else if let Ok(text) = utf8 {
-            text.chars().count()
-        } else {
-            let mut rest = bytes.as_slice();
-            let mut count = 0;
-            while !rest.is_empty() {
-                let (_, width) =
-                    crate::lstring::decode_char(rest).expect("valid internal string encoding");
-                rest = &rest[width..];
-                count += 1;
-            }
-            count
-        };
-        let byte_len = bytes.len();
-        let is_ascii = bytes.is_ascii();
+    /// ASCII bytes validated by the caller, with their already-known metadata.
+    pub(super) fn from_ascii(bytes: Vec<u8>, multibyte: bool) -> Self {
+        let chars = bytes.len();
+        Self::with_metadata(bytes, chars, ASCII | UTF8 | if multibyte { MULTIBYTE } else { 0 })
+    }
 
+    pub fn from_bytes(bytes: Vec<u8>, multibyte: bool) -> Self {
+        let (chars, flags) = Self::measure_bytes(&bytes, multibyte);
+        Self::with_metadata(bytes, chars, flags)
+    }
+
+    pub(super) fn from_bytes_polled<E>(
+        bytes: Vec<u8>, multibyte: bool, mut poll: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<Self, E> {
+        let mut chars = 0;
+        let mut flags = ASCII | UTF8 | if multibyte { MULTIBYTE } else { 0 };
+        for (index, part) in crate::lstring::byte_parts(&bytes, multibyte, crate::quit::KERNEL_CHUNK).enumerate() {
+            if index != 0 { poll()?; }
+            let (count, part_flags) = Self::measure_bytes(part, multibyte);
+            chars += count;
+            flags &= part_flags;
+        }
+        Ok(Self::with_metadata(bytes, chars, flags))
+    }
+
+    fn measure_bytes(bytes: &[u8], multibyte: bool) -> (usize, u8) {
+        let kind = if multibyte { MULTIBYTE } else { 0 };
+        if bytes.is_ascii() { return (bytes.len(), kind | ASCII | UTF8); }
+        if !multibyte { return (bytes.len(), kind); }
+        if let Ok(text) = std::str::from_utf8(bytes) {
+            return (text.chars().count(), kind | UTF8);
+        }
+        let mut rest = bytes;
+        let mut count = 0;
+        while !rest.is_empty() {
+            let (_, width) = crate::lstring::decode_char(rest).expect("valid internal string encoding");
+            rest = &rest[width..];
+            count += 1;
+        }
+        (count, kind)
+    }
+
+    fn with_metadata(bytes: Vec<u8>, chars: usize, flags: u8) -> Self {
+        let byte_len = bytes.len();
         Self {
             bytes,
             chars,
-            flags: u8::from(multibyte) * MULTIBYTE | u8::from(is_ascii) * ASCII | u8::from(is_utf8) * UTF8,
+            flags,
             properties: crate::properties::Properties::new(),
             cursors: [
                 std::cell::Cell::new((0, 0)),
@@ -223,6 +234,16 @@ impl LispString {
             flag_scanned: std::cell::Cell::new(0),
         }
     }
+
+    /// Keep the compact Bytes representation for an unpropertized unibyte result.
+    pub(super) fn into_concat_object(self) -> Object {
+        if !self.is_multibyte() && !self.is_ascii() && self.properties.is_empty() {
+            Object::Bytes(self.bytes)
+        } else {
+            string_object(self)
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         assert!(self.is_utf8(), "String slot must contain UTF-8");
         // SAFETY: checked just above, and construction and every byte mutation
@@ -690,17 +711,17 @@ impl Vm {
         // single argument the list's first element is the function.
         // The spread is apply's own walk: polled in the scope it grants at
         // its first chunk, its escape raised by `t2_prepare_apply`.
-        let list = self.stack[start + argc - 1];
+        let list = self.mutator.stack[start + argc - 1];
         let tail = self.list_values_polled::<true>(list)?;
-        let mut values = self.stack[start..start + argc - 1].to_vec();
+        let mut values = self.mutator.stack[start..start + argc - 1].to_vec();
         values.extend(tail);
         let target = values.first().copied().unwrap_or(Value::NIL);
         let values = values.get(1..).unwrap_or_default();
         let need = at + values.len() + crate::threaded::WINDOW;
-        if need > self.stack.len() {
+        if need > self.mutator.stack.len() {
             return Ok(Err(need));
         }
-        self.stack[at..at + values.len()].copy_from_slice(values);
+        self.mutator.stack[at..at + values.len()].copy_from_slice(values);
         Ok(Ok((target, at, values.len())))
     }
     #[inline(never)]
@@ -712,12 +733,12 @@ impl Vm {
         error: &str,
     ) -> Option<(Value, Value)> {
         let x = if argc > 0 {
-            self.stack[start]
+            self.mutator.stack[start]
         } else {
             Value::NIL
         };
         let y = if argc > 1 {
-            self.stack[start + 1]
+            self.mutator.stack[start + 1]
         } else {
             Value::NIL
         };
@@ -729,8 +750,8 @@ impl Vm {
         // A native poll's escape, for a caller that takes only a condition
         // (the engine takes any escape first, `primitive_value`).
         if error == crate::quit::ESCAPED
-            && let Some(crate::threaded::Escape::Signal(condition, data)) = self.propagated_escape {
-            self.propagated_escape = None;
+            && let Some(crate::threaded::Escape::Signal(condition, data)) = self.mutator.propagated_escape {
+            self.mutator.propagated_escape = None;
             return Some((condition, data));
         }
         if matches!(p, Primitive::Format | Primitive::Message) && error == "floating-point overflow" {
@@ -826,7 +847,7 @@ impl Vm {
             let predicate = self.intern("characterp");
             (
                 "wrong-type-argument",
-                vec![predicate, self.stack[start + 2]],
+                vec![predicate, self.mutator.stack[start + 2]],
             )
         } else if (error == "Attempt to store non-byte value into unibyte string" || error.starts_with("Cannot convert character at index")) {
             let message = self.make_lisp_string(error.as_bytes().to_vec(), true);
@@ -876,7 +897,7 @@ impl Vm {
             OverlaysIn => ("integer-or-marker-p", if self.scalar_position(x).is_ok() { y } else { x }),
             BufferSize => ("bufferp", x),
             Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec | Min | Max => {
-                let value = self.stack[start..start + argc]
+                let value = self.mutator.stack[start..start + argc]
                     .iter()
                     .copied()
                     .find(|v| {
@@ -933,11 +954,11 @@ impl Vm {
             return Err("wrong primitive arity".into());
         }
         if p == Vector {
-            return Ok(self.allocate_object(Object::Vector(self.stack[start..start + n].to_vec())));
+            return Ok(self.allocate_object(Object::Vector(self.mutator.stack[start..start + n].to_vec())));
         }
-        let x = self.stack[start];
+        let x = self.mutator.stack[start];
         let y = if n > 1 {
-            self.stack[start + 1]
+            self.mutator.stack[start + 1]
         } else {
             Value::NIL
         };
@@ -1002,7 +1023,7 @@ impl Vm {
                     };
                 }
                 self.object(x)?;
-                let value = self.stack[start + 2];
+                let value = self.mutator.stack[start + 2];
                 let table_slot = self.literal_table_slot(value);
                 let object = self.writable_object(x)?;
                 match self.objects.update_element(object, index, value) {

@@ -37,10 +37,13 @@ enum Class {
 }
 use Class::{Barrier, Cache, Free, Owed, Rescanned, Root, Transient};
 
-/// Every `Vm` field.
+/// Every `Vm` field, a field of its `mutator` or `mutator_rest`
+/// (`mutator.rs`) counting as one of `Vm`'s: moving a field there keeps its class.
 const FIELDS: &[(&str, Class)] = &[
     ("charsets", Root), ("standard_case_tables", Root), ("command_point", Root),
     ("change_prepared", Free),
+    // Which mutator takes the process's OS signals (`Mutator::process_signals`).
+    ("process_signals", Free),
     ("change_slots", Free), ("case_symbols_slot", Free), ("print_number_index", Free), ("undo_list_slot", Free),
     // `Shown`'s Values are compared only while `collections` still matches, and
     // `previous` and the bar's caches go the same way; faces are hidden slots.
@@ -214,7 +217,13 @@ fn body_of(toks: &[Token], keyword: &str, name: &str) -> Vec<String> {
 /// The members a body declares: an identifier at depth 0 at the start of a
 /// member, past its attributes and visibility, up to `,` at depth 0.
 fn members(body: &[String]) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
+    member_declarations(body).into_iter().map(|(name, _)| name).collect()
+}
+
+/// Each member a body declares, in order and as often as declared, with
+/// where its name stands in BODY.
+fn member_declarations(body: &[String]) -> Vec<(String, usize)> {
+    let mut out = Vec::new();
     let (mut depth, mut start, mut i) = (0i32, true, 1);
     while i < body.len() {
         let t = body[i].as_str();
@@ -241,7 +250,7 @@ fn members(body: &[String]) -> BTreeSet<String> {
             continue;
         }
         if start {
-            out.insert(t.to_owned());
+            out.push((t.to_owned(), i));
             start = false;
         }
         match t {
@@ -269,7 +278,18 @@ fn differences(what: &str, named: &[(&str, Class)], found: &BTreeSet<String>) ->
 
 #[test]
 fn every_vm_field_and_object_variant_has_a_class() {
-    let vm = members(&body_of(&tokens(&source("lib.rs")), "struct", "Vm"));
+    let vm_body = body_of(&tokens(&source("lib.rs")), "struct", "Vm");
+    // Each flattened only while Vm declares it once, as the struct alone.
+    let mut vm = members(&vm_body);
+    for (field, ty) in [("mutator", "Mutator"), ("mutator_rest", "MutatorRest")] {
+        let declared: Vec<usize> = member_declarations(&vm_body).into_iter().filter(|(name, _)| name == field).map(|(_, at)| at).collect();
+        assert!(declared.len() == 1 && vm_body.get(declared[0] + 1..declared[0] + 7).is_some_and(|t| t == [":", "mutator", ":", ":", ty, ","]),
+                "Vm declares `{field}: mutator::{ty}` once");
+        let inner = members(&body_of(&tokens(&source("mutator.rs")), "struct", ty));
+        assert!(vm.remove(field) && !inner.is_empty(), "Vm holds a {ty} with fields");
+        assert!(vm.is_disjoint(&inner), "a name both on Vm and its {ty}");
+        vm.extend(inner);
+    }
     let object = members(&body_of(&tokens(&source("data.rs")), "enum", "Object"));
     assert!(vm.len() > 100 && object.len() > 20, "the parse found too little: {} fields, {} variants", vm.len(), object.len());
     let mut problems = differences("Vm field", FIELDS, &vm);

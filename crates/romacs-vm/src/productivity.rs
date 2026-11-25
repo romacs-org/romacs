@@ -19,7 +19,7 @@ impl Vm {
         if n == 0 {
             return Err("wrong primitive arity".into());
         }
-        let args = self.stack[start..start + n]
+        let args = self.mutator.stack[start..start + n]
             .iter()
             .map(|v| {
                 self.str_view(*v)
@@ -30,6 +30,7 @@ impl Vm {
             })
             .collect::<Result<Vec<_>>>()?;
         let output = crate::host::command(&args[0])
+            // HOST(acquisition): runs a child and reads its output (rule 1: acquisition first)
             .and_then(|mut command| command.args(&args[1..]).stdin(std::process::Stdio::null()).output())
             .map_err(|e| e.to_string())?;
         if !output.status.success() {
@@ -64,10 +65,10 @@ impl Vm {
         // Copied out: `format_values' takes the whole VM.
         let mut short = [Value::NIL; 8];
         if n <= short.len() {
-            short[..n].copy_from_slice(&self.stack[start..start + n]);
+            short[..n].copy_from_slice(&self.mutator.stack[start..start + n]);
             return self.format_values(&short[..n], None);
         }
-        let arguments = self.stack[start..start + n].to_vec();
+        let arguments = self.mutator.stack[start..start + n].to_vec();
         self.format_values(&arguments, None)
     }
 

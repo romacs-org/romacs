@@ -351,9 +351,9 @@ mod tests {
 }
 
 defsubr! { name = "sxhash", gnu = "fns.c:4166", effect = Pure,
-fn sxhash(cx, value: Value) { Ok(cx.sxhash(value)) }}
+fn sxhash(cx, value: Value) { cx.sxhash_quittable(value) }}
 defsubr! { name = "sxhash-equal", gnu = "fns.c:4166", effect = Pure,
-fn sxhash_equal(cx, value: Value) { Ok(cx.sxhash(value)) }}
+fn sxhash_equal(cx, value: Value) { cx.sxhash_quittable(value) }}
 
 defsubr! { name = "sxhash-eq", gnu = "fns.c:5617", effect = Reads,
 fn sxhash_eq(cx, value: Value) { cx.sxhash_eq(value) }}
@@ -361,14 +361,14 @@ fn sxhash_eq(cx, value: Value) { cx.sxhash_eq(value) }}
 // identity.
 defsubr! { name = "sxhash-eql", gnu = "fns.c:5627", effect = Reads,
 fn sxhash_eql(cx, value: Value) {
-    if matches!(cx.kind(value), Kind::Float | Kind::Bignum) { Ok(cx.sxhash(value)) } else { cx.sxhash_eq(value) }
+    if matches!(cx.kind(value), Kind::Float | Kind::Bignum) { cx.sxhash_quittable(value) } else { cx.sxhash_eq(value) }
 }}
 // The contract is that `equal-including-properties' objects hash alike.
 // GNU also mixes each string interval's plist into the hash, which breaks
 // that contract for equal plists in another order or split; the `equal'
 // hash keeps it, and hash values are never comparable across Emacsen.
 defsubr! { name = "sxhash-equal-including-properties", gnu = "fns.c:5649", effect = Pure,
-fn sxhash_equal_including_properties(cx, value: Value) { Ok(cx.sxhash(value)) }}
+fn sxhash_equal_including_properties(cx, value: Value) { cx.sxhash_quittable(value) }}
 defsubr! { name = "fillarray", gnu = "fns.c:3308", effect = MutatesArgs,
 fn fillarray(cx, array: Value, item: Value) {
     if cx.kind(array) == Kind::Vector {

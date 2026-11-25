@@ -467,7 +467,7 @@ impl Vm {
     /// deactivate-mark set by a change whose hooks were not inhibited.
     pub(crate) fn mark_deactivated(&mut self) -> Faulty<()> {
         let deactivate = self.change_slots().deactivate;
-        if self.variable_trapped(self.indirect_variable(deactivate)) || !self.deferred_writes.is_empty() {
+        if self.variable_trapped(self.indirect_variable(deactivate)) || !self.mutator.deferred_writes.is_empty() {
             return self.write_from_native(crate::watchers::NativeWrite::set(deactivate, Value::TRUE));
         }
         self.store_deactivated(deactivate)
@@ -490,9 +490,9 @@ impl Vm {
     /// The bracket made its read-only checks, which GNU does not repeat.
     fn edit_kernel(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> Result<Value>) -> Faulty<Value> {
         self.with_kernel_stack(args, |vm, n| {
-            vm.change_prepared = true;
+            vm.mutator.change_prepared = true;
             let result = run(vm, n);
-            vm.change_prepared = false;
+            vm.mutator.change_prepared = false;
             result
         })
         .map_err(Fault::Error)
@@ -699,9 +699,9 @@ mod kernel_tests {
         let mut vm = Vm::new();
         vm.set_gc_stress(0);
         let held = vm.alloc_cons(Value::NIL, Value::NIL);
-        vm.stack.test_vec().push(held);
+        vm.mutator.stack.test_vec().push(held);
         assert!(vm.edit_kernel(&[], |vm, _| { vm.collect(&mut []); Ok(Value::NIL) }).is_ok());
-        assert_eq!(vm.stack.test_vec().pop(), Some(held));
+        assert_eq!(vm.mutator.stack.test_vec().pop(), Some(held));
         assert!(!vm.conses.is_free(held.index(3).unwrap()), "the engine's register lost what it held");
     }
 }

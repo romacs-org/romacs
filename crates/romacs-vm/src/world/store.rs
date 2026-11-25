@@ -349,6 +349,7 @@ fn private_store(store: &Path) -> std::io::Result<()> {
     let now = host::open_store_dir(store, false)?;
     let identity = |fd: &std::os::fd::OwnedFd| -> std::io::Result<(u64, u64)> {
         use std::os::unix::fs::MetadataExt;
+        // HOST(acquisition): duplicates a store descriptor for its stat, closed at once
         host::file_metadata(&std::fs::File::from(fd.try_clone()?)).map(|m| (m.dev(), m.ino()))
     };
     if identity(&now)? != identity(&dir)? {
@@ -384,6 +385,7 @@ fn store_path(store: &Path) -> std::io::Result<PathBuf> {
 /// never through a symlink.
 fn write_marker(dir: &std::os::fd::OwnedFd) -> std::io::Result<()> {
     use std::io::Write;
+    // HOST(escape): the marker's bytes; the new file is open_store_file_at's acquisition
     host::open_store_file_at(dir.as_fd(), MARKER, host::StoreOpen::New)?.write_all(MARKER_TEXT.as_bytes())
 }
 
@@ -413,6 +415,7 @@ fn marker_error(dir: &std::os::fd::OwnedFd) -> Option<String> {
 fn owned_store(dir: &std::os::fd::OwnedFd, store: &Path, home: Option<&Path>) -> std::io::Result<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let fail = |why: &str| Err(std::io::Error::other(format!("world store {}: {why}", store.display())));
+    // HOST(acquisition): duplicates a store descriptor for its stat, closed at once
     let meta = host::file_metadata(&std::fs::File::from(dir.try_clone()?))?;
     if !meta.file_type().is_dir() {
         return fail("not a directory");
@@ -799,17 +802,20 @@ impl World {
                 // The family's other worlds are of this executable before it
                 // was rebuilt, which nothing restores: gone before the build.
                 if let Err(error) = world.prune_family_to_current() {
+                    // HOST(escape): stdout and stderr are sends another process reads
                     eprintln!("test world: prune failed: {error}");
                 }
                 let outcome = world.begin_build().map_err(|e| e.to_string())
                     .and_then(|()| world.build(|| build().map(|(vm, carry)| (vm, carry, Json::Null))));
                 if let Err(error) = &outcome {
+                    // HOST(escape): stdout and stderr are sends another process reads
                     eprintln!("test world: {error}");
                 }
                 host::exit_at_once(i32::from(outcome.is_err()))
             }
             Launch::Chain { reason } => {
                 // Said, so a test that needs its world can tell why it has none.
+                // HOST(escape): stdout and stderr are sends another process reads
                 eprintln!("test world: booting from source: {reason}");
                 None
             }
@@ -903,6 +909,7 @@ impl World {
             // not record itself.
             std::thread::spawn(move || {
                 let mut child = child;
+                // HOST(block): waits for the child to end
                 let status = child.wait();
                 world.note_builder_end(status.map(|s| s.to_string()).map_err(|e| e.to_string()), attempts, published);
             });
@@ -979,7 +986,9 @@ impl World {
         // The builder holds the lock this process took, on its descriptor 0;
         // this one's copy closes once the builder runs.
         command.args(args).env_clear().envs(env).current_dir(pinned.join("cwd"))
+            // HOST(acquisition): duplicates the log descriptor for the child's output
             .stdin(lock).stdout(log.try_clone()?).stderr(log).process_group(0);
+        // HOST(acquisition): starts the world builder's child
         command.spawn()
     }
 
@@ -1019,6 +1028,7 @@ impl World {
     fn mark_use(&self) {
         let Ok(_store) = self.store_lock(host::Flock::Shared) else { return };
         if let Ok(file) = host::open_store_file(self.file(".use"), host::StoreOpen::Write { create: true, truncate: false }) {
+            // HOST(escape): the usage marker's time, which pruning reads: metadata others see
             let _ = file.set_modified(host::clock());
             if host::lock(&file, host::Flock::TryShared).unwrap_or(false) {
                 std::mem::forget(file);
@@ -1081,6 +1091,7 @@ impl World {
     fn publish(&self, suffix: &str, bytes: &[u8]) -> std::io::Result<()> {
         use std::io::Write;
         let (temporary, mut file) = self.temporary(suffix)?;
+        // HOST(escape): writes a world store file
         file.write_all(bytes)?;
         read_only(&temporary)?;
         host::rename(&temporary, self.file(suffix))
@@ -1177,6 +1188,7 @@ impl World {
         vm.collect_compacting();
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
         let placed = image::capture(vm, carry, &file, self.key).and_then(|len| {
+            // HOST(escape): forces a world store file's writes to disk: no inverse
             file.sync_all().map_err(|e| e.to_string())?;
             read_only(&temporary).map_err(|e| e.to_string())?;
             host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string()).map(|()| len)
@@ -1532,12 +1544,15 @@ fn now_seconds() -> u64 {
 fn wait_bounded(mut child: std::process::Child, timeout: std::time::Duration) -> Result<String, String> {
     let deadline = host::monotonic() + timeout;
     loop {
+        // HOST(take): reaps a finished child without blocking: its exit is consumed
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(status.to_string()),
             Ok(Some(status)) => return Err(format!("the builder ended: {status}")),
             Ok(None) if host::monotonic() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
             Ok(None) => {
+                // HOST(escape): kills the child: a signal another process receives
                 let _ = child.kill();
+                // HOST(block): waits for the child to end
                 let _ = child.wait();
                 return Err(format!("the builder ran past {} s and was killed", timeout.as_secs()));
             }

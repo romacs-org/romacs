@@ -2,4 +2,6 @@
 
 mod font_catalog_test;
 
+mod pane_picture_test;
+
 mod witnessed_query_test;

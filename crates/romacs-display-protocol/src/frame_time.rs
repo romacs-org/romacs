@@ -42,7 +42,7 @@ use std::time::Duration;
 /// [`FrameSample`].
 #[must_use]
 pub fn observe_platform_now() -> EventTime {
-    // HOST(Instant::now): romacs-vm depends on this crate, so it cannot call host.rs; the display
+    // HOST(Instant::now, pure): romacs-vm depends on this crate, so it cannot call host.rs; the display
     // event clock, not reached by the batch VM
     EventTime(std::time::Instant::now())
 }
