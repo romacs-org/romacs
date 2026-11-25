@@ -75,10 +75,9 @@
   ;; end at its instance's usage limit, the move to another account aside.
   ;; Where it could go on from there is read when asked, never kept
   ;; (`romacs-agent-summary-alternatives').  Whether its last end still
-  ;; waits to be delivered to its parent (`romacs-agent-tools--wanted-p'),
-  ;; and the session a handoff carries it on in (its :handed-to).
+  ;; waits to be delivered to its parent (`romacs-agent-tools--wanted-p').
   plan-offer-waits turns reply cancelled role worktree branch conversation
-  requested-model wake-rule limited undelivered handed-to)
+  requested-model wake-rule limited undelivered)
 
 (defun romacs-agent-summary--plain (value)
   "VALUE with every string in it, at any depth, without text properties:
@@ -262,8 +261,7 @@ its user: as data, its reply shared, not copied
           (romacs-agent-summary-wake-rule summary) (romacs-agent-summary--plain (romacs-agent-tools--wake-rule session))
           (romacs-agent-summary-limited summary)
           (romacs-agent-summary--plain (romacs-agent--without (romacs-agent-limited session) '(:moving :moving-since)))
-          (romacs-agent-summary-reply summary) (romacs-agent-summary--shared (romacs-agent-reply session))
-          (romacs-agent-summary-handed-to summary) (romacs-agent-summary--plain (plist-get options :handed-to)))
+          (romacs-agent-summary-reply summary) (romacs-agent-summary--shared (romacs-agent-reply session)))
     ;; Its cancellation read first, above.
     ;; Of the ends it keeps for its parent alone: a seq a note advanced is
     ;; none, and one with no ends kept reads no file.

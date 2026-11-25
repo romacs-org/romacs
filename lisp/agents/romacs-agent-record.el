@@ -132,10 +132,12 @@ STEER is non-nil when the journal already records a turn under way."
   (pcase (gethash "type" note)
     ;; The instance it was launched on and the credentials stamp its launch
     ;; found there (`romacs-agent--launch'), when said.
-    ("run" (if (eq (gethash "stamp" note 'absent) 'absent) (list :type 'run)
-             (list :type 'run :stamp (romacs-agent--value (gethash "stamp" note))
-                   :credentials (romacs-agent--value (gethash "credentials" note))
-                   :provider (romacs-agent--value (gethash "provider" note)))))
+    ;; The harness it runs, when said: its records are that harness's.
+    ("run" (append (if (eq (gethash "stamp" note 'absent) 'absent) (list :type 'run)
+                     (list :type 'run :stamp (romacs-agent--value (gethash "stamp" note))
+                           :credentials (romacs-agent--value (gethash "credentials" note))
+                           :provider (romacs-agent--value (gethash "provider" note))))
+                   (and (stringp (gethash "harness" note)) (list :harness (intern (gethash "harness" note))))))
     ("answer" (romacs-agent--record-answer note))
     ("selection" (list :type 'selection
                        :from (romacs-agent--selection-of (gethash "from" note))
@@ -146,7 +148,8 @@ STEER is non-nil when the journal already records a turn under way."
                       :messages (romacs-agent--messages-of (gethash "messages" note))))
     ("renew" (list :type 'renewed :why (romacs-agent--value (gethash "why" note))
                    :from (romacs-agent--value (gethash "from" note))
-                   :to (romacs-agent--value (gethash "to" note)) :brief (gethash "brief" note)))
+                   :to (romacs-agent--value (gethash "to" note)) :brief (gethash "brief" note)
+                   :provider (romacs-agent--value (gethash "provider" note))))
     ("attachments" (list :type 'attachments :id (gethash "id" note)
                          :attachments (romacs-agent--attachments-of (gethash "items" note))
                          :compare (append (romacs-agent--value (gethash "compare" note)) nil)))

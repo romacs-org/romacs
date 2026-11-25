@@ -3,8 +3,8 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; A session's thread goes on under another instance (Claude Code to Codex,
-;; or another account) as a new session started on a brief: the thread's
+;; A brief of a session's thread, for the new conversation a renewal or a
+;; switch to another harness goes on in (romacs-agent-renew): the thread's
 ;; history as context, chosen to a budget, then what to do next.  As T3
 ;; Code's context handoff does, the first request, the last request and the
 ;; last reply are always kept, the rest newest first while the budget
@@ -151,7 +151,6 @@ streamed (an imported transcript has no turn ends, only messages)."
       (close-turn))
     (nreverse items)))
 
-(declare-function romacs-agent-start "romacs-agent")
 (declare-function romacs-agent-history-events "romacs-agent-history")
 
 (defun romacs-agent-handoff-thread (session journal-events)
@@ -166,53 +165,6 @@ JOURNAL-EVENTS, what its journal holds (`romacs-agent-events')."
                              (list first (list :type 'gap :text "earlier turns of this thread left out"))))
                       (car read))))
           journal-events))
-
-(defun romacs-agent-handoff (session events provider model next &optional options)
-  "Go on with SESSION's thread, EVENTS (`romacs-agent-handoff-thread'),
-under instance PROVIDER on MODEL (nil for its own), in a new session on
-SESSION's project, to do NEXT: started on a brief of the thread
-\(`romacs-agent-handoff-brief'), with start OPTIONS besides; a task's
-parent, wake rule, role and worktree carry over.  A task is one task
-still: SESSION's harness stops, its chat kept as history, and its id
-names the new session to every task action (its :handed-to).  Return
-the new session."
-  (let* ((options-before (romacs-agent-options session))
-         (from (mapconcat #'identity (delq nil (list (romacs-agent-provider session)
-                                                     (or (romacs-agent-model session)
-                                                         (plist-get (romacs-agent-options session) :model))))
-                          " · "))
-         (new (romacs-agent-start (romacs-agent-cwd session)
-                                  (romacs-agent-handoff-brief (romacs-agent-handoff-items events) from next)
-                                  (format "%s (→ %s)" (romacs-agent-title session) provider)
-                                  provider (append (and model (list :model model)) options
-                                                   ;; A task goes on as the same parent's, by its rule.
-                                                   (cl-loop for key in '(:parent :wake :role :worktree :branch)
-                                                            when (plist-get (romacs-agent-options session) key)
-                                                            append (list key (plist-get (romacs-agent-options session) key)))))))
-    (when (and (romacs-agent-p new) (plist-get (romacs-agent-options session) :parent))
-      ;; The tasks it delegated are the new session's: their wakes, their
-      ;; questions, cancelling and listing all reach it by their parent.
-      (romacs-agent-handoff--adopt session new)
-      ;; The old one keeps its chat as history, no task of its parent's
-      ;; any more; its id still names the new one (:handed-to).
-      (romacs-agent--set-options session (plist-put (romacs-agent--without (romacs-agent-options session) '(:parent))
-                                                    :handed-to (romacs-agent-id new)))
-      (romacs-agent--unindex-parent session (plist-get options-before :parent))
-      (romacs-agent-stop session))
-    new))
-
-(declare-function romacs-agent-store-unloaded-rows "romacs-agent-store" (&optional parent))
-
-(defun romacs-agent-handoff--adopt (old new)
-  "Make the tasks OLD delegated NEW's: loaded ones and those left as rows,
-their parent and its index moved."
-  (let ((old-id (romacs-agent-id old)) (new-id (romacs-agent-id new)))
-    (dolist (child (append (romacs-agent-children old)
-                           (delq nil (mapcar (lambda (row) (romacs-agent-load-session (car row)))
-                                             (romacs-agent-store-unloaded-rows old-id)))))
-      (romacs-agent--unindex-parent child old-id)
-      (romacs-agent--set-options child (plist-put (copy-sequence (romacs-agent-options child)) :parent new-id))
-      (romacs-agent--index child))))
 
 (provide 'romacs-agent-handoff)
 ;;; romacs-agent-handoff.el ends here

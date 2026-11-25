@@ -187,8 +187,6 @@ its summary (`romacs-agent-log--summary').")
   "Deferred composer motions, newest first.
 Each entry holds an undo list cell, the old composer start and the delta.")
 (defvar-local romacs-agent-log--seq 0 "The seq of the last record drawn.")
-(defvar-local romacs-agent-log--active-start nil
-  "Start of the current session's transcript, after earlier handoffs.")
 (defvar-local romacs-agent-log--from nil
   "Where the drawn records begin (a place, as `romacs-agent--journal-tail'
 gives it), or nil when they begin at the session's start.")
@@ -1446,8 +1444,10 @@ on RET."
                (romacs-agent-log--note event text)))
     ('compacted (romacs-agent-log--compacted event))
     ('exit (romacs-agent-log--exit session event))
-    ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"
-                                                    (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))))
+    ('renewed (romacs-agent-log--note event (if-let* ((provider (plist-get event :provider)))
+                                                (format "switched to %s: a new conversation, briefed on this one" provider)
+                                              (format "renewed: a new conversation%s"
+                                                      (if-let* ((why (plist-get event :why))) (format " (%s)" why) "")))))
     ('forked (romacs-agent-log--note event (format "forked from %s" (or (plist-get event :title) (plist-get event :from)))))
     ('rolled-back (romacs-agent-log-turns-rolled-back event))
     ('replied (romacs-agent-log--note event (format "replied to %s" (plist-get event :message))))
@@ -1710,7 +1710,7 @@ at the transcript's end: its end, from a prompt on
 \(`romacs-agent-history-events').  Return the events drawn."
   (require 'romacs-agent-history)
   (let* ((path (plist-get imported :path))
-         (read (romacs-agent-history-events (romacs-agent-harness session) imported)))
+         (read (romacs-agent-history-events (or (plist-get imported :harness) (romacs-agent-harness session)) imported)))
     (if (null read)
         (romacs-agent-log--line nil 'error (format "%s %s is gone" (romacs-agent-glyph 'denied) (abbreviate-file-name path)) 'romacs-agent-log-denied)
       (when (cdr read)
@@ -1726,7 +1726,7 @@ at the transcript's end: its end, from a prompt on
     (when from
       (romacs-agent-log--writing
         (save-excursion
-          (goto-char (or romacs-agent-log--active-start (point-min)))
+          (goto-char (point-min))
           (insert (romacs-agent-log--earlier-line from)))))
     ;; From its start: an imported session's harness transcript first.
     (when-let* (((null from)) (imported (romacs-agent-imported session)))
@@ -1780,7 +1780,7 @@ FROM, nil at the session's start."
                 (dolist (id (mapcar #'romacs-agent-log-ask-id romacs-agent-log--asks)) (romacs-agent-log--settle-ask id))
                 (buffer-substring (point-min) romacs-agent-log--end))))
     (save-restriction
-      (narrow-to-region (or romacs-agent-log--active-start (point-min)) (point-max))
+      (narrow-to-region (point-min) (point-max))
       (romacs-agent-log--writing
         (save-excursion
           (goto-char (point-min))
@@ -1848,51 +1848,11 @@ drew forgotten, its markers let go, its composer kept."
     (set-marker (romacs-agent-log-ask-end ask) nil))
   (dolist (owed romacs-agent-log--ended-asks) (set-marker (romacs-agent-log-owed-at owed) nil))
   (romacs-agent-log--writing
-    (delete-region (or romacs-agent-log--active-start (point-min)) romacs-agent-log--end))
+    (delete-region (point-min) romacs-agent-log--end))
   (setq romacs-agent-log--current nil romacs-agent-log--early nil romacs-agent-log--asks nil
         romacs-agent-log--attributed nil romacs-agent-log--ended-asks nil
         romacs-agent-log--prompts nil romacs-agent-log--seq 0
         romacs-agent-log--from nil romacs-agent-log--root-kind nil romacs-agent-log--offered nil))
-
-(defun romacs-agent-log--archive-handoff (target)
-  "Set aside the current session's visible transcript before TARGET."
-  (romacs-agent-log--close-stream)
-  (let* ((start (save-excursion
-                  (goto-char (or romacs-agent-log--active-start (point-min)))
-                  (when (get-text-property (point) 'romacs-agent-log-earlier) (forward-line 1))
-                  (point)))
-         (history (buffer-substring-no-properties start romacs-agent-log--end)))
-    (romacs-agent-log--clear)
-    (romacs-agent-log--writing
-      (save-excursion
-        (goto-char romacs-agent-log--end)
-        (insert (romacs-agent-log--sealed history))))
-    (romacs-agent-log--note nil (format "Continued with %s" (romacs-agent-provider target)))
-    (setq romacs-agent-log--active-start (copy-marker romacs-agent-log--end))))
-
-(defun romacs-agent-log-continue (target)
-  "Continue this buffer with TARGET, preserving the draft and earlier text.
-Earlier turns' commands belong to their original session, available from
-the board.  TARGET owns the composer and all subsequent live events."
-  (let* ((source romacs-agent-log--session)
-         (chats (romacs-agent-log-source-chats romacs-agent-log--source))
-         (buffer (current-buffer)))
-    (unless (eq (gethash (romacs-agent-id source) chats) buffer)
-      (error "The source no longer owns this chat"))
-    (save-excursion
-      (when romacs-agent-log--recalled
-        (romacs-agent-log--recall nil))
-      (romacs-agent-log--archive-handoff target)
-      (remhash (romacs-agent-id source) chats)
-      (puthash (romacs-agent-id target) buffer chats)
-      (setq romacs-agent-log--filled nil
-            romacs-agent-log--recalled nil
-            romacs-agent-log--draft-kept nil
-            romacs-agent-log-turns--rollbacks nil)
-      (romacs-agent-log--set-session target)
-      (romacs-agent-log--ensure-filled)
-      (when (get-buffer-window buffer t)
-        (romacs-agent-log-source-seen romacs-agent-log--source target)))))
 
 (defun romacs-agent-log--show-end (window)
   "WINDOW at the chat's end, its composer, on its bottom line."

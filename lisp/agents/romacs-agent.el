@@ -402,18 +402,6 @@ offers no plan to proceed with."
   (romacs-agent--manifest-put session "options" (romacs-agent--options-object options))
   (romacs-agent--changed session))
 
-(defun romacs-agent-successor (session)
-  "SESSION, or the session a handoff to another harness carries it on in
-\(its :handed-to, `romacs-agent-handoff'), all the way: the one a task's
-actions, messages and wakes reach."
-  (let ((seen nil))
-    (while-let ((next (and session (not (memq session seen))
-                           (plist-get (romacs-agent-options session) :handed-to)))
-                (to (romacs-agent-get next)))
-      (push session seen)
-      (setq session to))
-    session))
-
 (defun romacs-agent--without (options keys)
   "OPTIONS, a plist, without KEYS."
   (cl-loop for (key value) on options by #'cddr unless (memq key keys) append (list key value)))
@@ -2220,7 +2208,9 @@ instance and credentials stamp (`romacs-agent--run-note'), else nothing."
     (list :credentials-stamp (cons credentials time) :credentials-provider (plist-get event :provider))))
 
 (defun romacs-agent--apply-run-event (session event)
-  "Start SESSION's run from EVENT on the currently defined driver."
+  "Start SESSION's run from EVENT on the currently defined driver: its
+harness's, the one EVENT names when it does (`romacs-agent-switch-harness')."
+  (when-let* ((harness (plist-get event :harness))) (setf (romacs-agent-harness session) harness))
   (setf (romacs-agent-driver session) nil
         (romacs-agent-renewing session) nil
         (romacs-agent-driver-state session)
@@ -2724,6 +2714,14 @@ has startup steps."
       (setf (romacs-agent-startup-pending session) (romacs-agent--step-id step))
       (romacs-agent--line session step))))
 
+(defun romacs-agent--start-harness (session)
+  "The harness SESSION's records began in: its manifest's `startHarness'
+once it switched harness (`romacs-agent-switch-harness'), else its own."
+  (let ((manifest (and (romacs-agent-dir session)
+                       (romacs-agent--read-json (expand-file-name "manifest.json" (romacs-agent-dir session))))))
+    (or (and manifest (stringp (gethash "startHarness" manifest)) (intern (gethash "startHarness" manifest)))
+        (romacs-agent-harness session))))
+
 (defun romacs-agent--scratch (session)
   "A copy of SESSION to replay its journal into: it parses as SESSION does,
 and changes nothing of SESSION's, writes nothing to its harness, and sends
@@ -2745,7 +2743,10 @@ nothing that waits."
           (romacs-agent-subagents scratch) nil
           ;; The live session's: a confirmation replayed here is not this copy's.
           (romacs-agent-pending-selection scratch) nil (romacs-agent-models-request scratch) nil
-          (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
+          (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil
+          ;; Replayed from the first record: under the harness that began it.
+          (romacs-agent-harness scratch) (romacs-agent--start-harness session)
+          (romacs-agent-driver scratch) nil)
     (puthash scratch t romacs-agent--copies)
     scratch))
 
@@ -5239,7 +5240,7 @@ USER: its user wrote it, theirs to change while it waits."
 (defconst romacs-agent--option-keys
   '((:model . "model") (:effort . "effort") (:role . "role") (:parent . "parent") (:request . "clientRequestId")
     (:wake . "wake") (:worktree . "worktree") (:branch . "branch") (:plan . "plan") (:plan-from . "planFrom") (:fork . "forkedFrom")
-    (:tracked . "tracked") (:handed-to . "handedTo"))
+    (:tracked . "tracked"))
   "A session's start options and their manifest names.")
 
 (defun romacs-agent--options-object (options)
@@ -5332,6 +5333,7 @@ run is of that login (`romacs-agent--attempt-stamp')."
   (let ((stamp (romacs-agent--home-stamp (romacs-agent-harness session) (romacs-agent-config-dir session))))
     (json-serialize
      (romacs-mcp--object "type" "run" "provider" (romacs-agent-provider session)
+                         "harness" (symbol-name (romacs-agent-harness session))
                          ;; Its two parts: the file, and its time to the nanosecond.
                          "credentials" (if (romacs-agent--valid-stamp-p stamp) (car stamp) :null)
                          "stamp" (if (romacs-agent--valid-stamp-p stamp) (romacs-agent--time-text (cdr stamp)) :null)))))
@@ -6474,8 +6476,9 @@ neither callback runs after it."
 ;; keeps what is not folded from records, and this process what is its own.
 
 (defconst romacs-agent--unkept
-  '(;; Its manifest's, read from it.
-    id harness provider config-dir cwd dir host-socket unit title title-auto options
+  '(;; Its manifest's, read from it.  Its harness is kept: the one its
+    ;; records ran under as of the kept seq (`romacs-agent-switch-harness').
+    id provider config-dir cwd dir host-socket unit title title-auto options
     seen-seq settled-seq imported cancelled pending-selection journal-start
     ;; This process's own: its connection, its views, what it sends.
     connection buffer driver queue queue-tail queue-length dispatch caught-up
@@ -6970,7 +6973,9 @@ not within the journal's last LIMIT bytes (`romacs-agent--journal-after')."
       (let ((slots (romacs-agent--slot-names 'romacs-agent)))
         (pcase-dolist (`(,slot . ,value) (plist-get kept :fields))
           (when (memq slot slots)
-            (aset session (cl-struct-slot-offset 'romacs-agent slot) value))))
+            (aset session (cl-struct-slot-offset 'romacs-agent slot) value)))
+        ;; Its driver is its kept harness's.
+        (setf (romacs-agent-driver session) nil))
       (when-let* ((forked (plist-get kept :forked)))
         (setf (romacs-agent-options session) (plist-put (copy-sequence (romacs-agent-options session)) :forked forked)))
       (puthash session (plist-get kept :seq) romacs-agent--kept)
@@ -6984,7 +6989,10 @@ not within the journal's last LIMIT bytes (`romacs-agent--journal-after')."
   "The session MANIFEST, DIR's, records, as nothing of its journal is
 folded yet."
   (romacs-agent--make
-   :id (gethash "id" manifest) :harness (intern (gethash "harness" manifest))
+   :id (gethash "id" manifest)
+   ;; Its records from the first are read under the harness they began
+   ;; in; each switch they hold moves it on (`romacs-agent-switch-harness').
+   :harness (intern (or (gethash "startHarness" manifest) (gethash "harness" manifest)))
    ;; Sessions recorded before instances ran the harness's default.
    :provider (or (gethash "provider" manifest) (gethash "harness" manifest))
    :config-dir (gethash "configDir" manifest)
@@ -6993,7 +7001,8 @@ folded yet."
                         (append (list :state 'armed) switch))
    :imported (let ((imported (gethash "imported" manifest)))
                (and (hash-table-p imported)
-                    (list :path (gethash "path" imported) :size (gethash "size" imported))))
+                    (list :path (gethash "path" imported) :size (gethash "size" imported)
+                          :harness (and (stringp (gethash "harness" imported)) (intern (gethash "harness" imported))))))
    :harness-session (gethash "harnessSession" manifest)
    :cancelled (file-exists-p (expand-file-name "cancelled" dir))
    ;; Should attaching fail, the journal is read from its start
@@ -7041,16 +7050,12 @@ once, and loads on once its kept state is written."
            (signal (car err) (cdr err))))
         session))))
 
-(defun romacs-agent--unindex-parent (session parent)
-  "Take SESSION out of PARENT's children in the index."
-  (when parent
-    (puthash parent (delq session (gethash parent romacs-agent--children)) romacs-agent--children)))
-
 (defun romacs-agent--unpublish (session)
   "Forget SESSION, whose load failed: out of the registry and its indexes."
   (let ((id (romacs-agent-id session)) (options (romacs-agent-options session)))
     (when (eq (gethash id romacs-agent--sessions) session) (remhash id romacs-agent--sessions))
-    (romacs-agent--unindex-parent session (plist-get options :parent))
+    (when-let* ((parent (plist-get options :parent)))
+      (puthash parent (delq session (gethash parent romacs-agent--children)) romacs-agent--children))
     (when-let* ((request (plist-get options :request))
                 (key (cons (plist-get options :parent) request))
                 ((equal (gethash key romacs-agent--requests) id)))
@@ -7216,8 +7221,9 @@ run."
                                        ;; All a fold loads: a worker that loads more is
                                        ;; ended after its job, which waits for its exit.
                                        :name "romacs-agent fold" :require '(romacs-agent cl-extra help-mode)
-                                       :bindings (romacs-agent--fold-bindings
-                                                  (mapcar (lambda (entry) (romacs-agent-harness (car entry))) batch)))
+                                       ;; Every driver: a session's records may be of
+                                       ;; more than one harness (`romacs-agent-switch-harness').
+                                       :bindings (romacs-agent--fold-bindings (mapcar #'car romacs-agent--drivers)))
                       (error (list 'error err)))))
         (if (eq (car-safe future) 'error)
             (romacs-agent--folded batch future)

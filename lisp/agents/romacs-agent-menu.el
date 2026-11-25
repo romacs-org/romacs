@@ -242,8 +242,8 @@ with a prefix argument, asked for."
 (cl-defun romacs-agent-chat-handoff (provider model next &optional (effort nil effort-chosen))
   "Continue this thread on PROVIDER and MODEL at EFFORT.
 Within a harness, change this session after its running turn ends.
-Across harnesses, continue this chat buffer under a new session on a brief
-of the thread and task NEXT."
+Across harnesses, go on in this session and chat, in a new conversation
+of that harness briefed on this one, told NEXT."
   (interactive (romacs-agent-menu--handoff-arguments) romacs-agent-log-mode)
   (let ((session (romacs-agent-menu--session)))
     (cond
@@ -276,31 +276,17 @@ an instance of its harness."
   (eq (if (symbolp provider) provider (plist-get (romacs-agent--configured provider) :harness))
       (romacs-agent-harness session)))
 
-(defun romacs-agent-menu--handoff-position (session)
-  "SESSION's journal and turn position while its handoff brief is read."
-  (list (romacs-agent--journal-end session) (romacs-agent-seq session)
-        (romacs-agent-state session) (romacs-agent-input-seq session)
-        (romacs-agent-completed-seq session)))
-
 (defun romacs-agent-menu--hand-off (session provider model next effort)
-  "Start a session under PROVIDER on MODEL at EFFORT, briefed on SESSION.
-Tell it to do NEXT."
+  "Go on with SESSION under PROVIDER, another harness, on MODEL at EFFORT,
+in this chat: a new conversation briefed on this one, told NEXT
+\(`romacs-agent-switch-harness')."
   (when romacs-agent-log-queue--editing
     (user-error "Finish editing the queued message before switching harnesses"))
-  (let ((source (current-buffer))
-        (position (romacs-agent-menu--handoff-position session)))
-    (message "Gathering %s's thread..." (romacs-agent-title session))
-    (romacs-agent-events-async
-     session
-     (lambda (events)
-       (when (buffer-live-p source)
-         (with-current-buffer source
-           (when (and (eq romacs-agent-log--session session) (not romacs-agent-log-queue--editing))
-             (let ((thread (romacs-agent-handoff-thread session events)))
-               (if (equal position (romacs-agent-menu--handoff-position session))
-                   (romacs-agent-log-continue
-                    (romacs-agent-handoff session thread provider model next (and effort (list :effort effort))))
-                 (message "Handoff cancelled because the conversation changed. Switch harnesses again to include it."))))))))))
+  (romacs-agent-switch-harness session provider model effort next
+                               (lambda (outcome)
+                                 (when-let* ((message (plist-get outcome :error)))
+                                   (message "Switching %s failed: %s" (romacs-agent-title session) message))))
+  (message "Switching %s to %s..." (romacs-agent-title session) provider))
 
 (defun romacs-agent-chat-plan ()
   "Put this session in its harness's plan mode, or take it out: what plan

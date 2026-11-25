@@ -438,21 +438,10 @@ fails for good is the answer's error, never what its row alone says."
                (t (user-error "Task %s's records could not be read by a worker; its status is unknown until a load reads them"
                               id))))))))
 
-(defun romacs-agent-tools--successor-id (id)
-  "ID, or the id of the session a handoff carries it on in, by their
-summaries (`romacs-agent-successor' for the sessions themselves)."
-  (let ((seen nil))
-    (while-let ((summary (and (not (member id seen)) (romacs-agent-summary id)))
-                (next (romacs-agent-summary-handed-to summary)))
-      (push id seen)
-      (setq id next))
-    id))
-
 (defun romacs-agent-tools--known (id)
   "Return the task with exact ID or a unique visible prefix matching ID
-\(`romacs-agent-tools--resolve'), to act on: a task handed off to another
-harness, the session it goes on in (`romacs-agent-handoff')."
-  (romacs-agent-successor (romacs-agent-get (romacs-agent-tools--resolve id))))
+\(`romacs-agent-tools--resolve'), to act on."
+  (romacs-agent-get (romacs-agent-tools--resolve id)))
 
 (defun romacs-agent-tools--woken-file (session)
   (expand-file-name "woken" (romacs-agent-dir session)))
@@ -840,9 +829,8 @@ CHILD's, when read already."
                               (romacs-agent-ends child))))))
 
 (defun romacs-agent-tools--hand-on (child)
-  ;; Its parent, loaded when only listed: a task's end reaches it all the
-  ;; same; one handed to another harness, where it goes on.
-  (let ((parent (romacs-agent-successor (romacs-agent-load-session (plist-get (romacs-agent-options child) :parent))))
+  ;; Its parent, loaded when only listed: a task's end reaches it all the same.
+  (let ((parent (romacs-agent-load-session (plist-get (romacs-agent-options child) :parent)))
         (handed (gethash child romacs-agent-tools--handed 0))
         (ends (romacs-agent-tools--unhanded child))
         ;; Read once, when it has ends: what each end's handing on reads of it.
@@ -890,8 +878,7 @@ end is its task's."
               ((not (gethash (romacs-agent-id coordinator) romacs-agent-tools--pending)))
               ((not (memq (romacs-agent-state coordinator) '(starting running waiting-approval))))
               ((not (romacs-agent-tools--delegates-working-p (romacs-agent-tools--summary-of coordinator))))
-              (parent (romacs-agent-successor
-                       (romacs-agent-load-session (plist-get (romacs-agent-options coordinator) :parent)))))
+              (parent (romacs-agent-load-session (plist-get (romacs-agent-options coordinator) :parent))))
     (remhash coordinator romacs-agent-tools--held)
     (push (cons coordinator end) (gethash (romacs-agent-id parent) romacs-agent-tools--pending))
     (romacs-agent-tools--wake-soon parent)))
@@ -1080,7 +1067,7 @@ for that parent: the ends it held may go now."
 kept for SESSION may not have reached it (`romacs-agent-store--sent-of'):
 a turn of its own, nothing sent again."
   (when-let* (((eq (plist-get event :type) 'error)) ((plist-get event :unsure))
-              (parent (romacs-agent-successor (romacs-agent-load-session (plist-get (romacs-agent-options session) :parent)))))
+              (parent (romacs-agent-load-session (plist-get (romacs-agent-options session) :parent))))
     (romacs-agent-tools--deliver parent (plist-get event :text) #'ignore nil nil 'next)))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--say-unsure)
@@ -1132,7 +1119,7 @@ request answered or withdrawn is forgotten here too."
               ((not (gethash key romacs-agent-tools--asked-parents)))
               ((romacs-agent--user-answers-p session id))
               ((not (equal (romacs-agent-tools--wake-rule session) "none")))
-              (parent (romacs-agent-successor (romacs-agent-load-session parent-id)))
+              (parent (romacs-agent-load-session parent-id))
               ((romacs-agent--goes-on-p parent)))
     (puthash key t romacs-agent-tools--asked-parents)
     (romacs-agent-tools--deliver parent (romacs-agent-tools--question-text session event) #'ignore
@@ -1687,9 +1674,8 @@ Romacs (its own channel's reply line says how), or a sender gone."
                         ;; Its own channel's, when it came by one: the call to copy.
                         (user-error "Message %s came from outside Romacs. %s" id
                                     (romacs-agent--message-reply-line message)))
-                       ;; One a start left a row: loaded, to be answered; one
-                       ;; handed to another harness, where it goes on.
-                       ((romacs-agent-successor (romacs-agent-get sender-id)))
+                       ;; One a start left a row: loaded, to be answered.
+                       ((romacs-agent-get sender-id))
                        (t (user-error "Message %s's sender, session %s, is gone" id sender-id))))
          ;; Its note first able to go: never an answer sent and its note lost.
          (record (progn (when by-user (romacs-agent--check-note session))
@@ -2179,8 +2165,8 @@ one, and kept so once its continuation is (KEPT, as
   "Go on with the task taskId (the caller's own session by default) under
 instance provider (default its own: a model or effort changes in place):
 of its harness, the same session and conversation, once its running turn
-ends; of another, a handoff (a new task on a brief of the thread, with
-its parent and wake rule)."
+ends; of another, the same session in a new conversation there, briefed
+on this one (`romacs-agent-switch-harness-soon')."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
          (task (romacs-agent-tools--known
@@ -2207,34 +2193,14 @@ its parent and wake rule)."
                                       verb))
                      record)
             record))
-      ;; Another harness, named: its pool, as for a new task.
-      (romacs-agent-tools--handed-off task (romacs-agent-pool-name provider) model effort next))))
-
-(defun romacs-agent-tools--handed-off (task provider model effort next)
-  "A deferred answer: the new task going on with TASK's thread under
-PROVIDER (another harness) on a brief, keeping TASK's parent, wake rule,
-role and worktree."
-  (require 'romacs-agent-handoff)
-  (let ((cell (list nil)))
-    (romacs-agent-events-async
-     task (lambda (events)
-            (setcar cell (condition-case err
-                             (let ((child (romacs-agent-handoff
-                                           task (romacs-agent-handoff-thread task events) provider model
-                                           (or next "Go on from where this thread left off.")
-                                           (and effort (list :effort effort)))))
-                               (romacs-agent-issues-record 'handoff task :from (romacs-agent-provider task) :to provider
-                                                           :child (romacs-agent-id child))
-                               (list :child child))
-                           (error (list :error (error-message-string err)))))))
-    (romacs-mcp-defer
-     (lambda ()
-       (let ((made (car cell)))
-         (cond ((null made) nil)
-               ((plist-get made :error) (user-error "%s" (plist-get made :error)))
-               (t (let ((record (romacs-agent-tools--ack (plist-get made :child))))
-                    (puthash "handedOffFrom" (romacs-agent-id task) record)
-                    (list record)))))))))
+      ;; Another harness: the same task, in a new conversation there.
+      (let* ((when (romacs-agent-switch-harness-soon task (romacs-agent-pool-name provider) model effort next))
+             (record (romacs-agent-tools--ack task)))
+        (puthash "next" (cond ((equal id caller) "You switch once this turn ends: end your turn now. Your next turn there starts on a brief of this one.")
+                              ((eq when 'now) "It switches now: the same task, a new conversation there on a brief of this one; its next end wakes you as before.")
+                              (t "It switches once its running turn ends, the same task; its next end wakes you as before."))
+                 record)
+        record))))
 
 (defvar romacs-agent-tools--making (make-hash-table :test #'equal)
   "A caller's (PARENT . CLIENT-REQUEST-ID) to its isolated task being made:
@@ -2704,8 +2670,7 @@ last result, whole: the tools that act on a task answer only its length (resultC
  (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string")) '("taskId"))
  (lambda (arguments)
    (romacs-mcp--instance arguments)
-   (romacs-agent-tools--told (romacs-agent-tools--successor-id
-                              (romacs-agent-tools--resolve (gethash "taskId" arguments)))
+   (romacs-agent-tools--told (romacs-agent-tools--resolve (gethash "taskId" arguments))
                              (lambda (id) (romacs-agent-tools--task (romacs-agent-summary id)))))
  (romacs-mcp--object "readOnlyHint" t))
 
@@ -2767,8 +2732,8 @@ romacs_task_send."
  "Change a task's model or effort, or go on with it under another provider instance (taskId, default your own \
 session), e.g. when its model or instance hits a usage limit. The same session and conversation go on, once its \
 running turn ends (your own: end your turn): in place with model or effort alone (provider defaults to its own), \
-or moved as is to an instance of the same harness (claude to claude2); on another harness, a new task starts on a \
-brief of the thread, with the same parent and wake rule. model and effort default to the task's; next is a message \
+or moved as is to an instance of the same harness (claude to claude2); on another harness, the same task goes on \
+there in a new conversation that starts on a brief of this one. model and effort default to the task's; next is a message \
 it is given. A task's record names its usage limit and the instances with room."
  (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string") ("provider" . "string") ("model" . "string")
                        ("effort" . "string") ("next" . "string"))

@@ -652,7 +652,7 @@ a time, `allow' marks it allowed."
           (to nil))
       (puthash "x" session romacs-agent--sessions)
       (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () "x"))
-                ((symbol-function 'romacs-agent-tools--handed-off) (lambda (_task provider &rest _) (setq to provider))))
+                ((symbol-function 'romacs-agent-switch-harness-soon) (lambda (_task provider &rest _) (setq to provider) 'now)))
         (romacs-agent-tools--switch (romacs-mcp--object "provider" "codex"))
         (should (eq to 'codex))))))
 
