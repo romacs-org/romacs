@@ -155,3 +155,54 @@ fn focus_events_run_their_special_event_bindings() {
                     (list (romacs--run-special-event (list 'focus-in (selected-frame))) focused)", "(t (focus-in t t))");
     check(&mut vm, "(list (romacs--run-special-event '(no-such-event)) (condition-case e (internal-handle-focus-in '(focus-out nil)) (error e)))", "(nil (error \"Invalid focus-in event\"))");
 }
+
+/// A filter that looks keys up itself, between two moving collections,
+/// in the middle of a walk that has found one prefix of the event and
+/// holds the next key unread: the outer walk's prefixes, its tails and its
+/// key sequence come back from the collector intact.  The answer is the
+/// pinned GNU's (45b0f7699df).
+#[test]
+fn a_nested_lookup_in_a_filter_survives_moving_collections() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude_raw().unwrap();
+    vm.set_gc_moving(true);
+    for _ in 0..200 { vm.conses.push((Value::NIL, Value::NIL)); }
+    check(&mut vm, r#"(progn
+  (defvar kw-seen nil)
+  (setq kw-a (make-sparse-keymap) kw-b (make-sparse-keymap) kw-high (make-sparse-keymap) kw-low (make-sparse-keymap))
+  (define-key kw-a [f7] (vector (copy-sequence "from-a")))
+  (define-key kw-b [f8] (vector (copy-sequence "from-b")))
+  (define-key kw-high [f5] kw-a)
+  (define-key kw-low [f5] (list 'menu-item "x" kw-b :filter
+                             (lambda (d) (garbage-collect)
+                               (setq kw-seen (list (key-binding [f6]) (lookup-key kw-low [f6])))
+                               (garbage-collect) d)))
+  (define-key kw-low [f6] 'kw-inner)
+  (use-local-map (list 'keymap kw-high kw-low))
+  nil)"#, "nil");
+    let before = (vm.heap_stats().collections, vm.slots[vm.names["kw-low"]].value);
+    check(&mut vm, "(list (key-binding [f5 f7]) (key-binding [f5 f8]) kw-seen (lookup-key (current-local-map) [f5 f8]))",
+          r#"(["from-a"] ["from-b"] (kw-inner kw-inner) ["from-b"])"#);
+    assert!(vm.heap_stats().collections >= before.0 + 6, "each filter call must collect twice");
+    assert_ne!(vm.slots[vm.names["kw-low"]].value, before.1, "fixture must move the maps it walks");
+    // A walk stopped at a default binding, in a parent map and on a meta
+    // character's ESC, each across two moving collections.
+    let collections = vm.heap_stats().collections;
+    check(&mut vm, r#"(let* ((hits 0)
+       (collect (lambda (d) (garbage-collect) (setq hits (1+ hits)) (garbage-collect) d))
+       (default (make-sparse-keymap))
+       (parent (make-sparse-keymap)) (child (make-sparse-keymap))
+       (p1 (make-sparse-keymap)) (p2 (make-sparse-keymap))
+       (meta (make-sparse-keymap)) (esc (make-sparse-keymap)))
+  (define-key default [t] (list 'menu-item "d" (vector (copy-sequence "default")) :filter collect))
+  (define-key p1 [f6] (vector (copy-sequence "child")))
+  (define-key p2 [f7] (vector (copy-sequence "parent")))
+  (define-key parent [f5] (list 'menu-item "p" p2 :filter collect))
+  (define-key child [f5] p1)
+  (set-keymap-parent child parent)
+  (define-key esc "x" (vector (copy-sequence "meta")))
+  (define-key meta [27] (list 'menu-item "e" esc :filter collect))
+  (list (lookup-key default [f5] t) (lookup-key child [f5 f6]) (lookup-key child [f5 f7])
+               (lookup-key meta [?\M-x]) (lookup-key meta [?\M-x ?y]) hits))"#, r#"(["default"] ["child"] ["parent"] ["meta"] 1 5)"#);
+    assert!(vm.heap_stats().collections >= collections + 10, "each filter call must collect twice");
+}
