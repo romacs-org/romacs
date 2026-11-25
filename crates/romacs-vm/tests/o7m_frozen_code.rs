@@ -55,6 +55,63 @@ fn copy_root(source: &mut Vm, receiver: &mut Vm) {
     place(receiver, &encode(source, "((variable o7m-root))", 100_000));
 }
 
+// Sol S7. Allow a one-time index rebuild, but hold the seed's closure
+// misses to a fraction of the 64-fold change in unrelated commands.
+#[test]
+fn review_seed_closure_lookup_after_compaction_scales() {
+    let small = compacted_seed_instructions(512);
+    let large = compacted_seed_instructions(32_768);
+    assert!(
+        large <= 8 * small,
+        "seeding 1024 ordinary closures after compaction retired {small} instructions with 512 commands and {large} with 32768 commands (maximum {})",
+        8 * small
+    );
+}
+
+fn compacted_seed_instructions(commands: usize) -> u64 {
+    let mut vm = vm();
+    assert_eq!(
+        eval(
+            &mut vm,
+            &format!(
+                r#"
+                (setq o7m-commands (make-vector {commands} nil)
+                      o7m-root (make-vector 1024 nil))
+                (dotimes (i {commands})
+                  (let ((n i))
+                    (aset o7m-commands i (lambda () (interactive "p") n))))
+                (dotimes (i 1024)
+                  (let ((n i)) (aset o7m-root i (lambda () n))))
+                (let ((first (aref o7m-commands 0))
+                      (last (aref o7m-commands (1- {commands}))))
+                  (list (commandp first) (commandp last) (eq first last)
+                        (commandp (aref o7m-root 0))))"#
+            ),
+        ),
+        "(t t nil nil)"
+    );
+    let request = vm
+        .compile_source(&format!(
+            "(romacs--seed-build '((variable o7m-root)) {TABLE} 100000)"
+        ))
+        .unwrap();
+    // A dead command forces weak-key sweep even when no live key moves.
+    assert_eq!(
+        eval(&mut vm, r#"(commandp (lambda () (interactive "p") 'dead))"#),
+        "t"
+    );
+    vm.collect_compacting();
+    let instructions = || romacs_vm::host::instruction_count().expect("instruction counter");
+    let before = instructions();
+    let seed = vm.execute(request).unwrap();
+    let retired = instructions() - before;
+    let (backing, refusals) = seed.cons_pair().unwrap();
+    assert!(refusals.is_nil(), "{}", refusals.display().unwrap());
+    assert!(backing.seed_backing_bytes().unwrap().starts_with(b"VM2FRZ02"));
+    assert!(retired > 0);
+    retired
+}
+
 fn body_kind(vm: &mut Vm, expr: &str) -> &'static str {
     vm.eval_source(expr).unwrap().function_body_kind().unwrap()
 }
