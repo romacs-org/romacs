@@ -168,6 +168,55 @@ PROCESS, a listener, has no output of its own to wait for."
           (should (process-live-p process)))
       (delete-process process))))
 
+;; Nil on a process whose channel is gone changes nothing, as on any
+;; unframed one.
+(ert-deftest process-framing-nil-on-a-deleted-process ()
+  (let ((process (process-framing-tests--cat #'ignore)))
+    (delete-process process)
+    (should-not (set-process-framing process nil))
+    (should-not (process-framing process))))
+
+;; At the end, any frame delivered is output: an empty line a change of
+;; kind left held ends a wait, though the child lives on.
+(ert-deftest process-framing-an-empty-last-frame-ends-a-wait ()
+  (let* ((frames nil)
+         (process (make-process :name "process-framing-empty" :noquery t :connection-type 'pipe
+                                :command '("sh" "-c" "printf '\\n'; read x; exec 1>&- 2>&-; sleep 5")
+                                :coding 'no-conversion
+                                :filter (lambda (_p fs) (setq frames (append frames (list fs)))))))
+    (unwind-protect
+        (progn
+          (set-process-framing process 'content-length)
+          (process-framing-tests--until process (lambda () (> (romacs--proc-get process 'nbytes-read) 0)))
+          (set-process-framing process 'lines)
+          (process-send-string process "go\n")
+          (with-timeout (3 (error "A wait for the last frame never returned"))
+            (while (not frames) (accept-process-output process)))
+          (should (equal frames '(("")))))
+      (delete-process process))))
+
+;; A socket's end, read in the wait that delivers its last line, does not
+;; make the wait say no output came.
+(ert-deftest process-framing-a-last-line-at-a-sockets-end-is-output ()
+  (let* ((socket (make-temp-name (expand-file-name "pf-end-" temporary-file-directory)))
+         (peer nil) (frames nil)
+         (server (make-network-process :name "process-framing-end" :family 'local :service socket
+                                       :server t :noquery t :coding 'no-conversion
+                                       :log (lambda (_s p _m) (setq peer p))
+                                       :filter (lambda (_p fs) (setq frames (append frames fs)))))
+         (client (make-network-process :name "process-framing-end-client" :family 'local
+                                       :service socket :noquery t :coding 'no-conversion)))
+    (unwind-protect
+        (progn
+          (set-process-framing server 'lines)
+          (process-send-string client "abc")
+          (process-framing-tests--until server (lambda () (and peer (> (romacs--proc-get peer 'nbytes-read) 0))))
+          (delete-process client)
+          (should (accept-process-output peer 2))
+          (should (equal frames '("abc"))))
+      (delete-process server)
+      (ignore-errors (delete-file socket)))))
+
 ;;; The agent protocol's connection
 
 (ert-deftest process-framing-rpc-lines-over-a-socket ()

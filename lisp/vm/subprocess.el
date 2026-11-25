@@ -1103,9 +1103,11 @@ reader sees what the timer changed.  Return GNU's got_some_output."
         (if (and read-kbd (or unread-command-events romacs--special-events
                               (/= timers-run romacs--timers-run)))
             (setq done t))
+        ;; A status change never takes back output this wait delivered
+        ;; (a framed last line, read just before its end of file).
         (if (and (not done) (romacs--proc-ticks-pending)
                  (not (romacs--proc-input-pending)))
-            (setq got-some-output (romacs--status-notify nil wait-proc)))
+            (setq got-some-output (max got-some-output (romacs--status-notify nil wait-proc))))
         ;; Don't wait for output from a non-running process: read what it has.
         (if (and (not done) wait-proc
                  (not (eq (romacs--proc-get wait-proc 'status) 'run))
@@ -1135,7 +1137,7 @@ reader sees what the timer changed.  Return GNU's got_some_output."
                  ((memq ready '(terminated input)) (setq done t))
                  ((null ready)
                   (if (romacs--proc-ticks-pending)
-                      (setq got-some-output (romacs--status-notify nil wait-proc)))
+                      (setq got-some-output (max got-some-output (romacs--status-notify nil wait-proc))))
                   (if (or (memq wait '(minimum idle))
                           (and wait-proc
                                (/= (romacs--proc-get wait-proc 'nbytes-read) prev-nbytes)))

@@ -31,6 +31,10 @@ impl Leaf<'_> {
             _ => return Err(Fault::Wrong("natnump", limit)),
         };
         let name = self.string_text(self.process(proc)?.get(Slot::Name))?;
+        // Nil on an unframed process, live or gone, changes nothing.
+        if kind.is_none() && self.channel(proc).is_none_or(|c| c.framer.is_none()) {
+            return Ok(Value::NIL);
+        }
         // A pty ends with EIO, not end of file, and may be reopened: no
         // protocol client reads one, so framing it is refused, not handled.
         let pty = self.process(proc).map(|p| p.pty_in || p.pty_out)?;
@@ -45,10 +49,6 @@ impl Leaf<'_> {
             && framer.kind() == kind
         {
             framer.set_limit(limit);
-            return Ok(Value::NIL);
-        }
-        // Nil on an unframed process changes nothing.
-        if kind.is_none() && channel.framer.is_none() {
             return Ok(Value::NIL);
         }
         let mut rest = channel.framer.take().map(Framer::into_rest).unwrap_or_default();
@@ -99,7 +99,13 @@ impl Leaf<'_> {
             }
         }
         self.process_mut(proc).nbytes_read += buf.len() as u64;
-        let delivered: usize = if eof { frames.iter().map(|f| if let Frame::Bytes(b) = f { b.len() } else { 0 }).sum() } else { buf.len() };
+        // At the end, any frame delivered is output, an empty line or an
+        // `over' too: at least a byte's worth.
+        let delivered: usize = if eof {
+            frames.iter().map(|f| if let Frame::Bytes(b) = f { b.len().max(1) } else { 1 }).sum()
+        } else {
+            buf.len()
+        };
         let list = self.frames_list(proc, frames)?;
         let nbytes = fixnum(delivered)?;
         Ok(self.cons(nbytes, list))
