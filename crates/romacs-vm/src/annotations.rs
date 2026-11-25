@@ -717,7 +717,7 @@ impl Vm {
     /// their symbol data lives in the slots named "nil" and "t", as their
     /// function cells and alias targets already do (prim.rs). `None` means
     /// nil/t before anything was stored there, i.e. an empty plist.
-    fn plist_owner(&self, symbol: Value) -> Result<Option<usize>> {
+    pub(super) fn plist_owner(&self, symbol: Value) -> Result<Option<usize>> {
         if symbol == Value::NIL || symbol == Value::TRUE {
             let name = if symbol == Value::NIL { "nil" } else { "t" };
             return Ok(self.names.get(name).copied());
@@ -731,7 +731,7 @@ impl Vm {
         }
         Ok(Some(slot))
     }
-    fn plist_owner_mut(&mut self, symbol: Value) -> Result<usize> {
+    pub(super) fn plist_owner_mut(&mut self, symbol: Value) -> Result<usize> {
         if symbol == Value::NIL || symbol == Value::TRUE {
             return Ok(self.slot(if symbol == Value::NIL { "nil" } else { "t" }));
         }
@@ -818,6 +818,7 @@ impl Vm {
                         break;
                     }
                     self.conses.set_car(rest.index(3).expect("private cons"), value);
+                    self.slots.mark_written_since_restore(owner);
                     return Ok(value);
                 }
                 prev = Some(rest);
@@ -838,7 +839,10 @@ impl Vm {
                     let cell = self.list_value(&[key, value]);
                     match prev {
                         None => self.slots[owner].plist = cell,
-                        Some(prev) => self.conses.set_cdr(prev.index(3).expect("private cons"), cell),
+                        Some(prev) => {
+                            self.conses.set_cdr(prev.index(3).expect("private cons"), cell);
+                            self.slots.mark_written_since_restore(owner);
+                        }
                     }
                     return Ok(value);
                 }

@@ -1297,6 +1297,7 @@ struct Slot {
     localness: Localness,
     /// Object-owned declaration flag for uninterned symbols.
     declared_special: bool,
+    written_since_restore: bool,
 }
 impl Slot {
     const fn new() -> Self {
@@ -1307,6 +1308,7 @@ impl Slot {
             plist: Value::NIL,
             localness: Localness::Never,
             declared_special: false,
+            written_since_restore: false,
         }
     }
 }
@@ -2022,11 +2024,16 @@ impl Vm {
         for name in forwarded::Forwarded::names() {
             vm.specials.insert(name.into());
         }
+        vm.finish_initialization()
+    }
+
+    fn finish_initialization(mut self) -> Self {
         // Code-image loading reuses this constructor before replacing the
         // symbol catalog. Intrinsic redirects must therefore start cold too;
         // retaining Plain here would mask an image's already-interned plist.
-        vm.variable_redirects.clear();
-        vm
+        self.variable_redirects.clear();
+        self.slots.clear_written_since_restore();
+        self
     }
     /// The symbols the VM reads by slot from its first form on, interned in
     /// this order: the quit polls', the face primitives', `debug-on-event''s

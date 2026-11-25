@@ -37,6 +37,7 @@ impl Vm {
         // Also leaves the minors' books at rest (the holders unknown, no
         // cache or name logged), which `world_quiescent` need not ask.
         self.settle_generations();
+        self.slots.clear_written_since_restore();
         Ok(AtRest(self))
     }
     /// Why this VM cannot be captured, or Ok when it can.
