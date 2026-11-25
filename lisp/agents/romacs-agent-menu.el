@@ -78,7 +78,7 @@ saying so when it settled since.")
   "Open the chat of worker ID if it is still among the unsettled workers."
   (let ((child (and (member id (romacs-agent-menu--workers)) (romacs-agent-get id))))
     (if (and child (not (romacs-agent-settled-p child)))
-        (romacs-agent-show child '(display-buffer-same-window))
+        (romacs-agent-show child)
       (user-error "%s is no longer in the Workers list" (if child (romacs-agent-title child) id)))))
 
 (defun romacs-agent-menu-open-worker ()
@@ -106,8 +106,7 @@ all of them by its title and state."
          (named (mapcar (lambda (row) (cons (romacs-agent-menu--thread-line row) (romacs-agent-log-activity--thread row)))
                         rows))
          (id (cdr (assoc (romacs-agent--read-ordered "Thread: " (mapcar #'car named) nil nil t) named))))
-    (romacs-agent-show (or (romacs-agent-get id) (user-error "Thread %s is gone" id))
-                       '(display-buffer-same-window))))
+    (romacs-agent-show (or (romacs-agent-get id) (user-error "Thread %s is gone" id)))))
 
 ;;; The session's commands, as the menu offers them
 
