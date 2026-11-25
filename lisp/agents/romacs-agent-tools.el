@@ -1006,7 +1006,8 @@ its parent again."
 (defun romacs-agent-tools--on-event (session event)
   ;; Its first launch failed: its end is new, whatever an earlier
   ;; failure's was.  A relaunch's (a renewal's, a switch's) keeps its ends.
-  (when (and (eq (plist-get event :type) 'unstarted) (not (plist-get (romacs-agent-driver-state session) :run)))
+  (when (and (eq (plist-get event :type) 'unstarted) (not (romacs-agent-renewing session))
+             (not (plist-get (romacs-agent-driver-state session) :run)))
     (romacs-agent-tools--forget-ends session))
   ;; A parent finished its turn or was brought back: its waiting ends can go.
   (when (and (memq (plist-get event :type) '(done settled))

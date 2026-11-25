@@ -365,6 +365,11 @@ never two of one."
        ((eq type 'done)
         (when turn (plist-put turn :done event))
         (romacs-agent-turns--write session (or (plist-get event :seq) (romacs-agent-seq session))))
+       ;; A switch to another harness leaves a turn cut off there: its row
+       ;; ends here, interrupted, before the new harness's first prompt.
+       ((and turn (eq type 'renewed))
+        (plist-put turn :done (list :type 'done :interrupted t :reason "the session switched harness"))
+        (romacs-agent-turns--write session (or (plist-get event :seq) (romacs-agent-seq session))))
        (turn
         (romacs-agent-turns--item turn event)
         (when (eq type 'tool)
@@ -431,7 +436,9 @@ records to SQLite: the editor alone does."
         ;; Its queue is the editor's to restore and write, never this
         ;; process's: a snapshot written here could land over a newer one.
         (cl-letf (((symbol-function 'romacs-agent--attach) #'ignore))
-          (let ((romacs-agent-loaded-functions (remq 'romacs-agent-store--requeue romacs-agent-loaded-functions)))
+          ;; Nor its renewal's to finish: that launches a harness.
+          (let ((romacs-agent-loaded-functions (seq-difference romacs-agent-loaded-functions
+                                                               '(romacs-agent-store--requeue romacs-agent-renew--loaded))))
             (romacs-agent--load dir)))
         (when-let* ((session (romacs-agent-loaded (file-name-nondirectory dir))))
           ;; Whether records came since its rows is the records' to say: a

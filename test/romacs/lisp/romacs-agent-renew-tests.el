@@ -467,8 +467,50 @@ instance configured beside it."
     (cl-letf (((symbol-function 'romacs-agent-tools--forget-ends) (lambda (_) (cl-incf forgot))))
       (romacs-agent-tools--on-event (romacs-agent--make :id "a" :driver-state (list :run 3)) '(:type unstarted))
       (should (= forgot 0))
+      (romacs-agent-tools--on-event (romacs-agent--make :id "c" :renewing 9) '(:type unstarted))
+      (should (= forgot 0))
       (romacs-agent-tools--on-event (romacs-agent--make :id "b") '(:type unstarted))
       (should (= forgot 1)))))
+
+(ert-deftest romacs-agent-renew-switch-ends-the-cut-off-turns-row ()
+  ;; The turn the old harness was cut off in is a row of its own, ended
+  ;; interrupted, before the new harness's first prompt.
+  (let ((session (romacs-agent--make :id "s" :dir "/d")) (written nil)
+        (romacs-agent-turns--open (make-hash-table :test #'eq :weakness 'key)))
+    (cl-letf (((symbol-function 'romacs-agent-turns--write)
+               (lambda (s _seq) (push (plist-get (gethash s romacs-agent-turns--open) :done) written)
+                 (remhash s romacs-agent-turns--open))))
+      (romacs-agent-turns--event session '(:type input :seq 3 :text "go"))
+      (romacs-agent-turns--event session '(:type renewed :seq 7 :switch t))
+      (should (plist-get (car written) :interrupted))
+      (romacs-agent-turns--event session '(:type input :seq 9 :text "brief"))
+      (should (equal (plist-get (gethash session romacs-agent-turns--open) :first) 9)))))
+
+(ert-deftest romacs-agent-renew-switch-waits-for-a-starting-harness ()
+  (romacs-agent-renew-tests--switching
+    (setf (romacs-agent-startup-pending session) t)
+    (should (string-match-p "busy" (cadr (should-error (romacs-agent-switch-harness session "codex") :type 'user-error))))))
+
+(ert-deftest romacs-agent-renew-switch-scans-a-turn-from-its-renewal ()
+  ;; Records before a prompt: a renewal note between ends what came before.
+  (let ((session (romacs-agent--make :id "s" :harness 'claude)))
+    (should (romacs-agent--turn-free-records-p
+             session (romacs-agent--scratch session)
+             (list (romacs-mcp--object "seq" 5 "note" (romacs-mcp--object "type" "renew"))
+                   (romacs-mcp--object "seq" 4 "in" (romacs-mcp--object "romacsRequest" 1)))
+             nil))))
+
+(ert-deftest romacs-agent-renew-switch-copy-forgets-the-live-conversation ()
+  ;; A copy read under another harness than the live one never takes the
+  ;; live conversation for its records'.
+  (romacs-agent-renew-tests--switching
+    (romacs-agent-renew-tests--switch session "codex")
+    (romacs-agent-renew-tests--ran-on session "codex")
+    (setf (romacs-agent-harness-session session) "thread-new")
+    (let ((copy (romacs-agent--scratch session)))
+      (romacs-agent--record copy (car (romacs-agent--journal-records session)))
+      (should (eq (romacs-agent-harness copy) 'claude))
+      (should-not (romacs-agent-harness-session copy)))))
 
 (ert-deftest romacs-agent-renew-switch-is-finished-when-loaded ()
   ;; Romacs ended after the switch's note: loaded with no supervisor, it

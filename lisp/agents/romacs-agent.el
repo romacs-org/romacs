@@ -2657,7 +2657,12 @@ The original session acknowledges held notes during catch-up."
   (let ((seq (gethash "seq" record)))
     (when (and (integerp seq) (gethash session romacs-agent--unplaced))
       (remhash session romacs-agent--unplaced)
-      (setf (romacs-agent-harness session) (romacs-agent--harness-at session seq) (romacs-agent-driver session) nil))
+      (let ((harness (romacs-agent--harness-at session seq)))
+        ;; Under another harness than the live one, the live conversation
+        ;; is none of its records'.
+        (unless (eq harness (romacs-agent-harness session))
+          (setf (romacs-agent-harness-session session) nil))
+        (setf (romacs-agent-harness session) harness (romacs-agent-driver session) nil)))
     (when (and (integerp seq) (> seq (romacs-agent-seq session)))
       (setf (romacs-agent-seq session) seq)
       (when-let* ((cursor (romacs-agent--record-cursor record)))
@@ -6773,21 +6778,37 @@ first, leave no turn under way: the last one telling either ends a turn
 or its harness, or none tells and ALL says they are all there are.
 PROBE, a scratch copy of SESSION (`romacs-agent--scratch'), is what the
 harness parses them in."
-  (let ((verdict nil) (driver (romacs-agent--driver session)))
-    (while (and (not verdict) records)
-      (let* ((record (pop records)) (out (and (hash-table-p record) (gethash "out" record)))
-             (in (and (hash-table-p record) (gethash "in" record))))
-        (when (hash-table-p record)
-          (cond ((gethash "exit" record) (setq verdict 'free))
-                ;; Another prompt and no end between: this one came into its turn.
-                ((and (hash-table-p in) (gethash "romacsRequest" in)) (setq verdict 'busy))
-                ((hash-table-p out)
-                 (let ((types (mapcar (lambda (event) (plist-get event :type))
-                                      (ignore-errors (romacs-agent--decode-driver-record probe 'out out driver)))))
-                   (cond ((memq 'done types) (setq verdict 'free))
-                         ((seq-intersection types '(delta thinking tool message-end approval))
-                          (setq verdict 'busy)))))))))
-    (eq (or verdict (if all 'free 'busy)) 'free)))
+  (let ((verdict nil) (driver nil))
+    (cl-flet ((driver-at (seq) (or driver (setq driver (romacs-agent--probe-driver session probe seq)))))
+      (while (and (not verdict) records)
+        (let* ((record (pop records)) (out (and (hash-table-p record) (gethash "out" record)))
+               (in (and (hash-table-p record) (gethash "in" record))))
+          (when (hash-table-p record)
+            (cond ((gethash "exit" record) (setq verdict 'free))
+                  ;; A renewal, a switch to another harness too, begins anew.
+                  ((romacs-agent--note-p record "renew") (setq verdict 'free))
+                  ;; Another prompt and no end between: this one came into its turn.
+                  ((and (hash-table-p in) (gethash "romacsRequest" in)) (setq verdict 'busy))
+                  ((hash-table-p out)
+                   (let ((types (mapcar (lambda (event) (plist-get event :type))
+                                        (ignore-errors
+                                          (romacs-agent--decode-driver-record
+                                           probe 'out out
+                                           ;; The run these records are of: none of them before a renewal.
+                                           (driver-at (gethash "seq" record)))))))
+                     (cond ((memq 'done types) (setq verdict 'free))
+                           ((seq-intersection types '(delta thinking tool message-end approval))
+                            (setq verdict 'busy)))))))))
+      (eq (or verdict (if all 'free 'busy)) 'free))))
+
+(defun romacs-agent--probe-driver (session probe seq)
+  "The driver of the run SESSION's record SEQ is of, PROBE (a copy) made
+to read it: under another harness than the live one, with no conversation
+of the live one's."
+  (let ((harness (romacs-agent--harness-at session seq)))
+    (unless (eq harness (romacs-agent-harness session))
+      (setf (romacs-agent-harness-session probe) nil))
+    (romacs-agent--driver-of harness)))
 
 (defun romacs-agent--journal-span (journal start end)
   "Put bytes START to END of file JOURNAL in the current buffer, decoded,
@@ -7157,7 +7178,8 @@ supervisor runs, else its journal read on here."
                   (t 'unstarted)))
       (romacs-agent--changed session))
     ;; A cancelled or settled one's goes nowhere.
-    (when (and (romacs-agent-pending-selection session)
+    ;; Nor one a journaled renewal, a switch to another harness say, replaces.
+    (when (and (romacs-agent-pending-selection session) (not (romacs-agent-renewing session))
                (romacs-agent--goes-on-p session))
       (romacs-agent--settle session)))
   ;; Replayed already, unless attached (its replay ends `attached').

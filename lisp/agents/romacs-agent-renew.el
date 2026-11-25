@@ -266,7 +266,8 @@ off at its limit is no obstacle: the new harness starts from the brief."
       (user-error "%s runs %s already: move it instead" (romacs-agent-title session) (romacs-agent-harness session)))
     (unless (plist-get instance :enabled) (user-error "Agent provider %s is disabled" provider))
     (romacs-agent--check-config-dir provider (romacs-agent--config-dir instance))
-    (unless (romacs-agent--harness-free-p session)
+    (unless (and (romacs-agent--harness-free-p session) (not (romacs-agent-startup-pending session))
+                 (not (eq (romacs-agent-state session) 'starting)))
       (user-error "Session %s is busy: switch it when its turn ends" (romacs-agent-title session)))
     (when (romacs-agent--held-p session)
       (user-error "Session %s is renewing or rolling back already" (romacs-agent-title session)))))
@@ -290,10 +291,10 @@ the harness its records began in; its next run is TARGET's."
      "imported" (if-let* ((imported (romacs-agent-imported session)))
                     (romacs-mcp--object "path" (plist-get imported :path) "size" (plist-get imported :size)
                                         "harness" (symbol-name (plist-get imported :harness)))
-                  :null))
-    ;; A selection asked of the old harness goes with it.
+                  :null)
+     ;; A selection asked of the old harness goes with it.
+     "switch" :null)
     (romacs-agent--cancel-select session)
-    (romacs-agent--manifest-put session "switch" :null)
     (setf (romacs-agent-options session) options (romacs-agent-pending-selection session) nil)))
 
 (defun romacs-agent-renew--switch-to (session target)
