@@ -1242,6 +1242,8 @@ pub struct FrameGlyphBuffer {
 
     /// The windows drawn as panes over the glyphs, none in GNU's look.
     pub panes: Vec<Pane>,
+    /// The windows owners lay out, drawn over the glyphs as pane pictures.
+    pub foreign_panes: Vec<crate::foreign_pane::ForeignPaneEntry>,
 
     /// The status bar's band, while the frame shows one (VM2-STATUS-BAR).
     pub status_bar: Option<Rect>,
@@ -1381,8 +1383,8 @@ impl FrameGlyphBuffer {
             transition_hints: _,
             status_bar_places: _,
             // Read only by passes that are not a frame's own glyph pass
-            // (child-frame placement and decoration, window effects).
-            window_infos: _,
+            // (child-frame placement and decoration, window effects, panes).
+            window_infos: _, foreign_panes: _,
             layer: _,
             frame_alpha: _,
             no_accept_focus: _,
@@ -1706,6 +1708,7 @@ impl FrameGlyphBuffer {
             presented_hit_index: crate::presented_pointer::PresentedHitIndex::default(),
             window_infos: Vec::new(),
             panes: Vec::new(),
+            foreign_panes: Vec::new(),
             status_bar: None,
             status_bar_places: Vec::new(),
             rounded_fills: Vec::new(),
@@ -1733,11 +1736,7 @@ impl FrameGlyphBuffer {
 
     /// Create a new buffer with specified dimensions
     pub fn with_size(width: f32, height: f32) -> Self {
-        Self {
-            width,
-            height,
-            ..Self::new()
-        }
+        Self { width, height, ..Self::new() }
     }
 
     #[cfg(test)]

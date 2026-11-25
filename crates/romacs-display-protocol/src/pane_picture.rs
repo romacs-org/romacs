@@ -387,7 +387,7 @@ fn relabel_submitted(receipt: SubmittedWindow, own: u64, master: u64) -> Submitt
 
 /// V logical px as a box's whole px.
 #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a frame's box is whole px far below `u32::MAX`; a negative or NaN one saturates to 0")]
-fn whole_px(v: f32) -> u32 {
+pub(crate) fn whole_px(v: f32) -> u32 {
     v.round() as u32
 }
 
