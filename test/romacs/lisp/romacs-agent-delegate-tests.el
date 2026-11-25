@@ -481,6 +481,16 @@ message's record for TEXT, `interrupted' each interrupted."
     ;; Only what replaced them went.
     (should (equal (mapcar #'cdr written) '("three")))))
 
+(ert-deftest romacs-agent-delegate-an-admitted-replace-is-queued-after-write-error ()
+  (romacs-agent-delegate-tests--sending parent
+    (send a "stale")
+    (setf (romacs-agent-state a) 'idle)
+    (cl-letf (((symbol-function 'romacs-agent--input) (lambda (&rest _) (error "Write failed"))))
+      (should (equal (gethash "delivery" (send a "replacement" "replace")) "queued")))
+    (should (equal (mapcar #'romacs-agent-item-text (romacs-agent-queue a)) '("replacement")))
+    (drain a)
+    (should (equal (mapcar #'cdr written) '("replacement")))))
+
 (ert-deftest romacs-agent-delegate-a-replace-writes-none-it-replaces ()
   ;; Its turn over, its drain not yet run: a replace goes in place of what
   ;; waits, and none of that is written first.

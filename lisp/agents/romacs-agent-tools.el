@@ -1625,7 +1625,14 @@ and the message's id."
         (let ((romacs-agent-tools--replacing target))
           (setq delivery (romacs-agent-tools--tell target text (intern mode) nil (list message)))
           (dolist (item replaced) (romacs-agent--dequeue target item)))
-        (romacs-agent--dispatch target)))
+        (condition-case err
+            (romacs-agent--dispatch target)
+          (error
+           (unless (cl-some (lambda (item) (memq message (romacs-agent-item-messages item)))
+                            (romacs-agent-queue target))
+             (signal (car err) (cdr err)))
+           (setq delivery 'queued)
+           (romacs-agent--raise target (list :type 'error :text (error-message-string err)))))))
     ;; Text no harness takes is never copied: it would ride every wake after.
     (when (and (equal kind "sibling") (romacs-agent--encodable-p (romacs-agent-item text)))
       (let ((parent (plist-get (romacs-agent-options target) :parent)))
