@@ -430,15 +430,20 @@ fn scratch_file() -> std::io::Result<std::fs::File> {
     Ok(file)
 }
 
+/// The most bytes of a command's stderr kept.
+const SAID_MOST: usize = 64 * 1024;
+
 /// What COMMAND says on stderr by the time it ends, within `DEADLINE`:
-/// past it, it is killed and reaped, and what it said by then kept.
+/// past it, it is killed and reaped, and what it said by then kept (its
+/// first `SAID_MOST` bytes, read at their place, whatever a helper it left
+/// writes after).  With no file to keep it in, it runs saying nothing.
 fn run_within(command: &[String]) -> String {
-    use std::io::Seek;
-    let mut said = match scratch_file() { Ok(file) => file, Err(error) => return format!("stderr: {error}") };
-    let child = said.try_clone().and_then(|stderr| {
-        std::process::Command::new(&command[0]).args(&command[1..])
-            .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(stderr).spawn()
-    });
+    use std::os::unix::fs::FileExt;
+    let said = scratch_file().ok();
+    let stderr = said.as_ref().and_then(|file| file.try_clone().ok())
+        .map_or_else(std::process::Stdio::null, std::process::Stdio::from);
+    let child = std::process::Command::new(&command[0]).args(&command[1..])
+        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(stderr).spawn();
     let mut child = match child { Ok(child) => child, Err(error) => return format!("{}: {error}", command[0]) };
     let begun = Instant::now();
     let mut late = String::new();
@@ -454,9 +459,9 @@ fn run_within(command: &[String]) -> String {
             }
         }
     }
-    let mut text = String::new();
-    let _ = said.rewind().and_then(|()| said.read_to_string(&mut text));
-    format!("{}{late}", text.trim())
+    let mut text = vec![0; SAID_MOST];
+    let n = said.and_then(|file| file.read_at(&mut text, 0).ok()).unwrap_or(0);
+    format!("{}{late}", String::from_utf8_lossy(&text[..n]).trim())
 }
 
 /// Start the headless service's unit; a unit failed before is reset first,
