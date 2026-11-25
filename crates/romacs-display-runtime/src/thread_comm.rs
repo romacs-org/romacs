@@ -539,6 +539,7 @@ impl ThreadComms {
             input_interrupt: None,
             keep_alive_without_frames: false,
             pixel_policy: crate::render_thread::PixelPolicy::Physical,
+            maximize_primary: false,
             cmd_rx: self.cmd_rx,
             input_tx: self.input_tx,
             facts_tx: self.facts_tx,
@@ -577,6 +578,8 @@ pub trait InputInterrupt: Send + Sync {
 /// Render thread communication handle
 pub(crate) struct RenderComms {
     pub pixel_policy: crate::render_thread::PixelPolicy,
+    /// The primary window opens maximized (`PaintHost::maximize_primary`).
+    pub maximize_primary: bool,
     /// The embedder's quit for a busy evaluator, when it has one.
     pub input_interrupt: Option<Arc<dyn InputInterrupt>>,
     /// Daemon root, rather than the primary native frame, owns display lifetime.
