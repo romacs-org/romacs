@@ -7,6 +7,40 @@ fn ok<T>(result: std::result::Result<T, Fault>) -> T {
 fn int(n: i64) -> Value { Value::integer(n).unwrap() }
 
 #[test]
+fn entry_barrier_initialized_case_mapping_stays_clean() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw(
+        "(setq entry-case (make-char-table 'case-table)) (set-case-table entry-case)",
+    )
+    .unwrap();
+    vm.check_buffer_entry_store(false, |vm, _| {
+        let expected = vm.slots[vm.names["entry-case"]].value;
+        assert_eq!(ok(Leaf::new(vm).current_case_mapping(true)), expected);
+    });
+}
+
+#[test]
+fn entry_barrier_initializing_case_mapping_dirties_the_buffer() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(current-buffer)").unwrap();
+    let index = vm.buffer_index().unwrap();
+    let data::Object::Buffer(text) = vm.objects.entry_mut(index) else {
+        panic!("expected a multibyte buffer")
+    };
+    text.case_tables = [Value::NIL; 4];
+
+    vm.check_buffer_entry_store(true, |vm, index| {
+        let expected = vm.standard_case_tables;
+        assert_ne!(expected[0], Value::NIL);
+        assert_eq!(ok(Leaf::new(vm).current_case_mapping(true)), expected[0]);
+        let data::Object::Buffer(text) = &vm.objects[index] else {
+            panic!("expected a multibyte buffer")
+        };
+        assert_eq!(text.case_tables, expected);
+    });
+}
+
+#[test]
 fn leaf_capability_surface_is_present() {
     let source = include_str!("prim.rs");
     let leaf = source.split("mod leaf {").nth(1).unwrap().split("pub(crate) use leaf::Leaf;").next().unwrap();

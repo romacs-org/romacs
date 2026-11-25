@@ -3,6 +3,39 @@
 use super::tests::{raw_of, sweep_whole};
 use super::*;
 
+impl crate::Vm {
+    pub(crate) fn check_buffer_entry_store(
+        &mut self,
+        writes: bool,
+        operation: impl FnOnce(&mut Self, usize),
+    ) {
+        self.set_gc_stress(0);
+        let before = self.heap_stats().collections;
+        self.collect_compacting();
+        let collections = self.heap_stats().collections;
+        assert_eq!(collections, before + 1);
+        let index = self.buffer_index().unwrap();
+        assert!(self.objects.old(index) && !self.objects.stored_into(index));
+
+        // Restore remembers all buffers for their shared storage. Model an
+        // initially unremembered image entry at the table boundary to check
+        // what this operation contributes to the remembered set.
+        self.objects.make_permanent(|_| false);
+        assert!(self.objects.permanent(index));
+        operation(self, index);
+        assert_eq!(self.heap_stats().collections, collections);
+
+        // The collection records dirty image entries before clearing DIRTY.
+        let dirty = self.objects.stored_into(index);
+        self.objects.remembered();
+        assert_eq!(
+            (dirty, self.objects.is_remembered(index)),
+            (writes, writes),
+            "(DIRTY, remembered) for the old buffer entry"
+        );
+    }
+}
+
 /// A table made the image's: entries 2 and 5 remembered, the rest permanent.
 fn image(n: i64) -> Table<Value> {
     let mut t = Table::default();

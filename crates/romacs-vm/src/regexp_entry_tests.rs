@@ -2,7 +2,37 @@
 //! text, counted: after its first call in a buffer it looks nothing up by
 //! name, reads no variable through its binding tables, converts no position
 //! Lisp does not get, copies no string and reads no syntax-table entry twice.
-use crate::Vm;
+use crate::{Vm, data::Object};
+
+#[test]
+fn entry_barrier_regexp_flat_window_stays_clean() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(insert \"aéza\") (narrow-to-region 2 4)")
+        .unwrap();
+    vm.check_buffer_entry_store(false, |vm, index| {
+        let Object::Buffer(text) = &vm.objects[index] else {
+            panic!("expected a multibyte buffer")
+        };
+        assert_eq!(text.bytes(), "aéza".as_bytes());
+        let window = vm.regexp_buffer_window(index, 1..3);
+        assert_eq!(window, 1..4);
+        assert_eq!(vm.regexp_buffer_input(index, window).bytes, "éz".as_bytes());
+    });
+}
+
+#[test]
+fn entry_barrier_regexp_building_a_search_view_dirties_the_buffer() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(insert \"aéza\") (narrow-to-region 2 4)")
+        .unwrap();
+    vm.check_buffer_entry_store(true, |vm, index| {
+        let before = crate::text::copied_bytes();
+        let window = vm.regexp_buffer_window(index, 1..3);
+        assert_eq!(window, 1..4);
+        assert_eq!(crate::text::copied_bytes() - before, "aéza".len());
+        assert_eq!(vm.regexp_buffer_input(index, window).bytes, "éz".as_bytes());
+    });
+}
 
 /// What the calls of one form cost.
 #[derive(Debug, PartialEq, Eq, Default)]
