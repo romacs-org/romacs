@@ -12,8 +12,9 @@ use std::time::Duration;
 /// What one idle check did.
 #[derive(Debug, PartialEq)]
 pub struct Idle {
-    /// A timer ran or process output was handled: redisplay, then check
-    /// again before blocking.
+    /// A timer ran or process output was handled: check again before
+    /// blocking, and redisplay if what ran left the frame on screen stale
+    /// (the redisplay trigger, trigger.rs).
     pub ran: bool,
     /// The echo area holds a message the display has not shown: one the
     /// timers left, here or in a wait elsewhere (`romacs--echo-shown',

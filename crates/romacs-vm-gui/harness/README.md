@@ -570,9 +570,12 @@ of `display_stages.el` (synthetic buffers: plain text, text with invisible
 and `display` parts, an agent chat) runs in a fresh `-Q --loadup` session
 in a private headless labwc: a buffer shown one way, then 30 steps, each a
 timer that makes the scenario's change followed by the loop's own
-redisplay and those of what the change set off. A step ends once it has
-settled: its redisplay ran, no timer is ripe, and a redisplay ran after any
-timer that ran since. So a follow-up redisplay, such as the one
+redisplay and those of what the change set off. A step that changes
+nothing shown runs none: the redisplay trigger finds the frame current
+(`Vm::display_stale`) and that check is the step's display pass, its
+instructions counted as `trigger_instructions`. A step ends once it has
+settled: its display pass ran, no timer is ripe, and a display pass ran
+after any timer that ran since. So a follow-up redisplay, such as the one
 `jit-lock-force-redisplay` asks for when a fontified chunk reaches back
 before its start (the folded Org scenarios), counts in its step however
 fast the host is, not in this step or the next by a race with a poll. The

@@ -195,11 +195,11 @@ impl Vm {
     /// prepare_menu_bars's call of `pre-redisplay-function', with the windows
     /// to redisplay. Lisp runs only when it would do something: never for
     /// nil or `ignore', nor for `simple.el''s default while no window's
-    /// buffer has work on `pre-redisplay-functions'.
-    pub(crate) fn run_pre_redisplay(&mut self) -> Result<()> {
-        let Some(windows) = self.pre_redisplay_call()? else { return Ok(()) };
+    /// buffer has work on `pre-redisplay-functions'. Whether Lisp ran.
+    pub(crate) fn run_pre_redisplay(&mut self) -> Result<bool> {
+        let Some(windows) = self.pre_redisplay_call()? else { return Ok(false) };
         self.call_prepared_source_propagating("(lambda (windows) (and (fboundp 'romacs--pre-redisplay) (romacs--pre-redisplay windows)))", &[windows])?;
-        Ok(())
+        Ok(true)
     }
     /// The windows argument `romacs--pre-redisplay' takes now, when it has
     /// anything to do.
@@ -298,6 +298,16 @@ impl Vm {
     pub fn redisplay_done(&mut self, took: std::time::Duration) {
         let conses = self.allocation.consed.conses;
         self.display_state.stats.end(conses);
+        self.redisplay_settled(took);
+    }
+    /// The redisplay trigger found the frame on screen current
+    /// (`Vm::display_stale`) in TOOK: a redisplay that had nothing to do,
+    /// as GNU's leaves early when nothing changed. It settles a
+    /// `romacs--redisplay-since-mark' mark as a cycle does.
+    pub fn redisplay_found_current(&mut self, took: std::time::Duration) {
+        self.redisplay_settled(took);
+    }
+    fn redisplay_settled(&mut self, took: std::time::Duration) {
         if self.redisplay_since_mark == Some(None) {
             self.redisplay_since_mark = Some(Some(u64::try_from(took.as_micros()).unwrap_or(u64::MAX)));
         }

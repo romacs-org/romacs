@@ -12,6 +12,9 @@ mod mini_window;
 pub(super) use mini_window::Segment;
 #[path = "display_check.rs"]
 mod display_check;
+#[path = "display_trigger.rs"]
+mod display_trigger;
+pub use display_trigger::{DisplayAcceptance, Staleness};
 pub(crate) use mini_window::{buffer_of, shown_end};
 use romacs_face::{
     Attribute, AttrsBuilder, Base, BoundedDatum, FaceDef, LispGraph, LiveView, NodeView,
@@ -259,6 +262,11 @@ pub(super) struct DisplayState {
     table_ids: u64,
     pub(super) font_selection_order: romacs_layout_input::FontSelectionState,
     font_alternatives: romacs_layout_input::FontAlternativeState,
+    /// The alternative families' alist as last found naming
+    /// FONT_ALTERNATIVES' families (`Vm::font_alternatives_moved'): its
+    /// value, and each cons of its spines with the car and cdr it then
+    /// held, as bits.
+    alternative_cells: Option<(u64, Vec<(u64, u64, u64)>)>,
     pub(super) fontsets: crate::fontsets::Registry,
     /// Last publication **per window**, keyed by the window's stable id. One
     /// shared snapshot made every window compare against whichever window
@@ -302,6 +310,18 @@ pub(super) struct DisplayState {
     /// Advanced by `force-mode-line-update' and `set-buffer-modified-p':
     /// GNU's `update_mode_lines'; the bar's segment cache is dropped.
     pub(crate) mode_line_epoch: u64,
+    /// The slots of `DISPLAY_VARIABLES` and the `special_changes` they
+    /// were resolved under (`Vm::display_variable_slots`).
+    variable_slots: Option<(u64, [usize; DISPLAY_VARIABLES.len()])>,
+    /// Advances when a frame parameter is stored: what a frame's pane
+    /// chrome, a layer's look and a child frame's place read
+    /// (`Vm::display_stale').
+    pub(crate) frame_revision: u64,
+    /// Advances at each explicit invalidation (`DisplayState::invalidate'):
+    /// `force-window-update', realized faces freed, a frame made, deleted,
+    /// shown, hidden or restacked. Unlike `version', which every buffer's
+    /// edit and every publication moves, a quiet timer leaves it.
+    pub(crate) invalidations: u64,
     pub version: u64,
     /// Whether a host has applied a layout: batch never does (VM2-POSVIS1).
     pub(super) hosted: bool,
@@ -339,19 +359,26 @@ impl DisplayState {
         self.font_alternatives.set_family_alist(names);
         self.face_revision += 1;
         self.previous.clear();
-        self.version = self.version.wrapping_add(1);
+        self.invalidate();
     }
     /// free_all_realized_faces: republish every window with fresh faces.
     pub(super) fn free_realized_faces(&mut self) {
         self.previous.clear();
-        self.version = self.version.wrapping_add(1);
+        self.invalidate();
     }
     pub(super) fn set_font_selection_order(&mut self, order: [romacs_layout_input::FontSelectionAttribute; 4]) {
         if self.font_selection_order.set_order(order) {
             self.face_revision += 1;
             self.previous.clear();
-            self.version = self.version.wrapping_add(1);
+            self.invalidate();
         }
+    }
+    /// What the frame shows may have changed in a way no window's record
+    /// holds: the display version moves, and the redisplay trigger's
+    /// count of invalidations (`Vm::display_stale').
+    pub(super) fn invalidate(&mut self) {
+        self.version = self.version.wrapping_add(1);
+        self.invalidations += 1;
     }
     /// Whether no window's layout is recorded: an image holds none, as
     /// what a layout found is this process's (`world_quiescent`).
@@ -370,7 +397,7 @@ impl DisplayState {
     /// Republish window ID in full next time (force-window-update).
     pub(super) fn repaint_window(&mut self, id: u64) {
         self.previous.remove(&id);
-        self.version = self.version.wrapping_add(1);
+        self.invalidate();
     }
     /// The id of the window whose line holds the status bar's shown
     /// character COLUMN; none past its line.
@@ -415,7 +442,9 @@ impl DisplayState {
             self.laid.insert(end.id, (shown.key.clone(), laid(end, byte, base, shown.len, shown.at_zv, segments.as_deref())));
         }
     }
-    pub fn new() -> Self {
+    /// What lies beneath the default face before any frame sets it: every
+    /// attribute absolute.
+    fn initial_base() -> Base {
         let mut attrs = AttrsBuilder::default();
         for a in Attribute::ALL {
             let v = match a {
@@ -433,10 +462,14 @@ impl DisplayState {
             };
             attrs.set(a, FaceSlot::Set(v));
         }
+        Base::new(attrs.build()).expect("absolute frame base")
+    }
+    pub fn new() -> Self {
         Self {
             font_selection_order: romacs_layout_input::FontSelectionState::default(),
             font_alternatives: romacs_layout_input::FontAlternativeState::default(),
-            base: Base::new(attrs.build()).expect("absolute frame base"),
+            alternative_cells: None,
+            base: Self::initial_base(),
             face_heights: Default::default(),
             fontsets: Default::default(),
             face_table: None,
@@ -455,6 +488,9 @@ impl DisplayState {
             bar_line: None,
             bar_cache: None,
             mode_line_epoch: 0,
+            frame_revision: 0,
+            invalidations: 0,
+            variable_slots: None,
             version: 0,
             hosted: false,
             width: 0,
@@ -597,6 +633,34 @@ struct Shown {
     /// The key the recorded end was laid out under when redisplay recorded
     /// it since the last paint (`record_end_laid'), else KEY's.
     ended: Option<ShownKey>,
+}
+
+/// A reused window's bands as painted (`Vm::fresh_bands'): their text,
+/// stretches and faces, and the faces its table gained past its last
+/// publication's list.
+struct FreshBands {
+    mode_line: Option<TextSlice>,
+    header_line: Option<TextSlice>,
+    band_stretches: BandStretches,
+    mode_line_face: FaceHandle,
+    header_line_face: FaceHandle,
+    added: Vec<Face>,
+}
+
+impl FreshBands {
+    /// SNAPSHOT, a reused window's last publication, painting these bands.
+    fn apply(self, snapshot: &mut WindowSnapshot) {
+        (snapshot.mode_line, snapshot.header_line, snapshot.band_stretches) = (self.mode_line, self.header_line, self.band_stretches);
+        (snapshot.mode_line_face, snapshot.header_line_face) = (self.mode_line_face, self.header_line_face);
+        snapshot.faces.extend(self.added);
+    }
+    /// Whether SHOWN, the window's last publication, already paints these
+    /// bands: the same text, stretches and faces.
+    fn shown_in(&self, shown: &WindowSnapshot) -> bool {
+        self.added.is_empty()
+            && (&self.mode_line, &self.header_line, &self.band_stretches, self.mode_line_face, self.header_line_face)
+                == (&shown.mode_line, &shown.header_line, &shown.band_stretches, shown.mode_line_face, shown.header_line_face)
+    }
 }
 
 /// The bands redisplay built for a window, before their faces.
@@ -829,15 +893,7 @@ impl Vm {
     /// frame whose id is FRAME, WIDTH by HEIGHT. The frame is named by its
     /// id, and found again after each step that runs Lisp.
     pub(crate) fn frame_snapshot_of(&mut self, frame: u64, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot> {
-        // redisplay_internal's order: prepare_menu_bars, then the window
-        // change functions.
-        if !self.redisplay_inhibited()? {
-            if self.treesit_deferred.is_none() {
-                self.run_pre_redisplay()?;
-                self.display_state.hooked = None;
-            }
-            self.run_window_change_functions()?;
-        }
+        self.prepare_redisplay()?;
         let font_alternatives = self.font_alternative_state()?;
         let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
         let mut windows = self.frame_window_snapshots(frame, width, height)?;
@@ -858,6 +914,17 @@ impl Vm {
         let chrome = self.pane_chrome(self.frame_of_id(frame)?)?;
         let no_font = self.no_font_display();
         Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, fontsets: self.fontset_state(), width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar, no_font })
+    }
+    /// The Lisp a redisplay runs before it reads the windows, in
+    /// redisplay_internal's order: prepare_menu_bars, then the window
+    /// change functions. Each runs only when it has something to do.
+    fn prepare_redisplay(&mut self) -> Result<()> {
+        if self.redisplay_inhibited()? { return Ok(()); }
+        if self.treesit_deferred.is_none() {
+            self.run_pre_redisplay()?;
+            self.display_state.hooked = None;
+        }
+        self.run_window_change_functions()
     }
     /// Top-level frame FRAME's pane chrome, from its `romacs-pane-radius',
     /// `romacs-pane-dim' and `romacs-pane-chrome' parameters
@@ -1121,14 +1188,7 @@ impl Vm {
         for row in spine(self, self.font_alternative_family_value())? {
             let mut names = Vec::new();
             for symbol in spine(self, row)? {
-                let name = if symbol == Value::NIL { "nil" }
-                    else if symbol == Value::TRUE { "t" }
-                    else {
-                        symbol.index_if(7).and_then(|index| index.checked_sub(1))
-                            .and_then(|slot| self.symbol_names.get(slot))
-                            .map(String::as_str)
-                            .ok_or("symbolp required in alternative font family state")?
-                    };
+                let name = self.alternative_name(symbol).ok_or("symbolp required in alternative font family state")?;
                 names.push(name.to_owned());
             }
             rows.push(names);
@@ -1139,6 +1199,86 @@ impl Vm {
             self.display_state.set_font_alternative_families(rows);
         }
         Ok(self.display_state.font_alternatives.clone())
+    }
+    /// An alternative family's name: a symbol's, nil's or t's.
+    fn alternative_name(&self, symbol: Value) -> Option<&str> {
+        if symbol == Value::NIL { return Some("nil"); }
+        if symbol == Value::TRUE { return Some("t"); }
+        symbol.index_if(7).and_then(|index| index.checked_sub(1)).and_then(|slot| self.symbol_names.get(slot)).map(String::as_str)
+    }
+    /// Whether the alternative families' alist Lisp holds now names other
+    /// families than the state last observed (`font_alternative_state').
+    /// The live alist is walked from the variable's value: while each of
+    /// its conses is, by its bits, the one kept when its names last
+    /// matched, with the car and cdr it held then, it names the same
+    /// symbols; else its names are compared, and the conses kept again. No
+    /// kept bits are read through. An in-place `aset' of a family's name
+    /// string slips past: its symbol stays.
+    pub(super) fn font_alternatives_moved(&mut self) -> bool {
+        let root = self.font_alternative_family_value();
+        if self.alternative_cells_hold(root) { return false; }
+        let renamed = self.font_alternatives_renamed();
+        self.display_state.alternative_cells = (!renamed).then(|| (root.0, self.alternative_cells(root)));
+        renamed
+    }
+    /// Whether ROOT, the alist's value now, walked along the rows
+    /// FONT_ALTERNATIVES names, meets the conses `alternative_cells' kept, in
+    /// order, holding what they held, and ends where they ended.
+    fn alternative_cells_hold(&self, root: Value) -> bool {
+        let Some((seen, cells)) = &self.display_state.alternative_cells else { return false };
+        if *seen != root.0 { return false; }
+        let mut kept = cells.iter();
+        let mut rows = root;
+        for names in self.display_state.font_alternatives.family_alist() {
+            let Ok((row, rest)) = self.cons_pair(rows) else { return false };
+            if kept.next() != Some(&(rows.0, row.0, rest.0)) { return false; }
+            let mut tail = row;
+            for _ in names {
+                let Ok((symbol, next)) = self.cons_pair(tail) else { return false };
+                if kept.next() != Some(&(tail.0, symbol.0, next.0)) { return false; }
+                tail = next;
+            }
+            if tail != Value::NIL { return false; }
+            rows = rest;
+        }
+        rows == Value::NIL && kept.next().is_none()
+    }
+    /// The conses of ROWS, the alternative families' alist, as
+    /// `alternative_cells' keeps them, along the rows FONT_ALTERNATIVES
+    /// names.
+    fn alternative_cells(&self, mut rows: Value) -> Vec<(u64, u64, u64)> {
+        let mut cells = vec![];
+        for names in self.display_state.font_alternatives.family_alist() {
+            let Ok((row, rest)) = self.cons_pair(rows) else { break };
+            cells.push((rows.0, row.0, rest.0));
+            let mut tail = row;
+            for _ in names {
+                let Ok((symbol, next)) = self.cons_pair(tail) else { break };
+                cells.push((tail.0, symbol.0, next.0));
+                tail = next;
+            }
+            rows = rest;
+        }
+        cells
+    }
+    /// Whether the alternative families' alist names other families than
+    /// the state last observed, read without allocating. A malformed or
+    /// circular one reads as renamed, for `font_alternative_state' to
+    /// report.
+    fn font_alternatives_renamed(&self) -> bool {
+        let mut rows = self.font_alternative_family_value();
+        for names in self.display_state.font_alternatives.family_alist() {
+            let Ok((row, rest)) = self.cons_pair(rows) else { return true };
+            let mut tail = row;
+            for name in names {
+                let Ok((symbol, next)) = self.cons_pair(tail) else { return true };
+                if self.alternative_name(symbol) != Some(name.as_str()) { return true; }
+                tail = next;
+            }
+            if tail != Value::NIL { return true; }
+            rows = rest;
+        }
+        rows != Value::NIL
     }
     pub fn font_selection_order(&self) -> [romacs_layout_input::FontSelectionAttribute; 4] {
         self.display_state.font_selection_order.order()
@@ -2371,6 +2511,15 @@ impl Vm {
         self.display_state.previous.insert(id, snapshot.clone());
         snapshot
     }
+    /// The slots of `DISPLAY_VARIABLES`, resolved by name once while no
+    /// slot names another symbol (`Vm::special_changes`): every
+    /// `shown_key` reads them all.
+    fn display_variable_slots(&mut self) -> [usize; DISPLAY_VARIABLES.len()] {
+        if let Some((key, slots)) = self.display_state.variable_slots && key == self.special_changes { return slots; }
+        let slots = DISPLAY_VARIABLES.map(|name| self.slot(name));
+        self.display_state.variable_slots = Some((self.special_changes, slots));
+        slots
+    }
     /// What WINDOW's snapshot reads besides point, cursor and mode line.
     fn shown_key(&mut self, window: Value, width: u32, height: u32) -> Result<ShownKey> {
         let w = self.window(window)?;
@@ -2391,12 +2540,10 @@ impl Vm {
         };
         let terminal = self.terminal_bindings.iter().find(|binding| binding.buffer == buffer)
             .map(|binding| (binding.session, binding.revision));
+        let slots = self.display_variable_slots();
         let saved = self.slots[self.buffer_slot].value;
         self.slots[self.buffer_slot].value = buffer;
-        let variables = DISPLAY_VARIABLES.iter().map(|name| {
-            let slot = self.slot(name);
-            self.variable_value(slot).unwrap_or(Value::UNBOUND)
-        }).collect();
+        let variables = slots.iter().map(|&slot| self.variable_value(slot).unwrap_or(Value::UNBOUND)).collect();
         self.slots[self.buffer_slot].value = saved;
         let header = crate::window::Windows::new(self).header_line_format(window).map_err(crate::forwarded::fault_text)?;
         let selected = self.selected_window_value()?;
@@ -2480,6 +2627,18 @@ impl Vm {
             }
             snapshot.point_byte = offset;
         }
+        let Some(bands) = self.fresh_bands(root, slot, width, height, &key)? else { return Ok(None) };
+        bands.apply(&mut snapshot);
+        let Some(shown) = self.display_state.shown.get_mut(&id) else { return Ok(None) };
+        shown.point = point;
+        Ok(Some(snapshot))
+    }
+    /// The bands of the window in ROOT expanded again over its last full
+    /// snapshot's record KEY, as reuse paints them (`reuse_shown'), with
+    /// the faces they ask for; None when their Lisp changed what the window
+    /// shows or what the record rests on, so a full redisplay is due.
+    fn fresh_bands(&mut self, root: usize, slot: usize, width: u32, height: u32, key: &ShownKey) -> Result<Option<FreshBands>> {
+        let id = self.window(self.slots[root].value)?.id;
         // Face and font changes, `force-window-update' and new faces advance
         // the display version and drop the records this reuse rests on.
         let version = self.display_state.version;
@@ -2491,7 +2650,7 @@ impl Vm {
             return Ok(None);
         }
         let window = self.slots[root].value;
-        if self.shown_key(window, width, height)? != key {
+        if self.shown_key(window, width, height)? != *key {
             return Ok(None);
         }
         let (face, header_face) = (self.mode_line_face_name(window)?, self.header_line_face_name(window)?);
@@ -2500,15 +2659,12 @@ impl Vm {
         // reused text's handles index the table it was published with.
         if self.display_state.shown.get(&id).map(|shown| shown.table) != Some(table.id) { return Ok(None); }
         let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands, &face, &header_face)?;
-        (snapshot.mode_line, snapshot.header_line, snapshot.band_stretches) = (mode_line, header_line, band_stretches);
-        snapshot.mode_line_face = self.named(&table, &face).ok_or("mode-line face required")?;
-        snapshot.header_line_face = self.named(&table, &header_face).ok_or("header-line face required")?;
-        // The bands may have asked for faces the text's list predates.
-        let known = snapshot.faces.len();
-        snapshot.faces.extend_from_slice(table.faces.borrow().get(known..).unwrap_or(&[]));
-        let Some(shown) = self.display_state.shown.get_mut(&id) else { return Ok(None) };
-        shown.point = point;
-        Ok(Some(snapshot))
+        let mode_line_face = self.named(&table, &face).ok_or("mode-line face required")?;
+        let header_line_face = self.named(&table, &header_face).ok_or("header-line face required")?;
+        // The bands may have asked for faces the published list predates.
+        let known = self.display_state.previous.get(&id).map_or(0, |p| p.faces.len());
+        let added = table.faces.borrow().get(known..).unwrap_or(&[]).to_vec();
+        Ok(Some(FreshBands { mode_line, header_line, band_stretches, mode_line_face, header_line_face, added }))
     }
     /// The row of FACES for a `face' property VALUE: a face symbol's own
     /// row, and for a list of faces or an attribute list a row merged as
