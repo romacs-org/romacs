@@ -5436,10 +5436,14 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
     if v == Value::NIL || !v.tag_is(0) {
         return None;
     }
-    let Some(data::Object::Buffer(t)) = vm.objects.get_entry_mut(v.payload() as usize - 1) else {
+    let index = v.payload() as usize - 1;
+    let kind = (target.0 >> 3) as usize;
+    if kind == Primitive::GotoChar as usize {
+        return buffer_goto_char(vm, index, x);
+    }
+    let Some(data::Object::Buffer(t)) = vm.objects.get(index) else {
         return None;
     };
-    let kind = (target.0 >> 3) as usize;
     let accessible = t.accessible();
     let number = if kind == Primitive::CharAfter as usize {
         if x != Value::NIL
@@ -5464,16 +5468,6 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
         } else {
             None
         }
-    } else if kind == Primitive::GotoChar as usize {
-        if !x.tag_is(1) {
-            return None;
-        }
-        let c = (x.0 as i64 >> 2).saturating_sub(1).max(0) as usize;
-        t.point = t
-            .byte_of_char(coordinates::CharOffset(c.min(t.len_chars())))
-            .unwrap()
-            .clamp(accessible.start, accessible.end);
-        Some(x.0 as i64 >> 2)
     } else if kind == Primitive::Point as usize {
         Some((t.char_of_byte(t.point).unwrap().0 + 1) as i64)
     } else if kind == Primitive::PointMin as usize {
@@ -5484,6 +5478,24 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
         Some(t.len_chars() as i64)
     };
     Some(number.map(|n| Value::fixnum(n).unwrap()).unwrap_or(Value::NIL))
+}
+/// The fixnum `goto-char` X of `buffer_read_value`, in the buffer at object
+/// INDEX: its one store, so the only branch that takes the entry `&mut`.
+fn buffer_goto_char(vm: &mut Vm, index: usize, x: Value) -> Option<Value> {
+    // A shared look first: a unibyte buffer falls back unmarked.
+    if !x.tag_is(1) || !matches!(vm.objects.get(index), Some(data::Object::Buffer(_))) {
+        return None;
+    }
+    let Some(data::Object::Buffer(t)) = vm.objects.get_entry_mut(index) else {
+        return None;
+    };
+    let accessible = t.accessible();
+    let c = (x.0 as i64 >> 2).saturating_sub(1).max(0) as usize;
+    t.point = t
+        .byte_of_char(coordinates::CharOffset(c.min(t.len_chars())))
+        .unwrap()
+        .clamp(accessible.start, accessible.end);
+    Some(x)
 }
 /// A type predicate kernel: BODY maps the argument to a bool with no
 /// fallback, as GNU's `Bconsp` and friends do.
