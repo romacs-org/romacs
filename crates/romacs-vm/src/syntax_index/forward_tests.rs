@@ -265,6 +265,137 @@ fn a_quit_on_entry_publishes_nothing() {
     assert!(index.stats.folds[0] > folds[0], "the warm scan after it folds");
 }
 
+/// A scan of CALL over TEXT through INDEX alone, polling as POLLS says:
+/// its end.
+fn indexed(index: &mut SyntaxIndex, text: &[u8], table: &[i32; 128], (polls, done): (Option<u64>, Option<i64>),
+           resume: Option<Scan>, call: Call) -> Result<Option<i64>, Stopped<Box<Scan>>> {
+    let properties = vec![None; text.len()];
+    let ppss = BTreeMap::new();
+    let live = Live { text, table, properties: &properties, polls, steps: Cell::new(0) };
+    let options = Options { propertize_done: done, ..Options::default() };
+    let mut scanner = Scanner { begv: live.pos(1), zv: live.pos(i64::MAX), text: &live, options, ppss: &ppss, defun_start: None, modiff: 1 };
+    let context = Context { table: 1, writes: 0, escaped_ends: false, properties: done.is_some() };
+    index.scan_lists(&mut scanner, text.len(), context, resume, (call.from, call.count, call.depth), call.sexpflag)
+}
+
+/// A cold scan whose quit probe comes due right after its first fold, the
+/// fold whose leaf summary it made then: the run publishes nothing. Its
+/// counters are as they were but for the quit, it goes on from where it
+/// stopped to the scanner's value, and the next scan makes every summary
+/// a scan that never stopped makes, that first one included.
+#[test]
+fn a_quit_after_building_a_fold_publishes_nothing() {
+    let text = format!("({})", "x".repeat(200));
+    let (text, table) = (text.as_bytes(), lists_table());
+    let call = Call { from: 1, count: 1, depth: 0, sexpflag: true };
+    let mut control = SyntaxIndex { leaf: 16, ..SyntaxIndex::default() };
+    let expected = indexed(&mut control, text, &table, (None, None), None, call).ok();
+    let mut index = SyntaxIndex { leaf: 16, ..SyntaxIndex::default() };
+    let before = index.stats;
+    // The probe's first call is on entry, its second after the first fold.
+    let stopped = indexed(&mut index, text, &table, (Some(2), None), None, call);
+    let Err(Stopped { halt: Halt::Poll, suspended: Some(scan) }) = stopped else { panic!("a poll after the first fold") };
+    assert!(scan.from.char > 16, "the scan stopped after its first fold, at {}", scan.from.char);
+    let after = index.stats;
+    assert_eq!((after.leaf_scans, after.folds, after.skipped, after.list_served), (before.leaf_scans, before.folds, before.skipped, before.list_served),
+               "the stopped run's counts are dropped");
+    assert_eq!(after.list_declined[Decline::Quit as usize], before.list_declined[Decline::Quit as usize] + 1);
+    assert_eq!(indexed(&mut index, text, &table, (None, None), Some(*scan), call).ok(), expected, "it goes on where it stopped");
+    let mut again = SyntaxIndex { leaf: 16, ..SyntaxIndex::default() };
+    indexed(&mut again, text, &table, (Some(2), None), None, call).ok();
+    let scans = again.stats.leaf_scans;
+    indexed(&mut again, text, &table, (None, None), None, call).ok();
+    assert_eq!(again.stats.leaf_scans - scans, control.stats.leaf_scans, "the stopped run's summary is made again");
+}
+
+/// The fields of a forward scan's continuation the scanner reads next.
+fn going_on(scan: &Scan) -> (crate::syntax_scan::ScanAt, i64, i64, i64, i64, bool, i64) {
+    (scan.at, scan.reached().char, scan.count, scan.depth, scan.min_depth, scan.mathexit, scan.last_good)
+}
+
+/// A warm scan whose frontier is its first cut, with a quit poll that does
+/// not quit coming due at the fold that reaches it: the stop for
+/// `internal--syntax-propertize' comes first, with the scanner's arguments
+/// and continuation, and the poll after the callback.
+#[test]
+fn a_frontier_on_a_cut_comes_before_a_poll_due_there() {
+    let text = format!("({})", "x".repeat(100));
+    let (text, table) = (text.as_bytes(), lists_table());
+    let call = Call { from: 1, count: 1, depth: 0, sexpflag: true };
+    let mut index = SyntaxIndex { leaf: 16, ..SyntaxIndex::default() };
+    indexed(&mut index, text, &table, (None, Some(i64::MAX)), None, call).ok();
+    // The cut after the first leaf, at position 17, is the frontier.
+    let plain = {
+        let properties = vec![None; text.len()];
+        let ppss = BTreeMap::new();
+        let live = Live { text, table: &table, properties: &properties, polls: None, steps: Cell::new(0) };
+        let options = Options { propertize_done: Some(17), ..Options::default() };
+        let mut scanner = Scanner { begv: live.pos(1), zv: live.pos(i64::MAX), text: &live, options, ppss: &ppss, defun_start: None, modiff: 1 };
+        let Err(Stopped { halt, suspended: Some(scan) }) = scanner.scan_lists(1, 1, 0, true) else { panic!("a stop at the frontier") };
+        (halt, going_on(&scan))
+    };
+    assert_eq!(plain.0, Halt::Propertize(18, 17));
+    let folds = index.stats.folds;
+    let mut events = Vec::new();
+    // The probe's second call, after the first fold, is due; so is its fourth.
+    let first = indexed(&mut index, text, &table, (Some(2), Some(17)), None, call);
+    let Err(Stopped { halt, suspended: Some(scan) }) = first else { panic!("a stop") };
+    assert!(index.stats.folds[1] > folds[1] || index.stats.folds[0] > folds[0], "the first leaf folded");
+    assert_eq!((halt, going_on(&scan)), plain, "the stop and the scanner's continuation");
+    events.push("propertize");
+    let next = indexed(&mut index, text, &table, (Some(2), Some(i64::MAX)), Some(*scan), call);
+    if matches!(next, Err(Stopped { halt: Halt::Poll, .. })) {
+        events.push("poll");
+    }
+    assert_eq!(events, ["propertize", "poll"]);
+}
+
+/// Five tables over one text, one of them making a character next to a
+/// cut an escape: four warm, the oldest used again, then the fifth. The
+/// one used least recently gives its slot up, the one used again keeps its
+/// summaries, and every scan, after an edit at a cut and after a write to
+/// a table too, is the scanner's.
+#[test]
+fn a_fifth_table_takes_the_least_recently_used_slot() {
+    let mut text = b"(ab (cd) e) ".repeat(40);
+    let leaf = 16;
+    let tables: Vec<[i32; 128]> = (0..5).map(|k| {
+        let mut table = lists_table();
+        // Table 4 makes `e', a leaf's last character in places, an escape.
+        if k == 4 { table[usize::from(b'e')] = scan::SESCAPE; }
+        if k == 1 { table[usize::from(b'c')] = scan::SSYMBOL; }
+        table
+    }).collect();
+    let mut index = SyntaxIndex { leaf, ..SyntaxIndex::default() };
+    let call = Call { from: 1, count: 100, depth: 0, sexpflag: true };
+    let ppss = BTreeMap::new();
+    let mut scan = |index: &mut SyntaxIndex, text: &[u8], k: usize, writes: u64| {
+        let properties = vec![None; text.len()];
+        let live = Live { text, table: &tables[k], properties: &properties, polls: None, steps: Cell::new(0) };
+        let mut scanner = Scanner { begv: live.pos(1), zv: live.pos(i64::MAX), text: &live, options: Options::default(), ppss: &ppss, defun_start: None, modiff: 1 };
+        let expected = scanner.scan_lists(call.from, call.count, call.depth, true).map_err(|stopped| stopped.halt);
+        let context = Context { table: u64::try_from(k).unwrap() + 1, writes, escaped_ends: false, properties: false };
+        let scans = index.stats.leaf_scans;
+        let actual = index.scan_lists(&mut scanner, text.len(), context, None, (call.from, call.count, call.depth), true).map_err(|stopped| stopped.halt);
+        assert_eq!(actual, expected, "table {k}");
+        index.stats.leaf_scans - scans
+    };
+    for k in 0..4 { scan(&mut index, &text, k, 0); }
+    assert_eq!(scan(&mut index, &text, 0, 0), 0, "table 0 warm");
+    assert_eq!(index.stats.context_evictions, 0);
+    assert!(scan(&mut index, &text, 4, 0) > 0, "table 4 cold");
+    assert_eq!(index.stats.context_evictions, 1);
+    assert_eq!(scan(&mut index, &text, 0, 0), 0, "table 0, used again before table 4 came, keeps its summaries");
+    assert!(scan(&mut index, &text, 1, 0) > 0, "table 1, least recently used, gave its slot up");
+    // An edit at the cut after the first leaf, then a write to table 0.
+    text.splice(16..16, b"e(".iter().copied());
+    index.edit(16, 16, 2);
+    for k in [4, 0, 2, 3, 1] { scan(&mut index, &text, k, 0); }
+    let invalidations = index.stats.context_invalidations;
+    scan(&mut index, &text, 0, 1);
+    assert_eq!(index.stats.context_invalidations, invalidations + 1);
+}
+
 /// Text of lists, strings, comments, math, escapes and words, as chunks.
 fn list_text(rng: &mut Rng, chunks: usize) -> Vec<u8> {
     const CHUNKS: [&[u8]; 14] = [b"(a [b] {c}) ", b"/*)*/ ", b"$$a$$ ", b"\"a\\\"b(\"", b"'x ", b"a_* / ) */ ",
@@ -359,9 +490,14 @@ fn randomized_forward(seed: u64, cases: u64) {
             let call = random_call(&mut rng, text.len());
             // A frontier within a few leaves of FROM half the time: most calls
             // end before one further on.
-            let done = match rng.below(4) {
+            // A frontier within a few leaves of FROM most of the time: most
+            // calls end before one further on. Now and then one before FROM,
+            // or on a cut of the fresh partition.
+            let done = match rng.below(8) {
                 0 => None,
                 1 => Some(i64::MAX),
+                2 => Some((call.from - i64::try_from(rng.below(2 * leaf)).unwrap()).max(1)),
+                3 => Some(position(leaf * (1 + rng.below(text.len() / leaf + 1)))),
                 _ => Some(call.from.max(1) + i64::try_from(rng.below(4 * leaf + 1)).unwrap()),
             };
             let polls = rng.chance(25).then(|| 3 + rng.next() % 60);

@@ -6,3 +6,4 @@ overlay_queries_alloc: installs a #[global_allocator], and an executable has one
 primitive_call_cost: counts instructions, and another test's char-table write renews a syntax table's flat view mid-measurement
 success_allocations: installs a #[global_allocator], and an executable has one
 world_image: installs a #[global_allocator], and an executable has one
+syntax_lists: counts what each scan does to a buffer's syntax index, which any char-table write in the process moves

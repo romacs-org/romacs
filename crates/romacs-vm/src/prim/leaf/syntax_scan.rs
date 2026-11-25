@@ -1103,6 +1103,40 @@ mod tests {
                    "((nil 7) (nil 7) (scan-error \"Containing expression ends prematurely\" 1 2) 7 (0 3 2 1 0 0 t 3))");
     }
 
+    /// A quit pending when an indexed list scan starts stops it there,
+    /// through the buffer's own view: the probe is asked at once, not at
+    /// the end of a countdown, so a warm scan that would fold its whole
+    /// text folds and reads nothing (GNU's maybe_quit before scan_lists'
+    /// setup).
+    #[test]
+    fn a_pending_quit_stops_an_indexed_scan_on_entry() {
+        use crate::syntax_scan::{self as scan, Halt, Scanner};
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.eval_source_raw("(progn (set-buffer (get-buffer-create \"quit\")) (insert \"(\" (make-string 20000 ?x) \")\")
+                              (scan-lists 1 1 0) (scan-lists 1 1 0))").unwrap();
+        let signal = std::sync::Arc::new(crate::QuitSignal::new());
+        vm.share_quit_signal(signal.clone());
+        vm.enter_busy();
+        assert!(signal.interrupt());
+        vm.mutator.native_quit = true;
+        let index = vm.buffer_index().unwrap();
+        let table = vm.buffer_syntax_table(index);
+        vm.flatten_table(table);
+        let view = super::View::new(&vm, index, table, false, true);
+        let super::Body::Multibyte(text, _) = &view.body else { panic!("a multibyte buffer") };
+        let context = crate::syntax_index::Context { table: vm.char_table_serial(table), writes: crate::char_table::writes(),
+                                                     escaped_ends: false, properties: false };
+        let (begv, zv) = (scan::Text::pos(&view, 1), scan::Text::pos(&view, i64::MAX));
+        let mut scanner = Scanner { text: &view, begv, zv, options: scan::Options::default(), ppss: &super::UNANSWERED, defun_start: None, modiff: 0 };
+        let before = text.syntax.borrow().stats;
+        assert!(before.skipped > 18_000, "the second scan folded: {before:?}");
+        let run = text.syntax.borrow_mut().scan_lists(&mut scanner, text.len_chars(), context, None, (1, 1, 0), false);
+        assert!(matches!(run, Err(scan::Stopped { halt: Halt::Poll, .. })), "the scan stops on entry");
+        let after = text.syntax.borrow().stats;
+        assert_eq!((after.folds, after.skipped, after.leaf_scans), (before.folds, before.skipped, before.leaf_scans));
+    }
+
     #[test]
     fn a_property_edit_changes_a_warm_unbounded_sexp_scan() {
         let mut vm = Vm::new();
