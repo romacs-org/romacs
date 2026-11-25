@@ -1151,7 +1151,8 @@ events (file notification's among them) or requeued input wait for
 read_char, as it does on detect_input_pending, or once a timer ran, so the
 reader sees what the timer changed.  SEND-PROC, not in GNU, is the
 process the calling send writes (`romacs--sending-processes'): the wait
-ends once it can take more.  Return GNU's got_some_output."
+is one round, which ends once it can take more or after what else was
+ready is handled, so the send writes again.  Return GNU's got_some_output."
   (let* ((wait (cond ((memq limit '(minimum forever idle)) limit) (t 'timeout)))
          (end-time (if (eq wait 'timeout) (+ (float-time) limit)))
          (got-some-output -1)
@@ -1235,7 +1236,7 @@ ends once it can take more.  Return GNU's got_some_output."
                         (setq got-some-output nread))
                     (if (and (> nread 0) (eq wait-proc ready))
                         (setq wait 'minimum)))))
-                (if (eq wait 'idle) (setq done t)))))))
+                (if (or (eq wait 'idle) send-proc) (setq done t)))))))
     (if (and wait-proc (/= (romacs--proc-get wait-proc 'nbytes-read) prev-nbytes))
         (setq got-some-output (- (romacs--proc-get wait-proc 'nbytes-read) prev-nbytes)))
     got-some-output))
