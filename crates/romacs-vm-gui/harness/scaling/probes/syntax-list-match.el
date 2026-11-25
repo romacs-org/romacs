@@ -6,6 +6,7 @@
 ;; between: nothing in N.
 (scaling-probe syntax-list-match-warm :n 1000 :k 64 :budget 0.5
   :setup (with-current-buffer (scaling--syntax-buffer " scaling-list-match-warm" n)
+           (setq-local parse-sexp-ignore-comments t)
            (goto-char (point-min))
            (insert "{\n")
            (goto-char (point-max))
@@ -23,6 +24,7 @@
 ;; the end, and folds the rest: nothing in N.
 (scaling-probe syntax-list-match-edit :n 1000 :k 64 :budget 0.5
   :setup (with-current-buffer (scaling--syntax-buffer " scaling-list-match-edit" n)
+           (setq-local parse-sexp-ignore-comments t)
            (goto-char (point-min))
            (insert "{\n")
            (goto-char (point-max))
