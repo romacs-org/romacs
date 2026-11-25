@@ -153,7 +153,7 @@ call stays running until its answer is ready."
                                (when answer (romacs-agent-tools--finish session key name start (car answer) nil))
                                answer)
                            (unless ok (romacs-agent-tools--finish session key name start "signalled an error" t)))))
-                     (nth 2 value)))
+                     (nth 2 value) (nth 3 value)))
                 (romacs-agent-tools--finish session key name start value nil)
                 value))
           (unless done (romacs-agent-tools--finish session key name start "signalled an error" t)))))))

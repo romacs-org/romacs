@@ -118,6 +118,40 @@ systemd reports `state' and `invocation' for each unit."
           (should-error (funcall (nth 1 reply)) :type 'user-error)
           (should-not (gethash "child" romacs-agent-watch--watches)))))))
 
+(ert-deftest romacs-agent-watch-teardown-releases-an-exclusive-unit-check ()
+  (romacs-agent-watch-tests--with
+    (let* ((romacs-agent-watch--checking (make-hash-table :test #'equal))
+           (romacs-mcp--deferred nil) (romacs-mcp--deferred-index (make-hash-table :test #'equal))
+           (romacs-mcp--deferred-alarm nil) (romacs-mcp--deferred-timer nil)
+           (romacs-mcp--listener nil) (romacs-mcp--peers nil) (romacs-mcp--socket nil)
+           (romacs-mcp--queue nil) (romacs-mcp--queued (make-hash-table :test #'equal))
+           (romacs-mcp--active nil) (romacs-mcp--timer nil) (romacs-mcp--generation 1)
+           (args (romacs-mcp--object "taskId" "child" "unit" "check"))
+           (romacs-mcp-tools nil)
+           (romacs-mcp-call-function #'romacs-agent-tools--call)
+           (peer (make-pipe-process :name "watch-test-peer" :noquery t)))
+      (process-put peer 'romacs-agent-session "lead")
+      (romacs-mcp-register-tool
+       "test_watch" "Check a unit for a task."
+       (romacs-mcp--schema '(("taskId" . "string") ("unit" . "string")) nil)
+       #'romacs-agent-watch--watch)
+      (unwind-protect
+          (cl-letf (((symbol-function 'romacs-agent-watch--output) #'ignore)
+                    ((symbol-function 'romacs-agent-tools--note) #'ignore)
+                    ((symbol-function 'romacs-mcp--send) #'ignore)
+                    ((symbol-function 'romacs-mcp--live-p) (lambda (&rest _) t))
+                    ((symbol-function 'romacs-mcp--dispatch)
+                     (lambda (&rest _)
+                       (romacs-mcp--call (romacs-mcp--object "name" "test_watch" "arguments" args) nil))))
+            (dolist (teardown (list (lambda () (romacs-mcp--withdraw peer 2 1)) #'romacs-mcp-stop))
+              (romacs-mcp--enqueue peer (romacs-mcp--object "id" 1))
+              (romacs-mcp--drain)
+              (should (gethash (cons peer 1) romacs-mcp--deferred-index))
+              (should-error (romacs-agent-watch--watch args) :type 'user-error)
+              (funcall teardown)
+              (should (zerop (hash-table-count romacs-agent-watch--checking)))))
+        (delete-process peer)))))
+
 (ert-deftest romacs-agent-watch-answers-no-result ()
   ;; What it watches, never the task's last result.
   (romacs-agent-watch-tests--with
