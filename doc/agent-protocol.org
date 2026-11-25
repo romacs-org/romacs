@@ -811,9 +811,26 @@ was accepted on and, on =service-relay.sock=, from =agents/transport=.
   never prompts), =ServerAliveInterval=15= and =ServerAliveCountMax=3=
   (a dead link ends within a minute), and a =ControlMaster= with
   =ControlPersist=, so a reconnect costs a new channel, not a new
-  handshake.  When the pipe ends the client connects again, says hello
-  and resumes from its revision and cursors (Generations, revisions and
-  cursors), as after any reconnect.
+  handshake.  The master's socket is in the agents' runtime directory;
+  where its name would not fit a socket's, there is no master.  When the
+  pipe ends the client connects again, after 0.25 s, doubled each time
+  up to 30 s until the machine answers; it says hello and watches the
+  list and the sessions it follows afresh.
+- *Measured* (build 28e8fac9 with this branch's Lisp, a Ryzen 9 5950X
+  client, an i5-2520M over a tailnet with an 8.5 ms ping, a fake session
+  in each private service):
+
+  | ssh to          | connect, cold | connect, master | round trip p50 | events/s | again, by itself |
+  |-----------------+---------------+-----------------+----------------+----------+------------------|
+  | localhost       | 0.27-0.39 s   | 10-14 ms        | 0.24 ms        | 16,700   | 261 ms           |
+  | the i5-2520M    | 0.28-0.34 s   | 25-41 ms        | 8.2-8.7 ms     | 4,600    | 288 ms           |
+
+  A connect is ssh's, then hello and the list; a round trip is a request
+  the service refuses at once; events are 2,000 units of 400 bytes from
+  the Romacs client; again is from a pipe killed to the list watched,
+  0.25 s of it the wait.  A cold connect to the i5-2520M took 2.2 to 2.9 s
+  now and then, as plain ssh did (2.5 s); its service answers a hello in
+  5 ms on the machine itself.
 
 ** The headless service
 - *Its entry.*  =romacs-vm-gui --batch -l romacs-agent-headless -f
@@ -854,8 +871,11 @@ an editor.
 - A session id is unique only within its service.  Everything a client
   keeps of a session, its mirror, its chat and its board row, is keyed
   by host and id together.
-- The board puts hosts above projects: hosts, then each host's
-  projects, then their threads.
+- The board shows one host's sessions at a time (=romacs-agents-remote=
+  asks which); every host stays connected.  Hosts above projects in one
+  board (hosts, then each host's projects, then their threads) needs the
+  board to draw several sources at once, its rows keyed by host and id:
+  to come, over the board's projects and threads.
 
 * Clients
 

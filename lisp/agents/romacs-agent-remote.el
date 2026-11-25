@@ -3,12 +3,16 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; Romacs on another machine (doc/agent-protocol.org, Clients): the
-;; agent sessions of the machine `romacs-agent-remote-host' names, drawn
-;; here as this editor draws its own.  `romacs-relay connect' carries the
-;; protocol from that machine's service to a socket here; a client
-;; (romacs-agent-client.el) mirrors what the service serves; and this is
-;; a chat's source (`romacs-agent-log--source') made of that client.
+;; Romacs on other machines (doc/agent-protocol.org, Clients and
+;; Transports): the agent sessions of the machines
+;; `romacs-agent-remote-hosts' names, drawn here as this editor draws its
+;; own.  An ssh pipe (`ssh HOST romacs-relay stdio') or `romacs-relay
+;; connect' to a relay's URL carries the protocol from a machine's service
+;; here; a client (romacs-agent-client.el) mirrors what the service
+;; serves; and each machine is a chat's source (`romacs-agent-log--source')
+;; made of its client, so what is kept of a session (its mirror, its chat)
+;; is kept by machine and id together.  A connection that ends is made
+;; again, a little later each time, until the machine is let go.
 ;;
 ;; A session here is a mirror: a session record made from the row the
 ;; service sends, never one of this editor's (`romacs-agent--sessions'),
@@ -30,27 +34,79 @@
   "Another machine's agent sessions."
   :group 'romacs-agent)
 
+(defcustom romacs-agent-remote-hosts nil
+  "The other machines whose agent sessions this editor shows, each
+\\(NAME . PLACE), NAME how it is called here.  PLACE is either
+\\(:ssh DESTINATION :relay COMMAND), the machine reached over ssh, where
+DESTINATION is what ssh takes (a host, USER@HOST, a Host of its config)
+and COMMAND runs `romacs-relay' in the remote shell, which is no login
+shell (`romacs-agent-remote-relay-command' when it is left out); or
+\\(:url URL), the machine's relay URL (wss://HOST/agents), reached through
+`romacs-relay connect'."
+  :type '(alist :key-type (string :tag "Name")
+                :value-type (choice (list :tag "SSH" (const :ssh) (string :tag "Destination")
+                                          (const :relay) (string :tag "Remote romacs-relay"))
+                                    (list :tag "Relay URL" (const :url) string)))
+  :group 'romacs-agent-remote)
+
 (defcustom romacs-agent-remote-host nil
-  "The machine whose agent sessions this editor shows: its relay's URL,
-as `romacs-relay connect' takes it (wss://HOST/agents), or nil."
+  "A machine's relay URL, as `romacs-relay connect' takes it
+\\(wss://HOST/agents), or nil: a host of `romacs-agent-remote-hosts' named
+by its URL."
   :type '(choice (const :tag "None" nil) string) :group 'romacs-agent-remote)
+(make-obsolete-variable 'romacs-agent-remote-host 'romacs-agent-remote-hosts "0.0.22")
 
 (defcustom romacs-agent-remote-relay "romacs-relay"
-  "The `romacs-relay' program."
+  "The `romacs-relay' program here, which `romacs-relay connect' runs."
   :type 'string :group 'romacs-agent-remote)
 
+(defcustom romacs-agent-remote-relay-command "romacs-relay"
+  "How the remote shell runs `romacs-relay' over ssh, for a host that names
+no command of its own: an absolute path, or one from the remote home
+\\(as ~/PATH), since ssh's remote shell is no login shell."
+  :type 'string :group 'romacs-agent-remote)
+
+(defcustom romacs-agent-remote-ssh "ssh"
+  "The ssh program."
+  :type 'string :group 'romacs-agent-remote)
+
+(defconst romacs-agent-remote--ssh-options
+  '("-T" "-x" "-o" "BatchMode=yes" "-o" "ServerAliveInterval=15" "-o" "ServerAliveCountMax=3")
+  "ssh's options for a pipe to a service: no pty and no X; never a prompt;
+a dead link ended within a minute.")
+
+(defconst romacs-agent-remote--master-options '("-o" "ControlMaster=auto" "-o" "ControlPersist=600")
+  "ssh's options for a master connection kept ten minutes, so connecting
+again costs a channel, not a handshake.")
+
+(defconst romacs-agent-remote--socket-path-most 107
+  "The most bytes of a Unix socket's file name.")
+
+(defconst romacs-agent-remote--retry-first 0.25
+  "The seconds before a machine whose connection ended is connected again
+the first time: a master connection makes it a channel's cost.")
+
+(defconst romacs-agent-remote--retry-most 30
+  "The most seconds between attempts to connect a machine again.")
+
 (cl-defstruct (romacs-agent-remote (:constructor romacs-agent-remote--make) (:copier nil))
-  "Another machine's sessions as a chat's source: the CLIENT of its
-service, the RELAY process that carries it here, the mirror of each of
-its sessions, by id (SESSIONS), their CHATS by id, while it connects the
-DIAL its one attempt is named by, and the PROJECTS and PROVIDERS its
-service last listed (`agents/projects.list', `agents/providers.list')."
-  client relay dial projects providers
+  "Another machine's sessions as a chat's source: its NAME and PLACE
+\\(`romacs-agent-remote-hosts'; a socket's file name for one reached
+directly), the CLIENT of its service, the RELAY process that carries it
+here, the mirror of each of its sessions, by id (SESSIONS), their CHATS by
+id, while it connects the DIAL its one attempt is named by, the PROJECTS
+and PROVIDERS its service last listed (`agents/projects.list',
+`agents/providers.list'), and, while it is to be connected again, the
+RETRY timer and the seconds it waits (DELAY)."
+  name place client relay dial projects providers retry (delay romacs-agent-remote--retry-first)
   (sessions (make-hash-table :test #'equal))
   (chats (make-hash-table :test #'equal)))
 
+(defvar romacs-agent-remote--sources (make-hash-table :test #'equal)
+  "Each machine this editor is connected to, by name: its source.")
+
 (defvar romacs-agent-remote--source nil
-  "The other machine this editor shows the sessions of, or nil: one at a time.")
+  "The other machine whose sessions the board shows, or nil.")
 
 ;;; Mirrors
 
@@ -123,10 +179,15 @@ date from it: the same record for its id each time."
   (romacs-agent-log--separator t)
   (romacs-agent-log--header-show))
 
+(defun romacs-agent-remote--of (client)
+  "The machine whose service CLIENT is connected to, or nil."
+  (if (and romacs-agent-remote--source (eq client (romacs-agent-remote-client romacs-agent-remote--source)))
+      romacs-agent-remote--source
+    (cl-find client (hash-table-values romacs-agent-remote--sources) :key #'romacs-agent-remote-client)))
+
 (defun romacs-agent-remote--followed (client id notice)
   "What came of following session ID on CLIENT, in its chat and board."
-  (when-let* ((source romacs-agent-remote--source)
-              ((eq client (romacs-agent-remote-client source))))
+  (when-let* ((source (romacs-agent-remote--of client)))
     (pcase notice
       (`(row ,row) (romacs-agent-remote--mirror source row))
       (`(pending ,requests) (romacs-agent-remote--waits source id requests)))
@@ -147,7 +208,7 @@ date from it: the same record for its id each time."
             ('(ended)
              (romacs-agent-log--writing
                (romacs-agent-log--note nil (substitute-command-keys
-                                            "the connection ended: \\[romacs-agents-remote] connects again"))))))))))
+                                            "the connection ended: connecting again"))))))))))
 
 (add-hook 'romacs-agent-client-follow-functions #'romacs-agent-remote--followed)
 
@@ -422,9 +483,11 @@ its key is the service's, whatever its parent here."
     (romacs-agent-remote--mirror source row)))
 
 (defun romacs-agent-remote--rows-changed (client _changed _removed)
-  "CLIENT's list changed: the board shows it again."
-  (when (and romacs-agent-remote--source (eq client (romacs-agent-remote-client romacs-agent-remote--source)))
-    (romacs-agent-board--refresh)))
+  "CLIENT's list changed: its machine answers, so a connection that ends
+is tried again soon; the board shows it again when it shows that machine."
+  (when-let* ((source (romacs-agent-remote--of client)))
+    (setf (romacs-agent-remote-delay source) romacs-agent-remote--retry-first)
+    (when (eq source romacs-agent-remote--source) (romacs-agent-board--refresh))))
 
 (add-hook 'romacs-agent-client-rows-functions #'romacs-agent-remote--rows-changed)
 
@@ -432,7 +495,7 @@ its key is the service's, whatever its parent here."
   "Start a session on SOURCE's machine: its project read among those its
 service listed, CWD offered, its provider among its instances, its first
 prompt; its chat shown once the service lists it."
-  (romacs-agent-remote--client)
+  (romacs-agent-remote--live-client source)
   (let* ((projects (mapcar (lambda (p) (gethash "cwd" p)) (romacs-agent-remote-projects source)))
          (providers (mapcar (lambda (p) (gethash "name" p)) (romacs-agent-remote-providers source)))
          (project (completing-read "Project on the other machine: " projects nil nil
@@ -456,7 +519,7 @@ prompt; its chat shown once the service lists it."
 
 (defun romacs-agent-remote--show-when-listed (source id deadline)
   "Show the chat of SOURCE's session ID once its service lists it, until DEADLINE."
-  (cond ((not (eq source romacs-agent-remote--source)))
+  (cond ((not (eq source (gethash (romacs-agent-remote-name source) romacs-agent-remote--sources))))
         ((gethash id (romacs-agent-remote--rows source))
          (pop-to-buffer (romacs-agent-remote-chat id)))
         ((< (float-time) deadline)
@@ -465,50 +528,127 @@ prompt; its chat shown once the service lists it."
 
 ;;; Connecting
 
-(defun romacs-agent-remote--socket ()
-  "The local socket `romacs-relay connect' listens on: in a directory of
-its own, which the relay makes the user's alone (the editor makes
-`romacs-agent--runtime-root' 0755)."
-  (expand-file-name "remote/remote.sock" (romacs-agent--runtime-root)))
+(defun romacs-agent-remote--hosts ()
+  "Every machine named, each (NAME . PLACE): `romacs-agent-remote-hosts',
+then `romacs-agent-remote-host' as a machine named by its URL."
+  (append romacs-agent-remote-hosts
+          (and romacs-agent-remote-host (list (list romacs-agent-remote-host :url romacs-agent-remote-host)))))
 
-(defun romacs-agent-remote-connect (&optional socket)
-  "Show another machine's agent sessions: connect to the service whose
-SOCKET is given, else start `romacs-relay connect' to
-`romacs-agent-remote-host' and connect through it once it listens, the
-editor not waiting.  Connected again, the chats it shows are followed
-afresh.  The source."
-  (let ((source (or romacs-agent-remote--source (romacs-agent-remote--make))))
+(defun romacs-agent-remote--socket (name)
+  "The local socket `romacs-relay connect' listens on for the machine NAME:
+in a directory of its own, which the relay makes the user's alone (the
+editor makes `romacs-agent--runtime-root' 0755)."
+  (expand-file-name (format "remote/%s.sock" (substring (secure-hash 'sha256 name) 0 16))
+                    (romacs-agent--runtime-root)))
+
+(defun romacs-agent-remote--control-dir ()
+  "The directory of ssh's master connections' sockets, made the user's
+alone, in the agents' runtime directory; nil when a socket there would
+not fit a socket's name: ssh's digest (40 bytes) and the suffix of its
+temporary name (17) after it."
+  (let ((dir (expand-file-name "ssh" (romacs-agent--runtime-root))))
+    (when (<= (+ (string-bytes dir) 1 40 17) romacs-agent-remote--socket-path-most)
+      (make-directory dir t)
+      (set-file-modes dir #o700)
+      dir)))
+
+(defun romacs-agent-remote--ssh-command (place control)
+  "The command whose pipes carry the protocol to the service of PLACE, a
+machine reached over ssh, its master connection's socket in the directory
+CONTROL, named by ssh's digest of the destination (%C); with no CONTROL,
+no master."
+  `(,romacs-agent-remote-ssh ,@romacs-agent-remote--ssh-options
+                             ,@(if control
+                                   `(,@romacs-agent-remote--master-options
+                                     "-o" ,(concat "ControlPath=" (expand-file-name "%C" control)))
+                                 '("-o" "ControlMaster=no" "-o" "ControlPath=none"))
+                             ,(plist-get place :ssh)
+                             ,(or (plist-get place :relay) romacs-agent-remote-relay-command) "stdio"))
+
+(defun romacs-agent-remote--stderr (source)
+  "The buffer of what SOURCE's ssh says on its standard error, emptied."
+  (with-current-buffer (get-buffer-create (format " *romacs-agent ssh %s*" (romacs-agent-remote-name source)))
+    (erase-buffer)
+    (current-buffer)))
+
+(defun romacs-agent-remote--said-last (source)
+  "The last line SOURCE's ssh said on its standard error, or nil."
+  (when-let* ((buffer (get-buffer (format " *romacs-agent ssh %s*" (romacs-agent-remote-name source)))))
+    (with-current-buffer buffer
+      (car (last (split-string (buffer-string) "[\r\n]+" t "[ \t]+"))))))
+
+(defun romacs-agent-remote--host-source (name place)
+  "The source of the machine NAME at PLACE: the one this editor keeps for
+NAME, else a new one, kept."
+  (or (gethash name romacs-agent-remote--sources)
+      (puthash name (romacs-agent-remote--make :name name :place place) romacs-agent-remote--sources)))
+
+(defun romacs-agent-remote-connect (&optional socket host)
+  "Show another machine's agent sessions on the board: HOST, a name of
+`romacs-agent-remote-hosts' (the first by default), or, given SOCKET, the
+service whose socket it is, named HOST, else by its file name.  Its
+service is connected afresh, the editor not waiting, and each chat of it
+shown is followed afresh once it is.  Machines connected before stay so.
+The source."
+  (let* ((name (or host socket (car (car (romacs-agent-remote--hosts)))
+                   (user-error "No machine named: set `romacs-agent-remote-hosts'")))
+         (place (or socket (cdr (assoc name (romacs-agent-remote--hosts)))
+                    (user-error "No machine %s in `romacs-agent-remote-hosts'" name)))
+         (source (romacs-agent-remote--host-source name place)))
     (setq romacs-agent-remote--source source romacs-agent-board-source source)
-    (when (romacs-agent-remote-client source) (romacs-agent-client-close (romacs-agent-remote-client source)))
-    (setf (romacs-agent-remote-client source) nil (romacs-agent-remote-dial source) nil)
-    (if socket
-        (romacs-agent-remote--connected source (romacs-agent-client-connect socket))
-      (unless romacs-agent-remote-host (user-error "No machine named: set `romacs-agent-remote-host'"))
-      (unless (process-live-p (romacs-agent-remote-relay source))
-        ;; Its socket's directory the relay's to make: the user's alone.
-        (setf (romacs-agent-remote-relay source)
-              (make-process :name "romacs-relay" :buffer (generate-new-buffer " *romacs-relay*") :noquery t
-                            :command (list romacs-agent-remote-relay "connect" romacs-agent-remote-host
-                                           "--socket" (romacs-agent-remote--socket)))))
-      (let ((dial (list 'dial)))
-        (setf (romacs-agent-remote-dial source) dial)
-        (romacs-agent-remote--dial source dial (+ (float-time) 10))))
+    (romacs-agent-remote--open source)
     source))
+
+(defun romacs-agent-remote--open (source)
+  "Connect SOURCE to its machine's service afresh, by its place: a socket,
+an ssh pipe, or a relay URL through `romacs-relay connect'.  A socket
+that cannot be connected to is a connection that ended."
+  (when (timerp (romacs-agent-remote-retry source)) (cancel-timer (romacs-agent-remote-retry source)))
+  (let ((old (romacs-agent-remote-client source)) (place (romacs-agent-remote-place source)))
+    ;; Not SOURCE's once closed: its end is no reason to connect again.
+    (setf (romacs-agent-remote-client source) nil (romacs-agent-remote-dial source) nil
+          (romacs-agent-remote-retry source) nil)
+    (when old (romacs-agent-client-close old))
+    (cond
+     ((stringp place)
+      (condition-case nil
+          (romacs-agent-remote--connected source (romacs-agent-client-connect place))
+        (file-error (romacs-agent-remote--again source))))
+     ((plist-get place :ssh)
+      (romacs-agent-remote--connected
+       source (romacs-agent-client-connect (romacs-agent-remote--ssh-command place (romacs-agent-remote--control-dir))
+                                           (romacs-agent-remote--stderr source))))
+     (t (romacs-agent-remote--relay source (plist-get place :url))))))
+
+(defun romacs-agent-remote--relay (source url)
+  "Connect SOURCE through `romacs-relay connect' to URL, started unless it
+runs, once it listens; the editor not waiting."
+  (let ((socket (romacs-agent-remote--socket (romacs-agent-remote-name source))))
+    (unless (process-live-p (romacs-agent-remote-relay source))
+      ;; Its socket's directory the relay's to make: the user's alone.
+      (setf (romacs-agent-remote-relay source)
+            (make-process :name "romacs-relay" :buffer (generate-new-buffer " *romacs-relay*") :noquery t
+                          :command (list romacs-agent-remote-relay "connect" url "--socket" socket))))
+    (let ((dial (list 'dial)))
+      (setf (romacs-agent-remote-dial source) dial)
+      (romacs-agent-remote--dial source dial (+ (float-time) 10)))))
 
 (defun romacs-agent-remote--dial (source dial deadline)
   "Connect SOURCE through its relay once it listens, trying again a moment
 later until DEADLINE, while DIAL is its attempt: a socket there before
 it, a stale one, refuses until the relay replaces it."
   (let ((relay (romacs-agent-remote-relay source)))
-    (when (and (eq source romacs-agent-remote--source) (eq dial (romacs-agent-remote-dial source)))
-      (if-let* ((client (ignore-error file-error (romacs-agent-client-connect (romacs-agent-remote--socket)))))
+    (when (eq dial (romacs-agent-remote-dial source))
+      (if-let* ((client (ignore-error file-error
+                          (romacs-agent-client-connect (romacs-agent-remote--socket (romacs-agent-remote-name source))))))
           (progn (setf (romacs-agent-remote-dial source) nil)
                  (romacs-agent-remote--connected source client))
         (if (and (process-live-p relay) (< (float-time) deadline))
             (run-at-time 0.05 nil #'romacs-agent-remote--dial source dial deadline)
           (when (process-live-p relay) (delete-process relay))
-          (message "No relay to %s: %s" romacs-agent-remote-host
-                   (with-current-buffer (process-buffer relay) (string-trim (buffer-string)))))))))
+          (message "No relay to %s: %s" (romacs-agent-remote-name source)
+                   (with-current-buffer (process-buffer relay) (string-trim (buffer-string))))
+          (romacs-agent-remote--again source))))))
 
 (defun romacs-agent-remote--lists (source)
   "Ask SOURCE's service what a session may start in and under, kept for
@@ -530,34 +670,76 @@ the next start."
                (romacs-agent-client-follow client id romacs-agent-log-turns romacs-agent-log-records)))
            (romacs-agent-remote-chats source)))
 
-(defun romacs-agent-remote-disconnect ()
-  "Stop showing another machine's sessions."
-  (when-let* ((source romacs-agent-remote--source))
-    (setq romacs-agent-remote--source nil romacs-agent-board-source romacs-agent-log-local)
+(defun romacs-agent-remote--again (source)
+  "Connect SOURCE again after its delay, doubled for the next time up to
+`romacs-agent-remote--retry-most' seconds, while this editor keeps it."
+  (let ((delay (romacs-agent-remote-delay source)))
+    (setf (romacs-agent-remote-delay source) (min romacs-agent-remote--retry-most (* 2 delay))
+          (romacs-agent-remote-retry source)
+          (run-at-time delay nil (lambda ()
+                                   (when (eq source (gethash (romacs-agent-remote-name source) romacs-agent-remote--sources))
+                                     (romacs-agent-remote--open source)))))))
+
+(defun romacs-agent-remote--ended (client)
+  "CLIENT's connection ended: its machine, while this editor keeps it, is
+connected again a little later (`romacs-agent-remote--again'), and what
+its ssh said last is told."
+  (when-let* ((source (romacs-agent-remote--of client)))
+    (message "Agents on %s: the connection ended%s; connecting again in %g s"
+             (romacs-agent-remote-name source)
+             (if-let* ((said (romacs-agent-remote--said-last source))) (format " (%s)" said) "")
+             (romacs-agent-remote-delay source))
+    (romacs-agent-remote--again source)))
+
+(add-hook 'romacs-agent-client-ended-functions #'romacs-agent-remote--ended)
+
+(defun romacs-agent-remote-disconnect (&optional source)
+  "Let go of SOURCE, another machine, the one the board shows by default:
+its connection closed, its relay stopped, connected no more; the board
+shows this editor's own sessions again when it showed SOURCE's."
+  (when-let* ((source (or source romacs-agent-remote--source)))
+    ;; No longer kept: its connection's end is no reason to connect again.
+    (remhash (romacs-agent-remote-name source) romacs-agent-remote--sources)
+    (when (timerp (romacs-agent-remote-retry source)) (cancel-timer (romacs-agent-remote-retry source)))
+    (when (eq source romacs-agent-remote--source)
+      (setq romacs-agent-remote--source nil romacs-agent-board-source romacs-agent-log-local))
     (when (romacs-agent-remote-client source) (romacs-agent-client-close (romacs-agent-remote-client source)))
     (when (process-live-p (romacs-agent-remote-relay source)) (delete-process (romacs-agent-remote-relay source)))
-    ;; The board shows this editor's own again.
     (romacs-agent-board--refresh)))
 
-(defun romacs-agent-remote--client ()
-  "The client of the other machine shown, connected, or a user error."
-  (let ((client (and romacs-agent-remote--source (romacs-agent-remote-client romacs-agent-remote--source))))
+(defun romacs-agent-remote--live-client (source)
+  "SOURCE's client, connected, or a user error."
+  (let ((client (and source (romacs-agent-remote-client source))))
     (unless (and client (romacs-agent-client-live-p client))
       (user-error (substitute-command-keys "Not connected: \\[romacs-agents-remote] connects")))
     client))
 
-(defun romacs-agents-remote ()
-  "Show the agent board of the machine `romacs-agent-remote-host' names:
-its sessions, drawn from its agents service; connected again when the
-connection ended."
-  (interactive)
-  (let ((client (and romacs-agent-remote--source (romacs-agent-remote-client romacs-agent-remote--source))))
-    (unless (and client (romacs-agent-client-live-p client)) (romacs-agent-remote-connect)))
+(defun romacs-agent-remote--read-host ()
+  "A machine's name of `romacs-agent-remote-hosts', read when there are
+several, the board's own offered first."
+  (let ((names (mapcar #'car (romacs-agent-remote--hosts))))
+    (cond ((null names) (user-error "No machine named: set `romacs-agent-remote-hosts'"))
+          ((null (cdr names)) (car names))
+          (t (completing-read "Agents on: " names nil t nil nil
+                              (and romacs-agent-remote--source (romacs-agent-remote-name romacs-agent-remote--source)))))))
+
+(defun romacs-agents-remote (host)
+  "Show the agent board of HOST, a machine of `romacs-agent-remote-hosts',
+read when there are several: its sessions, drawn from its agents
+service, connected unless it is.  Machines connected before stay so."
+  (interactive (list (romacs-agent-remote--read-host)))
+  (let* ((source (gethash host romacs-agent-remote--sources))
+         (client (and source (romacs-agent-remote-client source))))
+    (if (and client (romacs-agent-client-live-p client))
+        (setq romacs-agent-remote--source source romacs-agent-board-source source)
+      (romacs-agent-remote-connect nil host)))
   (romacs-agents))
 
-(defun romacs-agent-remote-chat (id)
-  "The chat of the other machine's session ID, drawn from its service."
-  (let* ((client (romacs-agent-remote--client)) (source romacs-agent-remote--source)
+(defun romacs-agent-remote-chat (id &optional source)
+  "The chat of session ID of SOURCE, another machine (the one the board
+shows by default), drawn from its service."
+  (let* ((source (or source romacs-agent-remote--source))
+         (client (romacs-agent-remote--live-client source))
          (row (or (gethash id (romacs-agent-client-rows client)) (user-error "No session %s there" id))))
     (romacs-agent-log-chat (romacs-agent-remote--mirror source row) nil source)))
 
