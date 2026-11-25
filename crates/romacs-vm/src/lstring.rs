@@ -127,6 +127,39 @@ pub(crate) fn byte_parts(mut rest: &[u8], multibyte: bool, size: usize) -> impl 
     })
 }
 
+/// The internal bytes as octets, with each byte8 character collapsed to its byte.
+pub(crate) fn unibyte_octets(
+    view: StrView<'_>, mut stopped: impl FnMut() -> bool,
+) -> std::result::Result<Vec<u8>, crate::quit::Stopped> {
+    use crate::quit::KERNEL_CHUNK;
+    let mut out = Vec::with_capacity(view.bytes.len());
+    let ascii = view.chars == view.bytes.len();
+    if view.bytes.len() <= KERNEL_CHUNK {
+        append_unibyte_octets(&mut out, view.bytes, ascii);
+        return Ok(out);
+    }
+    for (index, part) in byte_parts(view.bytes, true, KERNEL_CHUNK).enumerate() {
+        if index != 0 && stopped() { return Err(crate::quit::Stopped); }
+        append_unibyte_octets(&mut out, part, ascii);
+    }
+    Ok(out)
+}
+
+fn append_unibyte_octets(out: &mut Vec<u8>, mut bytes: &[u8], ascii: bool) {
+    if !ascii {
+        // C0 and C1 can only lead byte8 characters in canonical internal text.
+        while let Some(raw) = memchr::memchr2(0xc0, 0xc1, bytes) {
+            out.extend_from_slice(&bytes[..raw]);
+            bytes = &bytes[raw..];
+            while let [lead @ (0xc0 | 0xc1), tail, rest @ ..] = bytes {
+                out.push(((lead & 1) << 6) | tail);
+                bytes = rest;
+            }
+        }
+    }
+    out.extend_from_slice(bytes);
+}
+
 /// The characters of BYTES, a multibyte string's internal text or a unibyte
 /// string's bytes.
 #[inline]
