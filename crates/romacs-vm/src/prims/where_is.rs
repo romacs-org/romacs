@@ -1,59 +1,73 @@
 //! The reverse keymap lookup's primitives (keymap.c); the walk is
 //! `src/where_is.rs`.
 use super::{Fault, Kind, Leaf, Next, Step, Value};
+use crate::keymap::Walked;
 use crate::where_is::{Chain, Keyelt, Query, Reached, Stop, Wrappers};
 
 // Fwhere_is_internal.  A key sequence found is looked up again in the
-// keymaps, which applies menu filters as `lookup-key' does.  SAVED is then
-// the query as it stands (`Query::values'), each (item . result) the
-// lookup under way has, and the item whose filter runs.
+// keymaps, which applies menu filters as `lookup-key' does: SAVED is then
+// the query as it stands (`Query::values'), then the walk that met the
+// filter.
 defsubr! { name = "where-is-internal", gnu = "keymap.c:2588", effect = Global,
 fn where_is_internal(cx, definition: Value; optional keymap: Value, firstonly: Value, noindirect: Value, no_remap: Value) -> Step {
     let query = Query::new(cx, definition, keymap, firstonly, noindirect != Value::NIL, no_remap != Value::NIL)?;
-    where_is_step(cx, query, Vec::new())
+    where_is_step(cx, query)
 }}
-fn where_is_step(cx: &mut Leaf<'_>, mut query: Query, mut filters: Vec<(Value, Value)>) -> Next {
-    match query.advance(cx, &mut filters) {
+fn where_is_step(cx: &mut Leaf<'_>, mut query: Query) -> Next {
+    match query.advance(cx) {
         Ok(found) => Ok(Step::Done(found)),
         Err(Stop::Fault(fault)) => Err(fault),
-        Err(Stop::Filter { item, filter, object }) => {
-            let mut saved = query.values()?.to_vec();
-            saved.extend(filters.into_iter().flat_map(|(item, result)| [item, result]));
-            saved.push(item);
-            Ok(super::keymap::filter_call(cx, filter, object, where_is_filtered, saved))
-        }
+        Err(Stop::Filter { walk, filter, object }) => Ok(where_is_filter(cx, &query.values()?, &walk, filter, object)),
     }
 }
+fn where_is_filter(cx: &mut Leaf<'_>, query: &[Value], walk: &crate::keymap::KeyWalk, filter: Value, object: Value) -> Step {
+    let mut saved = query.to_vec();
+    saved.extend(cx.key_walk_values(walk));
+    super::keymap::filter_call(cx, filter, object, where_is_filtered, saved)
+}
+// The walk under way goes on with the filter's RESULT; once it has its
+// answer, so does the query, from the lookup the walk was for.
 fn where_is_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
-    let (query, filters) = saved.split_at(Query::VALUES);
-    let mut filters: Vec<(Value, Value)> = filters.chunks_exact(2).map(|pair| (pair[0], pair[1])).collect();
-    filters.push((saved[saved.len() - 1], result));
-    where_is_step(cx, Query::from_values(query), filters)
+    let (query, walk) = saved.split_at(Query::VALUES);
+    let mut walk = cx.key_walk_from(walk)?;
+    match cx.key_walk_resume(&mut walk, result)? {
+        Walked::Filter { filter, object } => Ok(where_is_filter(cx, query, &walk, filter, object)),
+        Walked::Done(binding) => where_is_step(cx, Query::from_values(query).walked(binding)),
+    }
 }
 
 // Faccessible_keymaps.  PREFIX's keymap comes from `lookup-key', the one
-// step that may apply a menu filter.  SAVED is that walk's: KEYMAP, PREFIX
-// and t, then the filters' results.
+// step that may apply a menu filter: SAVED is KEYMAP and PREFIX, then that
+// walk's.
 defsubr! { name = "accessible-keymaps", gnu = "keymap.c:2010", effect = Global,
 fn accessible_keymaps(cx, keymap: Value; optional prefix: Value) -> Step {
-    accessible_step(cx, &[keymap, prefix, Value::TRUE])
-}}
-fn accessible_step(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
-    let (keymap, prefix) = (saved[0], saved[1]);
-    let prefix_length = sequence_length(cx, prefix)?;
-    let start = if prefix == Value::NIL {
+    sequence_length(cx, prefix)?;
+    if prefix == Value::NIL {
         let map = crate::where_is::keymap_noload(cx, keymap).filter(|map| cx.pair(*map).is_some()).ok_or_else(|| Fault::Wrong("keymapp", keymap))?;
-        Some(Reached { keys: Vec::new(), map })
-    } else {
-        let binding = match super::keymap::walk(cx, saved, 0, accessible_filtered)? {
-            Ok(binding) => binding,
-            Err(call) => return Ok(call),
-        };
-        match crate::where_is::keymap_noload(cx, binding) {
-            Some(map) => Some(Reached { keys: crate::where_is::prefix_events(cx, prefix)?, map }),
-            None => None,
-        }
+        return accessible_from(cx, prefix, Some(Reached { keys: Vec::new(), map }));
+    }
+    let walked = super::keymap::lookup(cx, &[keymap, prefix], keymap, prefix, true, accessible_filtered)?;
+    accessible_prefix(cx, prefix, walked)
+}}
+fn accessible_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
+    let walked = super::keymap::resume(cx, result, saved, 2, accessible_filtered)?;
+    accessible_prefix(cx, saved[1], walked)
+}
+// The keymaps reachable from PREFIX's binding, once the walk has it.
+fn accessible_prefix(cx: &mut Leaf<'_>, prefix: Value, walked: super::keymap::Found) -> Next {
+    let binding = match walked {
+        Ok(binding) => binding,
+        Err(call) => return Ok(call),
     };
+    let start = match crate::where_is::keymap_noload(cx, binding) {
+        Some(map) => Some(Reached { keys: crate::where_is::prefix_events(cx, prefix)?, map }),
+        None => None,
+    };
+    accessible_from(cx, prefix, start)
+}
+// The keymaps reachable from START, each with its key sequence, as a list.
+fn accessible_from(cx: &mut Leaf<'_>, prefix: Value, start: Option<Reached>) -> Next {
+    let prefix_length = sequence_length(cx, prefix)?;
     let reached = crate::where_is::accessible(cx, start, prefix_length)?;
     let mut maps = Value::NIL;
     for (at, Reached { keys, map }) in reached.into_iter().enumerate().rev() {
@@ -63,11 +77,6 @@ fn accessible_step(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
         maps = cx.cons(entry, maps);
     }
     Ok(Step::Done(maps))
-}
-fn accessible_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
-    let mut saved = saved.to_vec();
-    saved.push(result);
-    accessible_step(cx, &saved)
 }
 // Flength of a key sequence argument.
 fn sequence_length(cx: &Leaf<'_>, sequence: Value) -> std::result::Result<usize, Fault> {

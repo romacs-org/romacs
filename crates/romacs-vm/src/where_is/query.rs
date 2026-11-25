@@ -1,6 +1,7 @@
 //! `Fwhere_is_internal` itself: which of the sequences bound to a
 //! definition run it, in which order, and which is its first key.
 use super::{candidates, elements, equal, integer, stringp, symbolp, variable, Faulty, Stop, Walk, META, NON_META_MODIFIERS};
+use crate::keymap::Walked;
 use crate::prim::{Fault, Kind, Leaf};
 use crate::{HashMap, Value};
 
@@ -92,7 +93,7 @@ pub(crate) struct Query {
     firstonly: Value,
     noindirect: bool,
     no_remap: bool,
-    /// The keymaps searched, a Lisp vector.
+    /// The keymaps searched, a list.
     maps: Value,
     modifier: i64,
     stage: Stage,
@@ -107,26 +108,26 @@ pub(crate) struct Query {
     /// The sequences found, newest first, a repeated one each time.
     found: Value,
     carried: Value,
-    /// The lookup under way: the keymap it is at and, when the sequence is
-    /// too long for that keymap, the prefix the keymap defines.
-    map: usize,
-    prefix: Value,
+    /// The answer of the lookup a menu filter interrupted, for the query to
+    /// take when it reaches that lookup again.
+    walked: Option<Value>,
 }
 impl Query {
     /// How many saved registers a query takes.
     pub(crate) const VALUES: usize = 15;
     pub(crate) fn new(cx: &mut Leaf<'_>, definition: Value, keymap: Value, firstonly: Value, noindirect: bool, no_remap: bool) -> Faulty<Self> {
         let maps = if cx.pair(keymap).is_some_and(|(first, _)| cx.keymapp(first)) {
-            elements(cx, keymap)?
+            keymap
         } else if keymap != Value::NIL {
-            vec![keymap, cx.global_map()]
+            let global = cx.global_map();
+            let rest = cx.cons(global, Value::NIL);
+            cx.cons(keymap, rest)
         } else {
-            let active = cx.current_active_maps(false, Value::NIL)?;
-            elements(cx, active)?
+            cx.current_active_maps(false, Value::NIL)?
         };
         Ok(Self {
-            definition, firstonly, noindirect, no_remap, maps: cx.vector_from(maps), modifier: preferred_modifier(cx)?, stage: Stage::Remap,
-            pending: Value::NIL, at: 0, later: Value::NIL, remapped: false, found: Value::NIL, carried: Value::NIL, map: 0, prefix: Value::NIL,
+            definition, firstonly, noindirect, no_remap, maps, modifier: preferred_modifier(cx)?, stage: Stage::Remap,
+            pending: Value::NIL, at: 0, later: Value::NIL, remapped: false, found: Value::NIL, carried: Value::NIL, walked: None,
         })
     }
     pub(crate) fn values(&self) -> Faulty<[Value; Self::VALUES]> {
@@ -134,7 +135,7 @@ impl Query {
         let count = |count: usize| integer(i64::try_from(count).unwrap_or(i64::MAX));
         let stage = STAGES.iter().position(|stage| *stage == self.stage).unwrap_or(0);
         Ok([self.definition, self.firstonly, flag(self.noindirect), flag(self.no_remap), self.maps, integer(self.modifier)?, count(stage)?,
-            self.pending, count(self.at)?, self.later, flag(self.remapped), self.found, self.carried, count(self.map)?, self.prefix])
+            self.pending, count(self.at)?, self.later, flag(self.remapped), self.found, self.carried, self.walked.unwrap_or(Value::NIL), flag(self.walked.is_some())])
     }
     pub(crate) fn from_values(values: &[Value]) -> Self {
         let count = |value: Value| value.integer_value().and_then(|count| usize::try_from(count).ok()).unwrap_or(0);
@@ -142,60 +143,45 @@ impl Query {
             definition: values[0], firstonly: values[1], noindirect: values[2] != Value::NIL, no_remap: values[3] != Value::NIL, maps: values[4],
             modifier: values[5].integer_value().unwrap_or(0), stage: STAGES[count(values[6]).min(STAGES.len() - 1)], pending: values[7],
             at: count(values[8]), later: values[9], remapped: values[10] != Value::NIL, found: values[11], carried: values[12],
-            map: count(values[13]), prefix: values[14],
+            walked: (values[14] != Value::NIL).then_some(values[13]),
         }
+    }
+    /// The query with BINDING, the answer of the walk a filter interrupted.
+    pub(crate) fn walked(mut self, binding: Value) -> Self {
+        self.walked = Some(binding);
+        self
     }
 
-    /// One `lookup-key` walk with the FILTERS it has results for.
-    fn walk(cx: &mut Leaf<'_>, map: Value, key: Value, filters: &[(Value, Value)]) -> Walk<Value> {
-        cx.lookup_key_walk(map, key, false, filters.to_vec())?.map_err(|(item, filter, object)| Stop::Filter { item, filter, object })
-    }
-    /// `shadow_lookup`: KEY's binding in the first keymap that defines it or
-    /// a prefix of it as a non-prefix; a range event stands for its first
-    /// character.  It goes on from `map` and `prefix`, where a filter
-    /// stopped it.  A keymap's filters run once for the sequence: looking
-    /// its prefix up there has their results.
-    fn lookup(&mut self, cx: &mut Leaf<'_>, maps: &[Value], key: Value, filters: &mut Vec<(Value, Value)>) -> Walk<Value> {
-        let key = match cx.vector_values(key) {
-            Ok(events) => {
-                let first = |event: Value| cx.pair(event).filter(|(from, to)| from.integer_value().is_some() && to.integer_value().is_some()).map(|range| range.0);
-                if events.iter().any(|&event| first(event).is_some()) {
-                    let events = events.iter().map(|&event| first(event).unwrap_or(event)).collect();
-                    cx.vector_from(events)
-                } else { key }
+    /// `shadow_lookup`: KEY's binding in the keymaps searched, as one
+    /// `lookup-key` over their list, nil when KEY is too long for them; a
+    /// range event stands for its first character.  When a filter
+    /// interrupted it, the query took the same steps again up to here, and
+    /// the walk's answer is `walked`.
+    fn lookup(&mut self, cx: &mut Leaf<'_>, key: Value) -> Walk<Value> {
+        let binding = if let Some(binding) = self.walked.take() { binding } else {
+            let key = Self::range_heads(cx, key);
+            match cx.key_walk(self.maps, key, false)? {
+                (_, Walked::Done(binding)) => binding,
+                (walk, Walked::Filter { filter, object }) => return Err(Stop::Filter { walk: Box::new(walk), filter, object }),
             }
-            // `lookup-key' refuses what is no array.
-            Err(_) => key,
         };
-        let mut found = Value::NIL;
-        while let Some(&map) = maps.get(self.map) {
-            if self.prefix == Value::NIL {
-                let value = Self::walk(cx, map, key, filters)?;
-                let Some(defined) = value.integer_value() else {
-                    filters.clear();
-                    found = value;
-                    if value == Value::NIL { self.map += 1; continue; }
-                    break;
-                };
-                let defined = usize::try_from(defined).unwrap_or(0);
-                self.prefix = if stringp(cx, key) { cx.string_slice(key, 0, defined)? } else { let events = cx.vector_values(key)?; cx.vector(&events[..defined.min(events.len())]) };
-            }
-            // An absent prefix falls through; a defined non-prefix shadows later maps.
-            let shadowed = Self::walk(cx, map, self.prefix, filters)? != Value::NIL;
-            filters.clear();
-            self.prefix = Value::NIL;
-            if shadowed { break; }
-            self.map += 1;
-        }
-        self.map = 0;
-        Ok(found)
+        Ok(if binding.integer_value().is_some() { Value::NIL } else { binding })
+    }
+    /// KEY with each range event its first character.
+    fn range_heads(cx: &mut Leaf<'_>, key: Value) -> Value {
+        // `lookup-key' refuses what is no array.
+        let Ok(events) = cx.vector_values(key) else { return key };
+        let first = |event: Value| cx.pair(event).filter(|(from, to)| from.integer_value().is_some() && to.integer_value().is_some()).map(|range| range.0);
+        if !events.iter().any(|&event| first(event).is_some()) { return key; }
+        let events = events.iter().map(|&event| first(event).unwrap_or(event)).collect();
+        cx.vector_from(events)
     }
     /// What COMMAND is remapped to in the keymaps, nil for none.
-    fn remapping(&mut self, cx: &mut Leaf<'_>, maps: &[Value], command: Value, filters: &mut Vec<(Value, Value)>) -> Walk<Value> {
+    fn remapping(&mut self, cx: &mut Leaf<'_>, command: Value) -> Walk<Value> {
         if !symbolp(cx, command) { return Ok(Value::NIL); }
         let remap = cx.intern("remap");
         let key = cx.vector(&[remap, command]);
-        self.lookup(cx, maps, key, filters)
+        self.lookup(cx, key)
     }
     fn nomenus(&self, cx: &mut Leaf<'_>) -> bool {
         self.firstonly != Value::NIL && self.firstonly != cx.intern("non-ascii")
@@ -206,15 +192,14 @@ impl Query {
         candidates(cx, maps, definition, self.noindirect, nomenus)
     }
 
-    /// Go on to the query's value, or to the next menu filter to apply, for
-    /// the lookup under way: FILTERS are that lookup's results so far.
-    pub(crate) fn advance(&mut self, cx: &mut Leaf<'_>, filters: &mut Vec<(Value, Value)>) -> Walk<Value> {
-        let maps = cx.vector_values(self.maps)?;
+    /// Go on to the query's value, or to the next menu filter to apply.
+    pub(crate) fn advance(&mut self, cx: &mut Leaf<'_>) -> Walk<Value> {
+        let maps = elements(cx, self.maps)?;
         loop {
             match self.stage {
                 // A remapped command's keys are those of the command it is remapped to.
                 Stage::Remap => {
-                    let remapping = self.remapping(cx, &maps, self.definition, filters)?;
+                    let remapping = self.remapping(cx, self.definition)?;
                     if !self.no_remap && remapping != Value::NIL { self.definition = remapping; }
                     let advertises = self.firstonly != Value::NIL && cx.kind(self.definition) == Kind::Symbol;
                     self.later = if advertises { let property = cx.intern(":advertised-binding"); cx.symbol_property(self.definition, property)? } else { Value::NIL };
@@ -230,7 +215,7 @@ impl Query {
                             continue;
                         }
                     };
-                    if self.lookup(cx, &maps, key, filters)? == self.definition { return Ok(key); }
+                    if self.lookup(cx, key)? == self.definition { return Ok(key); }
                     self.later = rest;
                 }
                 Stage::Sequence => {
@@ -242,7 +227,7 @@ impl Query {
                     }
                     let sequence = cx.vector_get(self.pending, integer(i64::try_from(self.at).unwrap_or(i64::MAX))?)?;
                     // A binding another keymap shadows does not run the definition.
-                    let value = self.lookup(cx, &maps, sequence, filters)?;
+                    let value = self.lookup(cx, sequence)?;
                     if self.remapped && value != Value::NIL && symbolp(cx, value) {
                         (self.carried, self.stage) = (value, Stage::Remapped);
                         continue;
@@ -250,7 +235,7 @@ impl Query {
                     if let Some(first) = self.runs(cx, &maps, sequence, value)? { return Ok(first); }
                 }
                 Stage::Remapped => {
-                    let remapping = self.remapping(cx, &maps, self.carried, filters)?;
+                    let remapping = self.remapping(cx, self.carried)?;
                     let value = if remapping == Value::NIL { self.carried } else { remapping };
                     let sequence = cx.vector_get(self.pending, integer(i64::try_from(self.at).unwrap_or(i64::MAX))?)?;
                     (self.carried, self.stage) = (Value::NIL, Stage::Sequence);

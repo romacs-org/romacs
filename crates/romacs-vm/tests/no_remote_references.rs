@@ -155,8 +155,6 @@ const FIELDS: &[(&str, Class)] = &[
     ("doomed_finalizers", Root),
     ("post_gc_due", Free), ("undo_offers_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
     ("suspended", Root),
-    // Set and cleared around one keymap walk, which never collects (keymap.rs).
-    ("keymap_filters", Transient), ("keymap_pending_filter", Transient),
     // A native call's watched writes, from the write to its engine's drain;
     // `may_collect` refuses while any waits (`watchers.rs`).
     ("deferred_writes", Transient),
