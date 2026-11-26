@@ -205,10 +205,13 @@ pub(super) struct WindowState {
     /// The display's device pixels per logical pixel (a HiDPI output's
     /// scale): images are decoded at it and laid out in logical pixels.
     pub device_scale: f32,
+    /// An owner's: its frames are laid out for its master's display, so
+    /// they show fringes with no display open here (owner/display.rs).
+    pub laid_for_display: bool,
 }
 impl Default for WindowState {
     fn default() -> Self {
-        Self { next: 1, select_count: 0, line: 20, column: 10, next_frame: 1, device_scale: 1.0 }
+        Self { next: 1, select_count: 0, line: 20, column: 10, next_frame: 1, device_scale: 1.0, laid_for_display: false }
     }
 }
 impl Vm {
@@ -1023,10 +1026,10 @@ impl Vm {
     }
     /// GNU WINDOW_LEFT_FRINGE_WIDTH and WINDOW_RIGHT_FRINGE_WIDTH
     /// (window.h): V's own widths, else its frame's; none on a frame
-    /// without a window system.
+    /// without a window system (`fringes_shown`).
     /// The minibuffer window a child frame hosts has that frame's.
     pub(crate) fn window_fringe_widths(&self, v: Value) -> Result<[u32; 2]> {
-        if !self.window_system_open() { return Ok([0, 0]); }
+        if !self.fringes_shown() { return Ok([0, 0]); }
         let w = self.window(v)?;
         let shown_in = match self.minibuffer_host(self.top_frame(w.frame)) { Some(host) if w.mini => host, _ => w.frame };
         let frame = self.frame(shown_in).map_or([0, 0], |f| f.fringes);
@@ -1038,7 +1041,7 @@ impl Vm {
     /// PERSISTENT, when given, unless the widths failed. True when V
     /// changed. Nothing on a frame without a window system.
     pub(crate) fn set_window_fringes(&mut self, v: Value, widths: [Value; 2], outside: bool, persistent: Option<bool>) -> Result<bool> {
-        if !self.window_system_open() { return Ok(false); }
+        if !self.fringes_shown() { return Ok(false); }
         let new = widths.map(|width| width.integer_value().and_then(|n| u32::try_from(n).ok()));
         let frame = { let w = self.window(v)?; self.frame(w.frame).map_or([0, 0], |f| f.fringes) };
         let column = self.window_state.column;
@@ -2390,7 +2393,7 @@ impl<'a> Windows<'a> {
         let (width, height) = self.frame_text_pixels(frame)?;
         let height = if self.is_child_frame(frame)? { height } else { height.saturating_sub(self.vm.tab_bar_lines(frame) * self.vm.window_state.line) };
         let ([left, right], _) = self.frame_chrome(frame)?;
-        Ok((if self.vm.window_system_open() { width.saturating_sub(left + right) } else { width }, height))
+        Ok((if self.vm.fringes_shown() { width.saturating_sub(left + right) } else { width }, height))
     }
     /// FRAME_COLS and FRAME_LINES of FRAME's text area.
     pub(crate) fn frame_text_size(&mut self, frame: Value) -> std::result::Result<(i64, i64), Fault> {

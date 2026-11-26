@@ -14,7 +14,9 @@
 ;; buffer-locally with the window and then by default with the frame, then
 ;; `window-configuration-change-hook' and `window-state-change-hook'; then
 ;; the state is recorded for the next run, and for `window-old-buffer' and
-;; its siblings.  GNU records the state in each window and flags a frame
+;; its siblings.  An owner runs only the buffer-local functions
+;; (`romacs--window-change-local-only').  GNU records the state in each
+;; window and flags a frame
 ;; whose windows changed; here the record is a list per frame and a
 ;; frame's change is its windows differing from that record.  The host
 ;; calls `romacs--run-window-change-functions' before it redisplays
@@ -26,6 +28,11 @@
   "Per live frame, (FRAME OLD-SELECTED-WINDOW WINDOW-STATES), as GNU's
 window_change_record left them; each window state (WINDOW BUFFER
 PIXEL-WIDTH PIXEL-HEIGHT BODY-PIXEL-WIDTH BODY-PIXEL-HEIGHT).")
+
+(defvar romacs--window-change-local-only nil
+  "Non-nil in an owner (lisp/vm/owner-window.el): on every frame only the
+buffer-local window change functions run, and not
+`window-state-change-hook'.  Its master runs the default ones, once.")
 
 (defvar romacs--old-selected-window nil "window.c old_selected_window.")
 (defvar romacs--old-selected-frame nil "window.c old_selected_frame.")
@@ -58,9 +65,10 @@ with WINDOW, BUFFER current."
   (dolist (function (default-value symbol))
     (unless (eq function t) (romacs--window-change-call function frame))))
 
-(defun romacs--run-window-configuration-change-hook (frame)
+(defun romacs--run-window-configuration-change-hook (frame &optional local-only)
   "window.c run_window_configuration_change_hook: each of FRAME's windows'
-buffer-local functions with the window selected, then the default ones."
+buffer-local functions with the window selected, then, unless LOCAL-ONLY,
+the default ones."
   (let ((global (default-value 'window-configuration-change-hook)))
     (save-current-buffer
       (set-buffer (window-buffer (selected-window)))
@@ -78,8 +86,9 @@ buffer-local functions with the window selected, then the default ones."
                             (dolist (function (buffer-local-value 'window-configuration-change-hook buffer))
                               (unless (eq function t) (romacs--window-change-call-0 function))))
                         (when (window-live-p old) (select-window old t)))))))
-              (dolist (function global)
-                (unless (eq function t) (romacs--window-change-call-0 function))))
+              (unless local-only
+                (dolist (function global)
+                  (unless (eq function t) (romacs--window-change-call-0 function)))))
           (when (and (frame-live-p old-frame) (not (eq old-frame (selected-frame))))
             (select-frame old-frame t)))))))
 
@@ -141,23 +150,37 @@ If FRAME is omitted or nil, it defaults to the selected frame."
                         (romacs--window-change-locally 'window-selection-change-functions buffer window))
                       (when (and (or window-buffer-change window-size-change selection) (window-live-p window))
                         (romacs--window-change-locally 'window-state-change-functions buffer window)))))
-                (let ((deleted (< (length states) (length old-states))))
-                  (when (frame-live-p frame)
-                    (when (or buffer-change deleted)
-                      (romacs--window-change-globally 'window-buffer-change-functions frame))
-                    (when size-change
-                      (romacs--window-change-globally 'window-size-change-functions frame))
-                    (when (or frame-selected-change selected-window-change)
-                      (romacs--window-change-globally 'window-selection-change-functions frame))
-                    (when (or frame-selected-change selected-window-change buffer-change deleted size-change)
-                      (romacs--window-change-globally 'window-state-change-functions frame)
-                      (setq state-change-hook t))
-                    (when (or size-change deleted)
-                      (romacs--run-window-configuration-change-hook frame))))))))
+                (when (and (frame-live-p frame)
+                           (romacs--window-change-frame
+                            frame buffer-change size-change
+                            (or frame-selected-change selected-window-change)
+                            (< (length states) (length old-states))))
+                  (setq state-change-hook t))))))
       (when (and state-change-hook (default-value 'window-state-change-hook))
         (condition-case err (run-hooks 'window-state-change-hook)
           (error (message "Error in window-state-change-hook: %S" err))))
       (romacs--window-change-record))))
+
+(defun romacs--window-change-frame (frame buffer-change size-change selection-change deleted)
+  "FRAME's default window change functions for what changed in its
+windows (BUFFER-CHANGE, SIZE-CHANGE, SELECTION-CHANGE, DELETED windows),
+then its `window-configuration-change-hook' when a window changed size
+or went; non-nil when `window-state-change-hook' is due.  In an owner
+\(`romacs--window-change-local-only') only its buffers' own functions run."
+  (let ((local-only romacs--window-change-local-only)
+        (state (or selection-change buffer-change deleted size-change)))
+    (unless local-only
+      (when (or buffer-change deleted)
+        (romacs--window-change-globally 'window-buffer-change-functions frame))
+      (when size-change
+        (romacs--window-change-globally 'window-size-change-functions frame))
+      (when selection-change
+        (romacs--window-change-globally 'window-selection-change-functions frame))
+      (when state
+        (romacs--window-change-globally 'window-state-change-functions frame)))
+    (when (or size-change deleted)
+      (romacs--run-window-configuration-change-hook frame local-only))
+    (and state (not local-only))))
 
 (defun romacs--window-change-record ()
   "window.c window_change_record: each live frame's selected window and

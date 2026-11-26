@@ -10,7 +10,7 @@ include!(concat!(env!("OUT_DIR"), "/prims_mods.rs"));
 
 /// The VM's own Lisp, which `Vm::install_lisp_prelude` evaluates from the
 /// runtime tree's lisp/, in this order:
-pub(crate) const PRELUDES: [&str; 10] = [
+pub(crate) const PRELUDES: [&str; 11] = [
     // `safe_run_hooks`, for the prelude and the keyboard half alike.
     "vm/hooks.el",
     // T3 tier: Lisp loops that call Lisp per element, over leaf cursors.
@@ -28,6 +28,9 @@ pub(crate) const PRELUDES: [&str; 10] = [
     // Owners: zygote children that serve for the session, their calls and
     // liveness, over prims/isolate.rs.
     "vm/owner.el",
+    // An owner's logical windows: the master's requests, healing, and the
+    // pictures, over prims/owner_window.rs.
+    "vm/owner-window.el",
     // Buffer snapshots, the frozen buffers worker isolates compute from.
     "vm/buffer-snapshot.el",
     // T3 tier: window.c's change functions and its old-state accessors

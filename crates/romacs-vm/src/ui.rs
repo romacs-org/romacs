@@ -11,6 +11,7 @@
 //! VM's entry.
 use crate::Vm;
 use crate::layout_host::LayoutHost;
+use crate::owner::display::OwnerUi;
 use crate::session_host::SessionHost;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -22,12 +23,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) struct Ui {
     pub(crate) layout_host: Option<Box<dyn LayoutHost>>,
     pub(crate) session_host: Option<SessionHost>,
+    /// An owner's display and the windows it laid out (owner/display.rs).
+    pub(crate) owner: Option<OwnerUi>,
 }
 
 impl Ui {
     /// Whether no host is attached.
     fn is_empty(&self) -> bool {
-        self.layout_host.is_none() && self.session_host.is_none()
+        self.layout_host.is_none() && self.session_host.is_none() && self.owner.is_none()
     }
 }
 

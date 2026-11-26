@@ -495,9 +495,10 @@ impl Vm {
         self.display_state.invalidate();
         Ok(())
     }
-    /// FRAME's fringe widths, none on a frame without a window system.
+    /// FRAME's fringe widths, none on a frame without a window system
+    /// (`fringes_shown`).
     pub(crate) fn frame_fringes(&self, frame: Value) -> Result<[u32; 2]> {
-        Ok(if self.window_system_open() { self.frame(frame)?.fringes } else { [0, 0] })
+        Ok(if self.fringes_shown() { self.frame(frame)?.fringes } else { [0, 0] })
     }
     /// A child frame's geometry request as it stands.
     pub(super) fn child_geometry(&self, frame: Value) -> Result<ChildGeometry> {
@@ -651,6 +652,10 @@ impl crate::window::Windows<'_> {
     /// The selected frame's top-level frame.
     pub(crate) fn selected_top_frame(&mut self) -> Value {
         self.vm.selected_top_frame()
+    }
+    /// Whether frames show fringes (`Vm::fringes_shown`).
+    pub(crate) fn fringes_shown(&self) -> bool {
+        self.vm.fringes_shown()
     }
     /// FRAME's display identity (`frame-id').
     pub(crate) fn frame_display_id(&mut self, frame: Value) -> std::result::Result<u64, Fault> {

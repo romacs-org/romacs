@@ -254,11 +254,14 @@ fn alpha_lower_limit(cx: &mut Leaf<'_>) -> std::result::Result<f32, Fault> {
 /// and `internal-border-width' the gaps between and around its windows;
 /// `tab-bar-lines' its tab bar; `romacs-status-bar-lines' its status bar,
 /// which is its windows' mode line, and `romacs-status-bar-position'
-/// where (VM2-STATUS-BAR). Other parameters, and
-/// every parameter of a frame without a window system, are only stored.
+/// where (VM2-STATUS-BAR). Other parameters, and every parameter of a
+/// frame without a window system, are only stored; but an owner's frames,
+/// laid out for its master's display, take their fringes.
 fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
-    if cx.kind(key) != leaf::Kind::Symbol || cx.windows().window_system(frame)? == Value::NIL { return Ok(()); }
+    if cx.kind(key) != leaf::Kind::Symbol { return Ok(()); }
     let fringe = [cx.intern("left-fringe"), cx.intern("right-fringe")].iter().position(|&k| k == key);
+    let shown = if fringe.is_some() { cx.windows().fringes_shown() } else { cx.windows().window_system(frame)? != Value::NIL };
+    if !shown { return Ok(()); }
     if let Some(side) = fringe {
         // gui_set_left_fringe (frame.c:5800): a fixnum's magnitude, else 8.
         let width = value.integer_value().map_or(crate::frame::DEFAULT_FRINGE, |n| n.unsigned_abs().min(i32::MAX as u64) as u32);
