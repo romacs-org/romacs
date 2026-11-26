@@ -454,10 +454,11 @@ until a pass after it has run: then nil.")
   (alist-get 'cycles (romacs--display-stats)))
 
 (defun display-stages--passes ()
-  "Display passes run so far: redisplay cycles, and the redisplay trigger's
-checks, each of which either found the frame current or set off a cycle."
+  "Completed display passes: redisplay cycles and checks finding the frame current.
+A stale check requests a cycle that may still be waiting for a paint in flight."
   (let ((stats (romacs--display-stats)))
-    (+ (alist-get 'cycles stats) (alist-get 'trigger-checks stats 0))))
+    (+ (alist-get 'cycles stats)
+       (- (alist-get 'trigger-checks stats 0) (alist-get 'trigger-stale stats 0)))))
 
 (defun display-stages--work (run &rest args)
   "Call RUN with ARGS, counting the instructions it ran as a step's work.
