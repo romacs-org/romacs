@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -31,6 +32,41 @@ class Measurement(unittest.TestCase):
             self.assertEqual(shutil.which('wlr-randr', path=child['PATH']), str(randr))
             self.assertEqual(child['PATH'].split(':')[0], env['ROMACS_TOOLCHAIN_BIN'])
             self.assertEqual(child['XDG_RUNTIME_DIR'], env['XDG_RUNTIME_DIR'])
+
+    def test_retry_keeps_only_the_passing_draft(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            work = Path(scratch)
+            bars = work / 'bars.json'
+            bars.write_text('{}\n')
+            env = {'ROMACS_TOOLCHAIN_BIN': '/rust', 'ROMACS_TEST_LABWC': '/headless/labwc'}
+            drafts = []
+
+            def run(command, **_):
+                if '--write-bars' not in command:
+                    return
+                draft = Path(command[command.index('--write-bars') + 1])
+                drafts.append(draft)
+                draft.write_text(f'{{"attempt": {len(drafts)}}}')
+                if len(drafts) == 1:
+                    raise subprocess.CalledProcessError(1, command)
+
+            with patch.object(recorder.subprocess, 'run', side_effect=run) as spawn:
+                draft = recorder.measure('display', bars, work / 'target', work, env)
+
+            self.assertEqual(spawn.call_count, 3)
+            self.assertNotEqual(drafts[0], drafts[1])
+            self.assertEqual(draft.read_text(), '{"attempt": 2}')
+            self.assertEqual(bars.read_text(), '{}\n')
+
+    def test_retry_is_bounded(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            work = Path(scratch)
+            env = {'ROMACS_TOOLCHAIN_BIN': '/rust', 'ROMACS_TEST_LABWC': '/headless/labwc'}
+            failure = subprocess.CalledProcessError(1, 'harness')
+            with patch.object(recorder.subprocess, 'run', side_effect=[None, failure, failure]) as spawn:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    recorder.measure('render', work / 'bars.json', work / 'target', work, env)
+            self.assertEqual(spawn.call_count, 3)
 
 
 class Publication(unittest.TestCase):
