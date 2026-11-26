@@ -2884,6 +2884,13 @@ pub fn interrupt_pending() -> bool {
 pub fn safepoint_pending() -> bool {
     interrupt_pending() || USER_SIGNAL_ARRIVED.load(std::sync::atomic::Ordering::Relaxed)
 }
+/// A user signal arrived since a safepoint last looked, which may be a
+/// debug event: one relaxed load, for a native loop's entry.
+// HOST(pure): looks at a signal flag, takes nothing
+#[inline(always)]
+pub fn user_signal_arrived() -> bool {
+    USER_SIGNAL_ARRIVED.load(std::sync::atomic::Ordering::Relaxed)
+}
 /// keyboard.c handle_user_signal: SIGUSR1 and SIGUSR2 are input, counted
 /// here until read as `sigusr1' and `sigusr2' events, never the end of the
 /// process. An isolate worker gives SIGUSR1 its own meaning afterwards
