@@ -32,6 +32,7 @@
 (require 'romacs-key-hint)
 (require 'romacs-truncate)
 (require 'romacs-agent-history)
+(require 'romacs-banner)
 
 (defface romacs-agent-board-row '((t :inherit highlight :extend t))
   "The agent board's row at point."
@@ -513,16 +514,31 @@ work), dim when none presses; then its folder."
   "The banner's thread for ROWS: running while one of their threads works."
   (if (seq-intersection (romacs-agent-board--keys-of rows) romacs-agent-ui--live-keys) 'running 'idle))
 
+(defcustom romacs-agent-board-banner 'thread
+  "The pattern of the board's banner, its first line: the chat's working
+thread, or one the display draws in the board's state colours.  It moves
+while a thread works."
+  :type '(choice (const thread) (const wave) (const rain) (const sparkle) (const sweep))
+  :group 'romacs-agent)
+
+(defconst romacs-agent-board--banner-faces '(romacs-working-running romacs-working-waiting romacs-agent-done)
+  "The banner's colours: running, waiting on the user, done.")
+
+(defvar-local romacs-agent-board--banner-epoch nil "The seed of the banner's randomness, set once a board.")
+
 (defun romacs-agent-board--banner (rows width)
-  "The board's first line, WIDTH columns of the chat's thread at rest for
-ROWS (`romacs-working-still'); `romacs-agent-board--animate' sets it moving."
-  (romacs-working-still width (romacs-agent-board--work rows)))
+  "The board's first line: WIDTH columns of its banner at rest for ROWS
+\(`romacs-banner-still'); `romacs-agent-board--animate' sets it moving."
+  (romacs-banner-still romacs-agent-board-banner width 1 romacs-agent-board--banner-faces
+                       (with-memoization romacs-agent-board--banner-epoch (romacs-banner-random-epoch))
+                       (eq (romacs-agent-board--work rows) 'running)))
 
 (defun romacs-agent-board--animate (rows width)
-  "Show the banner's thread for ROWS over its WIDTH columns: moving while
-a thread works, at rest otherwise."
-  (romacs-working-show 'romacs-agent-board-banner (current-buffer) (point-min) width
-                       (romacs-agent-board--work rows)))
+  "Show the banner for ROWS over its WIDTH columns: moving while a thread
+works, at rest otherwise."
+  (romacs-banner-show 'romacs-agent-board-banner (current-buffer) (point-min) romacs-agent-board-banner
+                      width 1 romacs-agent-board--banner-faces
+                      (eq (romacs-agent-board--work rows) 'running) romacs-agent-board--banner-epoch))
 
 (defvar romacs-agent-board-mode-map)
 

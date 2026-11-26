@@ -125,3 +125,36 @@ fn a_thread_is_placed_on_its_laid_row_and_never_over_other_text() {
     let still = TextAnimation { still: true, ..placed };
     assert_eq!(located(&frame, &still), None);
 }
+
+fn banner(pattern: romacs_logo::banner::Pattern, epoch: u64) -> TextAnimation {
+    TextAnimation { window: 1, top: 0, cols: 20, rows: 1, anchor: None, rise: None, fps: 30, moving: true, still: false,
+                    kind: TextAnimationKind::Banner { pattern, epoch, colours: vec![[0x10, 0x20, 0x30], [0xa0, 0xb0, 0xc0]] } }
+}
+
+#[test]
+fn a_banner_moves_in_its_stops_colours_and_keeps_its_motion_for_its_pattern_and_epoch() {
+    use romacs_display_protocol::text_animation::located;
+    use romacs_logo::banner::Pattern;
+    let mut animations = TextAnimations::default();
+    let start = Instant::now();
+    animations.replace(vec![(1, banner(Pattern::Wave, 3))]);
+    animations.tick(start);
+    let first = animations.running[&1].animation.cells(0.0);
+    for step in 1..=5 { animations.tick(start + Duration::from_millis(40 * step)); }
+    let moved = animations.running[&1].moved;
+    let cells = animations.running[&1].animation.cells(moved);
+    assert_ne!(cells, first, "the render thread alone moves it");
+    assert_eq!(cells.len(), 20);
+    assert!(cells.iter().all(|c| c.1.is_none_or(|rgb| rgb == 0x102030 || rgb == 0xa0b0c0)), "only its stops' colours");
+    // The same pattern and epoch go on; another of either starts over.
+    animations.replace(vec![(1, banner(Pattern::Wave, 3))]);
+    assert!((animations.running[&1].moved - moved).abs() < 1e-9);
+    animations.replace(vec![(1, banner(Pattern::Rain, 3))]);
+    assert_eq!(animations.running[&1].moved, 0.0);
+    // Cells, never a scene; with motion off the evaluator's still frame
+    // shows alone.
+    assert!(!banner(Pattern::Sweep, 0).kind.scened());
+    let frame = FrameGlyphBuffer::new();
+    assert!(located(&frame, &banner(Pattern::Sweep, 0)).is_some());
+    assert_eq!(located(&frame, &TextAnimation { still: true, ..banner(Pattern::Sweep, 0) }), None);
+}

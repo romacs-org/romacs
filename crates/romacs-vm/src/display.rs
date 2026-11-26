@@ -708,7 +708,8 @@ impl Vm {
     /// BUFFER, keyed by KEY and WINDOW.  START is the buffer position (or
     /// marker) where the block's first row begins.  MOVING is t, nil (held
     /// where it is) or `still' (motion is off: its still frame).  KIND is
-    /// (logo CELL-ASPECT EPOCH) or (working WORK EPOCH FACE BEATS).
+    /// (logo CELL-ASPECT EPOCH), (working WORK EPOCH FACE BEATS) or
+    /// (banner PATTERN EPOCH FACES).
     /// They travel with the frame, so each frame the display shows says
     /// which animations it has: none once the buffer is no longer shown.
     /// The block's row in WINDOW is counted here, from the window start
@@ -723,6 +724,7 @@ impl Vm {
         let natural = |v: Value| v.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or("natural number required");
         let logo = self.intern("logo");
         let working = self.intern("working");
+        let banner = self.intern("banner");
         let still = self.intern("still");
         let mut animations = vec![];
         for entry in self.list_values(list)? {
@@ -772,6 +774,22 @@ impl Vm {
                     TextAnimationKind::Working { work, beats: natural(beats)?, epoch: natural(epoch)?,
                                                  colour: self.display_face(&face)?.foreground,
                                                  bead: self.display_face("default")?.foreground }
+                }
+                // (banner PATTERN EPOCH FACES): lisp/ui/romacs-banner.el's,
+                // its colour stops FACES' foregrounds, read as each frame
+                // freezes so a theme switch recolours it.
+                [head, pattern, epoch, faces] if head == banner => {
+                    let pattern = self.symbol_name_of(pattern).as_deref().and_then(romacs_logo::banner::Pattern::named)
+                        .ok_or("banner pattern required")?;
+                    let mut colours = vec![];
+                    for face in self.list_values(faces)? {
+                        let face = self.symbol_name_of(face).ok_or("face symbol required")?;
+                        colours.push(self.display_face(&face)?.foreground);
+                    }
+                    if !(1..=romacs_logo::banner::MAX_STOPS).contains(&colours.len()) {
+                        return Err("1 to 4 banner faces required".into());
+                    }
+                    TextAnimationKind::Banner { pattern, epoch: natural(epoch)?, colours }
                 }
                 _ => return Err("bad text animation kind".into()),
             };

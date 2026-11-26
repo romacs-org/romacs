@@ -57,6 +57,14 @@ pub enum TextAnimationKind {
         /// The bead's: the text's own colour.
         bead: [u8; 3],
     },
+    /// A banner over a list's first lines (romacs_logo::banner): PATTERN
+    /// in COLOURS, its stops (1 to 4, from the theme's faces), seeded by
+    /// EPOCH.  A new EPOCH or PATTERN starts it over.
+    Banner {
+        pattern: romacs_logo::banner::Pattern,
+        epoch: u64,
+        colours: Vec<[u8; 3]>,
+    },
 }
 
 /// The colours the logo takes from the theme: the mark's light (the
@@ -112,6 +120,10 @@ impl TextAnimation {
                 TextAnimationKind::Working { epoch: a, .. },
                 TextAnimationKind::Working { epoch: b, .. },
             ) => a == b,
+            (
+                TextAnimationKind::Banner { pattern: p, epoch: a, .. },
+                TextAnimationKind::Banner { pattern: q, epoch: b, .. },
+            ) => p == q && a == b,
             _ => false,
         }
     }
@@ -119,6 +131,7 @@ impl TextAnimation {
     /// The cells after MOVED seconds of motion, each a character and its
     /// colour (none for an empty cell).
     pub fn cells(&self, moved: f64) -> Vec<romacs_logo::Cell> {
+        let rgb = |[r, g, b]: [u8; 3]| (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
         match self.kind {
             TextAnimationKind::Logo { cell_aspect, .. } => {
                 let view = romacs_logo::View {
@@ -133,8 +146,13 @@ impl TextAnimation {
                 }
             }
             TextAnimationKind::Working { work, beats, colour, bead, .. } => {
-                let rgb = |[r, g, b]: [u8; 3]| (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
                 romacs_logo::working::thread(self.cols as usize, work, beats, rgb(colour), rgb(bead), moved)
+            }
+            TextAnimationKind::Banner { pattern, epoch, ref colours } => {
+                romacs_logo::banner::frame(pattern, self.cols as usize, self.rows as usize, colours.len(), epoch, moved)
+                    .into_iter()
+                    .map(|(ch, stop)| (ch, stop.and_then(|i| colours.get(i)).map(|&c| rgb(c))))
+                    .collect()
             }
         }
     }
@@ -280,10 +298,13 @@ fn text_slot(glyph: &FrameGlyph, animation: &TextAnimation) -> Option<DisplaySlo
 /// text down within that row), whose cells must all hold braille,
 /// the thread's still frame, so it never paints over text not its own;
 /// none while motion is off, the evaluator's still frame showing alone.
-/// Any other kind as it is.
+/// A banner as it is, or none while motion is off, as a thread.  Any
+/// other kind as it is.
 pub fn located(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<TextAnimation> {
-    if !matches!(animation.kind, TextAnimationKind::Working { .. }) {
-        return Some(animation.clone());
+    match animation.kind {
+        TextAnimationKind::Working { .. } => {}
+        TextAnimationKind::Banner { .. } if animation.still => return None,
+        _ => return Some(animation.clone()),
     }
     if animation.still {
         return None;
