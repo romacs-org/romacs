@@ -107,10 +107,12 @@ PATH_GATED = {
         r'|crates/romacs-vm-gui/src/(?:batch|main)\.rs$)'),
 }
 
+STAGE_HARNESSES = ('display_stages', 'render_stages')
+
 # The live harnesses a check runs for any change that reaches the editor
 # (crates/romacs-vm-gui/harness/NAME_live.py, each taking --binary and --output).
 HARNESSES = ('world', 'autoloads', 'completion', 'fontify', 'timers', 'popup', 'lines', 'find_file',
-             'entry_prompts', 'requests', 'landing_anim', 'layout_journey', 'chrome', 'scaling', 'display_stages')
+             'entry_prompts', 'requests', 'landing_anim', 'layout_journey', 'chrome', 'scaling', *STAGE_HARNESSES)
 # More harnesses, each for the paths only it drives end to end.
 HARNESS_RULES = (
     # The agent client end to end (sessions, selections and restarts, relays, tools),
@@ -213,7 +215,8 @@ def includers(support, sources, tests_dir):
 
 def harness_users(changed, root):
     """The live harnesses (HARNESSES and the rules' names) whose script is
-    CHANGED (a module of HARNESS_DIR) or imports it, directly or not."""
+    CHANGED (a module of HARNESS_DIR) or imports it, directly or not.
+    The stage harnesses measure shared scenarios, so either selects both."""
     harness = root / HARNESS_DIR
     modules = {p.stem: p.read_text(errors='replace') for p in harness.glob('*.py')}
     wanted, found = {pathlib.PurePosixPath(changed).stem}, set()
@@ -223,7 +226,8 @@ def harness_users(changed, root):
         pattern = re.compile(rf'^\s*(?:import\s+{re.escape(name)}\b|from\s+{re.escape(name)}\s+import\b)', re.M)
         wanted |= {m for m, text in modules.items() if m not in found and pattern.search(text)}
     names = set(HARNESSES) | {name for _, name in HARNESS_RULES}
-    return {m[:-len('_live')] for m in found if m.endswith('_live') and m[:-len('_live')] in names}
+    users = {m[:-len('_live')] for m in found if m.endswith('_live') and m[:-len('_live')] in names}
+    return users.union(STAGE_HARNESSES) if users.intersection(STAGE_HARNESSES) else users
 
 
 def select(paths, root, metadata):

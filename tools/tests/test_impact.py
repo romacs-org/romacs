@@ -15,7 +15,7 @@ import impact  # noqa: E402
 
 def workspace(root):
     """A workspace like the repository's, small: romacs-vm, romacs-vm-gui on it,
-    romacs-display-runtime alone; romacs-vm's tests, one folded through a
+    and romacs-display-runtime; romacs-vm's tests, one folded through a
     support file, romacs-vm-gui's harness and a fixture a test names."""
     files = {
         'Cargo.toml': '[workspace]\nmembers = ["crates/*"]\nresolver = "2"\n',
@@ -32,7 +32,8 @@ def workspace(root):
         'crates/romacs-vm/tests/filelock.rs': 'include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/pinned_gnu.rs"));\n',
         'crates/romacs-vm/tests/support/orphan.rs': '',
         'crates/romacs-vm-gui/Cargo.toml': '[package]\nname = "romacs-vm-gui"\nversion = "0.0.0"\nedition = "2021"\n'
-                                           '[dependencies]\nromacs-vm = { path = "../romacs-vm" }\n',
+                                           '[dependencies]\nromacs-vm = { path = "../romacs-vm" }\n'
+                                           'romacs-display-runtime = { path = "../romacs-display-runtime" }\n',
         'crates/romacs-vm-gui/src/main.rs': 'fn main() {}\n',
         'crates/romacs-vm-gui/tests/all/standalone.txt': '',
         'crates/romacs-vm-test-build/Cargo.toml': '[package]\nname = "romacs-vm-test-build"\nversion = "0.0.0"\n'
@@ -55,6 +56,8 @@ def workspace(root):
         'crates/romacs-vm-gui/harness/live_oracle.py': '',
         'crates/romacs-vm-gui/harness/scaling_live.py': 'import live_oracle\n',
         'crates/romacs-vm-gui/harness/world_live.py': 'from live_oracle import stop\n',
+        'crates/romacs-vm-gui/harness/display_stages_live.py': '',
+        'crates/romacs-vm-gui/harness/render_stages_live.py': 'import display_stages_live\n',
         'crates/romacs-vm-gui/harness/agent_live.py': '',
         'crates/romacs-vm-gui/harness/exit_live.py': '',
         'crates/romacs-vm-gui/harness/startup_failed_live.py': 'import exit_live\n',
@@ -87,14 +90,30 @@ class Select(unittest.TestCase):
         self.assertNotIn('romacs-display-runtime', found['filter'].replace('time_discipline', ''))
 
     def test_a_crate_nothing_depends_on_reaches_only_itself(self):
-        found = self.select('crates/romacs-display-runtime/src/lib.rs')
-        self.assertEqual(set(found['packages']), {'romacs-display-runtime'})
-        self.assertIn(impact.CRATE_RULES['romacs-display-runtime'], found['filter'])
+        found = self.select('crates/romacs-vm-test-build/src/lib.rs')
+        self.assertEqual(set(found['packages']), {'romacs-vm-test-build'})
         self.assertEqual(found['harnesses'], {})
+
+    def test_a_changed_crate_runs_its_structural_rule(self):
+        found = self.select('crates/romacs-display-runtime/src/lib.rs')
+        self.assertIn(impact.CRATE_RULES['romacs-display-runtime'], found['filter'])
 
     def test_a_change_the_editor_reaches_calls_for_every_standard_harness(self):
         found = self.select('crates/romacs-vm/src/gc.rs')
         self.assertEqual(set(found['harnesses']), set(impact.HARNESSES))
+
+    def test_display_and_render_stages_are_selected_together(self):
+        stages = {'display_stages', 'render_stages'}
+        for path in ('lisp/agents/romacs-agent-chat.el', 'lisp/ui/romacs-list.el',
+                     'crates/romacs-display-runtime/src/lib.rs', 'Cargo.lock',
+                     'crates/romacs-vm-gui/harness/display_stages_live.py',
+                     'crates/romacs-vm-gui/harness/render_stages_live.py'):
+            with self.subTest(path):
+                self.assertEqual(stages & self.select(path)['harnesses'].keys(), stages)
+        for path in ('doc/x.org', 'crates/romacs-vm/tests/quit_async.rs',
+                     'crates/romacs-vm-gui/harness/live_oracle.py'):
+            with self.subTest(path):
+                self.assertFalse(stages & self.select(path)['harnesses'].keys())
 
     def test_a_test_file_reaches_its_tests_alone(self):
         found = self.select('crates/romacs-vm/tests/quit_async.rs')
