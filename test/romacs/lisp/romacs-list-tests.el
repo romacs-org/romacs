@@ -5,6 +5,8 @@
 (require 'cl-lib)
 (require 'romacs-list)
 
+(declare-function romacs--run-window-change-functions "window-change")
+
 ;;; A list of fruit by colour: groups, a level per colour, a live column
 
 (defvar romacs-list-tests--fruit nil "(ID COLOUR RIPE) of each fruit the test list shows.")
@@ -198,5 +200,55 @@ level, that colour's alone."
           (romacs-list--resized (selected-window))
           (should (equal (buffer-string) "the user's text"))
           (should (= romacs-list-tests--drawn 3)))))))
+
+(ert-deftest romacs-list-enters-on-its-heading-with-no-banner ()
+  (let ((romacs-list-tests--fruit '((apple red nil) (lime green nil))) (romacs-list-banners '((romacs-list-tests-mode))))
+    (with-temp-buffer
+      (romacs-list-tests-mode)
+      (funcall romacs-list-redraw-function)
+      (romacs-list-enter 'green)
+      (should (eq (romacs-list-tests--at) 'green)))))
+
+(ert-deftest romacs-list-stops-its-clock-and-banner-when-it-leaves-its-mode ()
+  (romacs-list-tests--with '((apple red now))
+    (let ((timer (run-at-time 3600 1 #'ignore)) (id (romacs-list--banner-id)))
+      (setq romacs-list--ticker timer)
+      (should (romacs-animate--get id))
+      (fundamental-mode)
+      (should-not (memq timer timer-list))
+      (should-not (romacs-animate--get id)))))
+
+(ert-deftest romacs-list-shown-first-puts-each-window-on-its-first-row ()
+  (save-window-excursion
+    (let ((romacs-list-tests--fruit '((apple red nil))) (romacs-list-tests--drawn 0))
+      (with-temp-buffer
+        (romacs-list-tests-mode)
+        (set-window-buffer (selected-window) (current-buffer))
+        (funcall romacs-list-redraw-function)
+        (should (eq (plist-get (save-excursion (goto-char (window-point)) (romacs-list-row)) :id) 'red))
+        (romacs-banner-stop (romacs-list--banner-id))))))
+
+(ert-deftest romacs-list-a-window-switching-lists-draws-the-one-it-shows-once ()
+  (save-window-excursion
+    (let ((romacs-list-tests--fruit '((apple red nil))) (draws nil))
+      (let ((one (generate-new-buffer "one")) (two (generate-new-buffer "two")))
+        (unwind-protect
+            (progn
+              (dolist (buffer (list one two))
+                (with-current-buffer buffer
+                  (romacs-list-tests-mode)
+                  (setq-local romacs-list-redraw-function
+                              (lambda (&optional _)
+                                (push (current-buffer) draws)
+                                (setq romacs-list--width (romacs-list-columns (current-buffer)))))))
+              (set-window-buffer (selected-window) one)
+              (romacs--run-window-change-functions)
+              (setq draws nil)
+              ;; The buffer it showed runs its hook too: only TWO draws.
+              (set-window-buffer (selected-window) two)
+              (romacs--run-window-change-functions)
+              (should (equal draws (list two))))
+          (kill-buffer one)
+          (kill-buffer two))))))
 
 ;;; romacs-list-tests.el ends here

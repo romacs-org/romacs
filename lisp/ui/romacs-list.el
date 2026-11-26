@@ -277,18 +277,22 @@ count: slack, so a row's last column is not cut."
 (defun romacs-list-render (buffer rows &optional width)
   "Draw ROWS in BUFFER's list, WIDTH columns wide, by default as wide as
 its windows: each window showing it keeps the row at its point and at
-its start."
+its start, or once drawn first, the row the draw put point on."
   (with-current-buffer buffer
     (let* ((windows (romacs-list-windows buffer))
            (spots (mapcar (lambda (window)
                             (list window (romacs-list--spot (window-point window))
                                   (romacs-list--spot (window-start window))))
-                          windows)))
+                          windows))
+           (drawn romacs-list--width))
       (romacs-list-draw rows (or width (romacs-list-columns buffer)))
       (pcase-dolist (`(,window ,at ,start) spots)
-        (set-window-point window (romacs-list--back at))
-        (set-window-start window (save-excursion (goto-char (romacs-list--back start)) (line-beginning-position))
-                          t))
+        (if (not drawn)
+            ;; Drawn first: where the draw put point.
+            (set-window-point window (point))
+          (set-window-point window (romacs-list--back at))
+          (set-window-start window (save-excursion (goto-char (romacs-list--back start)) (line-beginning-position))
+                            t)))
       (when hl-line-mode
         (if windows (with-selected-window (car windows) (hl-line-highlight)) (hl-line-highlight)))
       (when (and windows (not romacs-list--ticker)
@@ -327,6 +331,11 @@ while the list shows one; else stop."
     (cancel-timer romacs-list--ticker)
     (setq romacs-list--ticker nil)))
 
+(defun romacs-list--stop ()
+  "Stop the list's clock and banner: its buffer goes, or leaves the mode."
+  (romacs-list--stop-ticker)
+  (romacs-banner-stop (romacs-list--banner-id)))
+
 ;;; Windows
 
 (defun romacs-list--in (window)
@@ -337,8 +346,10 @@ another buffer now runs the list's window hooks too."
 
 (defun romacs-list--shown-in (window)
   "Draw the list anew as WINDOW shows it: it was not followed hidden."
-  (when-let* ((buffer (romacs-list--in window)))
-    (with-current-buffer buffer (funcall romacs-list-redraw-function))))
+  (when-let* ((buffer (romacs-list--in window))
+              ;; The buffer it showed runs the hook too.
+              ((eq buffer (current-buffer))))
+    (funcall romacs-list-redraw-function)))
 
 (defun romacs-list--resized (window)
   "Draw the list again when WINDOW, showing it, changed its width."
@@ -371,7 +382,7 @@ up, on the row of the level it came from."
     (set romacs-list-level-variable level)
     (funcall romacs-list-redraw-function)
     (goto-char (point-min))
-    (if level (romacs-list-next 1) (romacs-list-goto from))))
+    (if level (unless (romacs-list-row) (romacs-list-next 1)) (romacs-list-goto from))))
 
 (defun romacs-list-up ()
   "Show the list's top level again."
@@ -403,7 +414,8 @@ up, on the row of the level it came from."
   (hl-line-mode)
   (add-hook 'window-buffer-change-functions #'romacs-list--shown-in nil t)
   (add-hook 'window-size-change-functions #'romacs-list--resized nil t)
-  (add-hook 'kill-buffer-hook #'romacs-list--stop-ticker nil t))
+  (add-hook 'kill-buffer-hook #'romacs-list--stop nil t)
+  (add-hook 'change-major-mode-hook #'romacs-list--stop nil t))
 
 (provide 'romacs-list)
 ;;; romacs-list.el ends here

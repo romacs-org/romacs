@@ -33,6 +33,10 @@
 (require 'romacs-agent-history)
 (require 'romacs-list)
 
+(defface romacs-agent-board-row '((t :inherit romacs-list-row))
+  "The agent board's row at point."
+  :group 'romacs-agent)
+
 (defconst romacs-agent-board--name "*romacs-agents*")
 
 ;;; The view: what the user chose, kept in the board's buffer
@@ -842,6 +846,7 @@ A parent:ID term matches the threads directly delegated by session ID."
 \\{romacs-agent-board-mode-map}"
   :interactive nil
   (setq-local revert-buffer-function #'romacs-agent-board--revert
+              hl-line-face 'romacs-agent-board-row
               romacs-list-redraw-function #'romacs-agent-board--redraw
               romacs-list-line-function #'romacs-agent-board--line
               romacs-list-group-kind 'project
