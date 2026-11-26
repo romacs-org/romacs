@@ -1360,6 +1360,29 @@ mod tests {
         assert!(matches!(outcome, Err(_)), "the scan stops for the event before its setup's stop for Lisp");
     }
 
+    /// A quit pending when a scan whose count no text can use up starts is
+    /// the indexed path's to answer, which `listing` sent it to: its entry
+    /// probe stops it and counts the quit decline.
+    #[test]
+    fn a_pending_quit_at_an_unbound_scan_counts_its_decline() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.eval_source_raw(r#"(progn (set-buffer (get-buffer-create "unbound quit")) (insert (make-string 20000 ?a)))"#).unwrap();
+        let signal = std::sync::Arc::new(crate::QuitSignal::new());
+        vm.share_quit_signal(signal.clone());
+        vm.enter_busy();
+        assert!(signal.interrupt());
+        let args = [Value::integer(1).unwrap(), Value::integer(30000).unwrap(), Value::NIL, Value::NIL, Value::NIL, Value::NIL];
+        let outcome = {
+            let mut leaf = super::Leaf { vm: &mut vm };
+            leaf.quittable(|leaf| leaf.syntax_scan(super::Op::ScanSexps, &args, Value::NIL, Value::NIL))
+        };
+        assert!(matches!(outcome, Err(_)), "the scan quits");
+        let index = vm.buffer_index().unwrap();
+        let quits = super::buffer_text(&vm, index).syntax.borrow().stats.list_declined[super::Decline::Quit as usize];
+        assert_eq!(quits, 1, "the indexed entry counted the quit");
+    }
+
     /// A quit pending when an indexed list scan starts stops it there,
     /// through the buffer's own view: the probe is asked at once, not at
     /// the end of a countdown, so a warm scan that would fold its whole
