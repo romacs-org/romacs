@@ -4,6 +4,7 @@ use super::{
 };
 use romacs_display_protocol::{
     Color, CursorStyle, FrameGlyph, FrameGlyphBuffer, frame_glyphs::GlyphRowRole,
+    pane_picture::PanePicture,
 };
 use romacs_layout::LayoutEngine;
 use romacs_vm::Vm;
@@ -25,7 +26,7 @@ fn request_box(
     ));
 }
 
-fn fringed_master() -> ((u32, u32), FrameGlyphBuffer) {
+fn fringed_master(left_margin: u32) -> ((u32, u32), FrameGlyphBuffer) {
     let mut vm = Vm::new();
     vm.set_frame_geometry(80, 25, 1, 1).unwrap();
     romacs_vm_gui::startup::drive_loadup(&mut vm, &romacs_vm_gui::startup::lisp_dir()).unwrap();
@@ -38,7 +39,7 @@ fn fringed_master() -> ((u32, u32), FrameGlyphBuffer) {
         "{FACE} {CONTENT}
          (set-window-buffer nil test-buffer)
          (set-window-fringes nil 8 4)
-         (set-window-margins nil 1 0)"
+         (set-window-margins nil {left_margin} 0)"
     ))
     .unwrap();
     let target = vm.selected_window_id().unwrap();
@@ -47,9 +48,10 @@ fn fringed_master() -> ((u32, u32), FrameGlyphBuffer) {
         .windows
         .retain(|window| window.snapshot.id == target);
     let window = &mut snapshot.windows[0];
+    let left = 8 + left_margin * 10;
     assert_eq!(
         (window.x, window.snapshot.width),
-        (18, 378),
+        (left, 396 - left),
         "master text insets"
     );
     window.y = 0;
@@ -69,7 +71,7 @@ fn fringed_master() -> ((u32, u32), FrameGlyphBuffer) {
 #[test]
 fn fringes_and_margin_match_master_layout() {
     with_pinned_fonts(|| {
-        let (size, expected) = fringed_master();
+        let (size, expected) = fringed_master(1);
         let mut owner = Owner::new();
         assert_smaller_pane_preserves_f1_size(&mut owner);
         owner.run("(with-current-buffer test-buffer (setq-local mode-line-format \"pane\"))");
@@ -384,4 +386,169 @@ fn display_buffer_allows_the_caller_to_request_no_window() {
             "nil"
         );
     });
+}
+
+mod round_three {
+    use super::{
+        BUFFER, FrameGlyph, GlyphRowRole, Owner, PanePicture, SIZE, WINDOW, assert_same_paint,
+        fringed_master, request_box, with_owner, with_pinned_fonts,
+    };
+
+    fn applied_request(owner: &mut Owner) -> String {
+        owner.run(&format!(
+            "(owner-window--request (gethash {WINDOW} owner-window--records))"
+        ))
+    }
+
+    fn picture_facts(picture: &PanePicture) -> (u64, u64, u32, u32) {
+        (
+            picture.head.request,
+            picture.head.v,
+            picture.width,
+            picture.height,
+        )
+    }
+
+    #[test]
+    fn failed_apply_keeps_the_applied_request_and_waits_for_a_valid_one() {
+        with_owner(|owner| {
+            owner.seed();
+            let before = owner.show(WINDOW, 1, SIZE, true);
+            let applied = applied_request(owner);
+            request_box(owner, 2, (460, 140), (0, 0), (2_147_483_648, 10));
+
+            let rejected = owner.picture(WINDOW);
+            let after_failure = applied_request(owner);
+            let without_new_request = owner.picture(WINDOW);
+            let recovered = owner.show(WINDOW, 3, (460, 140), true);
+
+            assert_eq!(
+                (
+                    rejected.as_ref().map(picture_facts),
+                    without_new_request.as_ref().map(picture_facts),
+                    after_failure,
+                    picture_facts(&recovered),
+                ),
+                (None, None, applied, (3, before.head.v + 1, 460, 140))
+            );
+        });
+    }
+
+    #[test]
+    fn direct_frame_resize_is_repaired_to_the_requested_box() {
+        with_owner(|owner| {
+            owner.seed();
+            owner.show(WINDOW, 1, SIZE, true);
+            assert_eq!(
+                owner.run(&format!(
+                    "(let ((window (test-pane-window {WINDOW})))
+                       (set-frame-size (window-frame window) 340 100 t)
+                       (list (window-pixel-width window) (window-pixel-height window)))"
+                )),
+                "(340 100)"
+            );
+            let picture = owner.shown(WINDOW);
+            assert_eq!(
+                (picture.head.request, (picture.width, picture.height)),
+                (1, SIZE)
+            );
+        });
+    }
+
+    #[test]
+    fn failed_drop_never_paints_the_old_buffer_under_the_new_request() {
+        with_owner(|owner| {
+            owner.seed();
+            owner.show(WINDOW, 1, SIZE, true);
+            owner.run(&format!(
+                r#"
+                (setq test-drop-frame (window-frame (test-pane-window {WINDOW}))
+                      test-drop-refused nil)
+                (add-hook 'delete-frame-functions
+                  (lambda (frame)
+                    (when (and (eq frame test-drop-frame) (not test-drop-refused))
+                      (setq test-drop-refused t)
+                      (error "test refuses the first drop"))))
+                nil
+                "#
+            ));
+            owner.request(WINDOW, "absent pane buffer", 2, SIZE, true);
+            let failed_drop = owner.picture(WINDOW);
+            assert_eq!(owner.run("test-drop-refused"), "t", "the deletion hook ran");
+            let next = owner.picture(WINDOW);
+            let facts = |picture: &PanePicture| (picture_facts(picture), text_in(picture));
+            assert_eq!(
+                (failed_drop.as_ref().map(facts), next.as_ref().map(facts)),
+                (None, None)
+            );
+        });
+    }
+
+    #[test]
+    fn a_new_fringe_request_supersedes_a_window_override() {
+        with_pinned_fonts(|| {
+            let (size, expected) = fringed_master(0);
+            let mut owner = Owner::new();
+            owner.seed();
+            request_box(&mut owner, 1, size, (4, 2), (20, 10));
+            owner.shown(WINDOW);
+            owner.run(&format!(
+                "(set-window-fringes (test-pane-window {WINDOW}) 0 0)"
+            ));
+
+            request_box(&mut owner, 2, size, (8, 4), (20, 10));
+            let picture = owner.shown(WINDOW);
+            assert_eq!(
+                (picture.head.request, (picture.width, picture.height)),
+                (2, size)
+            );
+            assert_same_paint(picture, expected, true);
+        });
+    }
+
+    fn text_in(picture: &PanePicture) -> (bool, bool) {
+        let shows = |letter| {
+            picture.glyphs.iter().any(|glyph| {
+                matches!(glyph, FrameGlyph::Char { row_role: GlyphRowRole::Text, char, .. } if *char == letter)
+            })
+        };
+        (shows('a'), shows('z'))
+    }
+
+    #[test]
+    fn a_buffer_swap_during_snapshot_disqualifies_the_picture() {
+        with_owner(|owner| {
+            owner.seed();
+            owner.show(WINDOW, 1, SIZE, true);
+            owner.run(&format!(
+                r#"
+                (setq test-snapshot-swapped nil test-intruder (get-buffer-create "snapshot intruder"))
+                (with-current-buffer test-intruder (insert "zzzz"))
+                (with-current-buffer test-buffer
+                  (setq-local mode-line-format
+                    '(:eval
+                      (progn
+                        (unless test-snapshot-swapped
+                          (let ((window (test-pane-window {WINDOW}))
+                                (ignore-window-parameters t))
+                            (set-window-dedicated-p window nil)
+                            (set-window-buffer window test-intruder)
+                            (setq test-snapshot-swapped t)))
+                        "pane"))))
+                nil
+                "#
+            ));
+            let swapped = owner.picture(WINDOW);
+            assert_eq!(
+                owner.run("test-snapshot-swapped"),
+                "t",
+                "mode-line swap ran"
+            );
+            let repaired = owner.shown(WINDOW);
+            assert_eq!(
+                (swapped.as_ref().map(text_in), text_in(&repaired)),
+                (None, (true, false))
+            );
+        });
+    }
 }
