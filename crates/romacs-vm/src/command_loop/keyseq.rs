@@ -114,7 +114,10 @@ impl KeyseqFrame {
     }
 }
 
-/// The key sequence the activation AT reads.
+/// The key sequence the activation AT reads. Only `keyseq.rs` and
+/// `keyremap.rs` ask, and only for an activation `read` gave a frame; a
+/// `read-event` activation (`read_char`'s alone) has none, and asking for it
+/// panics.
 pub(super) fn frame(vm: &mut Vm, at: usize) -> &mut KeyseqFrame {
     vm.reads.act(at).keyseq.as_mut().expect("an activation reading a key sequence")
 }
@@ -450,8 +453,10 @@ fn checkpoint(vm: &mut Vm, depth: usize) -> Checkpoint {
 fn new_event<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, before: RootFrame) -> Done<bool> {
     let method = m.leaf((), |vm, ()| var(vm, "last-nonmenu-event") == Value::NIL);
     let read = read_char::read_char(m, gc.by_ref(), depth, CharArgs { seconds: None, method, keymap_read: true });
-    let kept = step(m, gc.by_ref(), depth, (depth, read.is_ok()), |vm, (depth, ok)| {
-        if !ok { return Ok(false); }
+    // `quit-flag` first, then the event classified as its watcher left it.
+    let cleared = if read.is_ok() { step(m, gc.by_ref(), depth, depth, |vm, depth| store(vm, depth, "quit-flag", Value::NIL)) } else { Ok(()) };
+    let kept = m.leaf((depth, read.is_ok() && cleared.is_ok()), |vm, (depth, ok)| {
+        if !ok { return false; }
         let key = vm.reads.act(depth).result;
         let delay = (frame(vm, depth).n > 0 || !frame(vm, depth).can_return_switch_frame) && switch_frame_p(vm, key);
         let f = frame(vm, depth);
@@ -462,13 +467,13 @@ fn new_event<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, before: Ro
             f.raw.push(key);
             f.keybuf.push(key);
         }
-        store(vm, depth, "quit-flag", Value::NIL)?;
-        Ok(!delay)
+        !delay
     });
     let changed = m.leaf(&before, |vm, before| vm.rooted(before, 0) != vm.slots[vm.buffer_slot].value);
     m.leaf(before, Vm::drop_frame);
     read?;
-    if !kept? { return Ok(false); }
+    cleared?;
+    if !kept { return Ok(false); }
     if m.leaf((), |vm, ()| var(vm, "romacs--key-read-functions") != Value::NIL) {
         call(m, gc.by_ref(), depth, depth, |vm, depth| {
             let key = frame(vm, depth).key;

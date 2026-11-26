@@ -78,7 +78,7 @@ fn store(vm: &mut Vm, at: usize, name: &str, value: Value) -> Done<()> {
     let slot = vm.slot(name);
     if vm.variable_trapped(vm.indirect_variable(slot)) {
         let act = vm.reads.act(at);
-        debug_assert!(act.write.is_none(), "one watched write per reader leaf");
+        assert!(act.write.is_none(), "one watched write per reader leaf");
         act.write = Some((slot, value));
         return Ok(());
     }

@@ -42,7 +42,7 @@ impl Vm {
     }
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 47] = [
+        let checks: [(&str, bool); 46] = [
             ("stack", self.mutator.stack.is_empty()),
             ("site_leaf", self.mutator_rest.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -85,7 +85,6 @@ impl Vm {
             ("profiler", self.profiler.is_idle()),
             // A thread of this process: the running parse of a visit.
             ("treesit_early", crate::treesit::early_idle() && !self.objects.iter().any(|o| matches!(o, crate::data::Object::Buffer(b) if b.treesit.early.is_some()))),
-            ("suspended", self.mutator_rest.suspended.is_empty()),
             // The collector's reentry state: no engine running or suspended,
             // no frame holding Values out of its sight.
             ("suspended_stacks", self.mutator.stack.depth() == 0),

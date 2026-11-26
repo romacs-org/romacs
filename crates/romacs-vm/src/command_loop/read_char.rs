@@ -235,16 +235,18 @@ fn host_event<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, own: &RootFr
     if !taken.recorded { record(m, gc.by_ref(), at, own)?; }
     taken.recorded = true;
     // What the echo area held, for an input method to refer to.
-    let clear = step(m, gc.by_ref(), at, (at, own), |vm, (at, own)| {
+    step(m, gc.by_ref(), at, (at, own), |vm, (at, own)| {
         let event = vm.rooted(own, 0);
+        if var(vm, "input-method-function") == Value::NIL || !printable(event) { return Ok(()); }
         let message = vm.current_message().unwrap_or(Value::NIL);
-        let clear = message != Value::NIL && !echo_kept(vm, event);
-        if var(vm, "input-method-function") != Value::NIL && printable(event) {
-            vm.set_rooted(own, 1, message);
-            store(vm, at, "input-method-previous-message", message)?;
-        }
-        Ok(clear)
+        vm.set_rooted(own, 1, message);
+        store(vm, at, "input-method-previous-message", message)
     })?;
+    // Then the echo area as it is now, which that write's watcher may have changed.
+    let clear = m.leaf(own, |vm, own| {
+        let event = vm.rooted(own, 0);
+        vm.current_message().unwrap_or(Value::NIL) != Value::NIL && !echo_kept(vm, event)
+    });
     if clear { call(m, gc, at, (), |vm, ()| Ok(vec![vm.intern("romacs--clear-echo")]))?; }
     Ok((taken, quit))
 }
@@ -363,22 +365,20 @@ fn method_call<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, own: &RootF
 }
 
 /// The method's events: the first is the event now, and the rest go before
-/// `unread-post-input-method-events` as the Lisp port's `nconc` put them,
-/// the method's own list's tail extended. Whether it gave an event.
+/// `unread-post-input-method-events` as the Lisp port put them, with `nconc`
+/// itself (`fns_seq::nconc_values`): the method's own list extended, a
+/// non-list tail or a circular one refused, quit polled. Whether it gave an
+/// event.
 fn queue_rest(vm: &mut Vm, at: usize, own: &RootFrame) -> Done<bool> {
     let events = vm.reads.act(at).result;
     let cx = Leaf::new(vm);
     let Some((first, rest)) = cx.pair(events) else { return Ok(false) };
     vm.set_rooted(own, 0, first);
     let queued = var(vm, "unread-post-input-method-events");
-    let mut cx = Leaf::new(vm);
-    let mut last = rest;
-    while let Some((_, next)) = cx.pair(last).filter(|&(_, next)| cx.pair(next).is_some()) { last = next; }
-    let tail = if cx.pair(rest).is_some() {
-        cx.setcdr(last, queued).map_err(|fault| signal(vm, fault))?;
-        rest
-    } else {
+    let tail = if rest == Value::NIL {
         queued
+    } else {
+        crate::prim::prims::fns_seq::nconc_values(&mut Leaf::new(vm), &[rest, queued]).map_err(|fault| signal(vm, fault))?
     };
     store(vm, at, "unread-post-input-method-events", tail)?;
     Ok(true)

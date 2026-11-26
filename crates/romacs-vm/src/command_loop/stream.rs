@@ -134,9 +134,9 @@ impl Reads {
         self.acts.len() - 1
     }
     /// The activation at AT ends; activations end innermost first.
-    pub(super) fn pop(&mut self, at: usize) -> Act {
+    pub(super) fn pop(&mut self, at: usize) {
         assert_eq!(self.acts.len(), at + 1, "reads end innermost first");
-        self.acts.pop().unwrap_or_else(|| Act::new(None))
+        self.acts.truncate(at);
     }
     /// The activation at AT.
     pub(super) fn act(&mut self, at: usize) -> &mut Act {
