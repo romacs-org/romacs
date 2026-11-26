@@ -122,21 +122,23 @@ board's is `thread')."
 ;;; Rows in the buffer
 
 (defun romacs-list-row ()
-  "The row on point's line, or nil: anywhere on it, as a mark put over
-its first columns (`tabulated-list-put-tag') carries none."
-  (let ((start (line-beginning-position)) (end (line-end-position)))
+  "The row on point's line, or nil: anywhere on it, its newline too, as a
+mark put over its first columns (`tabulated-list-put-tag') carries none."
+  (let ((start (line-beginning-position)))
     (or (get-text-property start 'romacs-list-row)
-        (let ((at (next-single-property-change start 'romacs-list-row nil end)))
+        (let* ((end (min (point-max) (1+ (line-end-position))))
+               (at (next-single-property-change start 'romacs-list-row nil end)))
           (and (< at end) (get-text-property at 'romacs-list-row))))))
 
 (defun romacs-list--find (id)
-  "Where the row named ID starts, or nil."
+  "Where the line of the row named ID starts, or nil."
   (when id
     (save-excursion
       (goto-char (point-min))
       (when-let* ((at (text-property-search-forward 'romacs-list-row id
                                                     (lambda (id row) (equal id (plist-get row :id))))))
-        (prop-match-beginning at)))))
+        (goto-char (prop-match-beginning at))
+        (line-beginning-position)))))
 
 (defun romacs-list-goto (id)
   "Move to the row named ID, when it shows; return where it starts."
@@ -297,8 +299,12 @@ count: slack, so a row's last column is not cut."
 
 (defun romacs-list-highlight ()
   "Highlight the row at point now: hl-line moves it after a command, and a
-draw that no command made is followed by none."
-  (when (bound-and-true-p hl-line-mode) (hl-line-highlight)))
+draw that no command made is followed by none.  Not from a buffer the
+selected window does not show while the highlight follows that window
+\(`hl-line-sticky-flag' nil): it would take the highlight from it."
+  (when (and (bound-and-true-p hl-line-mode)
+             (or (bound-and-true-p hl-line-sticky-flag) (eq (window-buffer) (current-buffer))))
+    (hl-line-highlight)))
 
 (defun romacs-list-render (buffer rows &optional width)
   "Draw ROWS in BUFFER's list, WIDTH columns wide, by default as wide as

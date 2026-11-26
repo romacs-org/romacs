@@ -505,12 +505,12 @@ changing `tabulated-list-sort-key'."
       (delete-region (point) (point-max)))
     (set-buffer-modified-p nil)
     ;; If REMEMBER-POS was specified, move to the "old" location.
-    (if saved-pt
-	(progn (goto-char saved-pt)
-	       (move-to-column saved-col))
-      (goto-char (point-min)))
-    ;; No command follows a print that none made: the row it left point on.
-    (romacs-list-highlight)))
+    (prog1 (if saved-pt
+	       (progn (goto-char saved-pt)
+		      (move-to-column saved-col))
+	     (goto-char (point-min)))
+      ;; No command follows a print that none made: the row it left point on.
+      (romacs-list-highlight))))
 
 (defun tabulated-list-print-entries (entries sorter update entry-id)
   (let (saved-pt)

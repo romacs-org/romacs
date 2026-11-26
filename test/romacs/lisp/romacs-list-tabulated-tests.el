@@ -52,6 +52,22 @@
     (should (eq (plist-get (romacs-list-row) :id) 'apple))
     (should (equal (romacs-list-tabulated-tests--ids) '(apple fig lime)))))
 
+(ert-deftest romacs-list-tabulated-a-row-whose-only-column-was-set-is-a-row ()
+  (with-temp-buffer
+    (romacs-list-tabulated-tests-mode)
+    (setq tabulated-list-format [("Name" 8 t)] tabulated-list-padding 0
+          tabulated-list-entries (list (list 'apple (vector "apple")) (list 'fig (vector "fig"))))
+    (tabulated-list-print)
+    (tabulated-list-set-col 0 "APPLE")
+    (should (eq (plist-get (romacs-list-row) :id) 'apple))
+    (should (equal (romacs-list-tabulated-tests--ids) '(apple fig)))
+    (romacs-list-goto 'apple)
+    (should (= (point) (point-min)))
+    (romacs-list-next 1)
+    (should (eq (tabulated-list-get-id) 'fig))
+    (romacs-list-previous 1)
+    (should (eq (tabulated-list-get-id) 'apple))))
+
 (ert-deftest romacs-list-tabulated-updating-prints-as-gnu-does ()
   (romacs-list-tabulated-tests--with (romacs-list-tabulated-tests--fruit)
     (forward-line 1)
