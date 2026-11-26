@@ -953,7 +953,7 @@ pub(super) fn fontset_name_parts(cx: &mut Leaf<'_>, name: &str) -> std::result::
 
 /// The XLFD name of the font a def was realized to.
 pub(super) fn opened_name(cx: &mut Leaf<'_>, font: &romacs_layout_input::OpenedDefFont) -> std::result::Result<Option<String>, Fault> {
-    let Some(opened) = cx.font_host().and_then(|host| host.opened_def_font(font)) else { return Ok(None) };
+    let Some(opened) = cx.with_font_host(|host| host.opened_def_font(font)).flatten() else { return Ok(None) };
     let object = font_object(cx, &opened)?;
     Ok(name_of(cx, slot(cx, object, NAME)))
 }
@@ -985,10 +985,10 @@ fn open(cx: &mut Leaf<'_>, font: Value) -> std::result::Result<Option<Value>, Fa
     let entity = if kind == Kind3::Entity { entity_of(cx, font) } else {
         let mut query = query_of(cx, font);
         if query.family.is_none() { query.family = Some(cx.default_font_request()?.family); }
-        cx.font_host().and_then(|host| host.list_fonts(&query).into_iter().next())
+        cx.with_font_host(|host| host.list_fonts(&query).into_iter().next()).flatten()
     };
     let Some(entity) = entity else { return Ok(None) };
-    match cx.font_host().and_then(|host| host.open_font(&entity, size)) {
+    match cx.with_font_host(|host| host.open_font(&entity, size)).flatten() {
         Some(opened) => Ok(Some(font_object(cx, &opened)?)),
         None => Ok(None),
     }
@@ -1005,11 +1005,11 @@ pub(crate) fn frame_font(cx: &mut Leaf<'_>) -> std::result::Result<Option<String
 /// pixel size. None without a display, or for a face painting cannot
 /// realize.
 pub(crate) fn face_font(cx: &mut Leaf<'_>, face: &str, ch: char) -> std::result::Result<Option<String>, Fault> {
-    if cx.font_host().is_none() { return Ok(None); }
+    if !cx.has_font_host() { return Ok(None); }
     let Ok(request) = cx.face_font_request(face) else { return Ok(None) };
     let key = request.key();
     if ch == ' ' && let Some(name) = cx.cached_face_font(&key) { return Ok(Some(name)); }
-    let Some((opened, _)) = cx.font_host().and_then(|host| host.char_font(&request, ch)) else { return Ok(None) };
+    let Some((opened, _)) = cx.with_font_host(|host| host.char_font(&request, ch)).flatten() else { return Ok(None) };
     // font_build_object's name: the entity's XLFD at the opened size.
     let entity = make_entity(cx, &opened.entity)?;
     let name = unparse_xlfd(cx, entity, opened.pixel_size);
@@ -1108,7 +1108,7 @@ fn list_fonts(cx, font_spec: Value; optional frame: Value, num: Value, prefer: V
     };
     if prefer != Value::NIL { check_spec(cx, prefer)?; }
     let query = query_of(cx, font_spec);
-    let entities = cx.font_host().map_or_else(Vec::new, |host| host.list_fonts(&query));
+    let entities = cx.with_font_host(|host| host.list_fonts(&query)).unwrap_or_default();
     let mut list = Vec::new();
     for entity in entities.iter().take(limit.unwrap_or(usize::MAX)) { list.push(make_entity(cx, entity)?); }
     Ok(list.into_iter().rev().fold(Value::NIL, |tail, entity| cx.cons(entity, tail)))
@@ -1119,14 +1119,14 @@ fn find_font(cx, font_spec: Value; optional frame: Value) {
     cx.windows().check_live_frame(frame)?;
     check_spec(cx, font_spec)?;
     let query = query_of(cx, font_spec);
-    let first = cx.font_host().and_then(|host| host.list_fonts(&query).into_iter().next());
+    let first = cx.with_font_host(|host| host.list_fonts(&query).into_iter().next()).flatten();
     match first { Some(entity) => make_entity(cx, &entity), None => Ok(Value::NIL) }
 }}
 
 defsubr! { name = "font-family-list", gnu = "font.c:4442", effect = Reads,
 fn font_family_list(cx; optional frame: Value) {
     cx.windows().check_live_frame(frame)?;
-    let families = cx.font_host().map_or_else(Vec::new, |host| host.font_families());
+    let families = cx.with_font_host(|host| host.font_families()).unwrap_or_default();
     let mut list = Value::NIL;
     for family in families.iter().rev() { let name = cx.string(family); list = cx.cons(name, list); }
     Ok(list)
@@ -1159,7 +1159,7 @@ fn check_object(cx: &mut Leaf<'_>, font: Value) -> std::result::Result<(), Fault
 fn opened_of(cx: &mut Leaf<'_>, font: Value) -> Option<OpenedFont> {
     let entity = entity_of(cx, font)?;
     let size = slot(cx, font, SIZE).integer_value()?;
-    cx.font_host()?.open_font(&entity, size)
+    cx.with_font_host(|host| host.open_font(&entity, size)).flatten()
 }
 
 defsubr! { name = "query-font", gnu = "font.c:5277", effect = Reads,
@@ -1177,7 +1177,7 @@ fn font_has_char_p(cx, font: Value, ch: Value; optional frame: Value) {
     if frame != Value::NIL && cx.kind(frame) != Kind::Frame { return Err(Fault::Wrong("framep", frame)); }
     let Some(object) = open(cx, font)? else { return Ok(Value::NIL) };
     let Some(opened) = opened_of(cx, object) else { return Ok(Value::NIL) };
-    let found = char::from_u32(c as u32).and_then(|c| cx.font_host()?.glyph_metrics(&opened, c));
+    let found = char::from_u32(c as u32).and_then(|c| cx.with_font_host(|host| host.glyph_metrics(&opened, c)).flatten());
     Ok(if found.is_some() { Value::TRUE } else { Value::NIL })
 }}
 
@@ -1202,7 +1202,7 @@ fn open_font(cx, font_entity: Value; optional size: Value, frame: Value) {
         if pixels == 0 { 120 } else { pixels }
     };
     let Some(entity) = entity_of(cx, font_entity) else { return Ok(Value::NIL) };
-    match cx.font_host().and_then(|host| host.open_font(&entity, pixels)) {
+    match cx.with_font_host(|host| host.open_font(&entity, pixels)).flatten() {
         Some(opened) => font_object(cx, &opened),
         None => Ok(Value::NIL),
     }
@@ -1256,7 +1256,7 @@ fn font_match_p(cx, spec: Value, font: Value) {
                 if !is_object { return Ok(Value::NIL); }
                 let Some(opened) = opened_of(cx, font) else { return Ok(Value::NIL) };
                 let has = |cx: &mut Leaf<'_>, c: Value| c.integer_value().and_then(|c| char::from_u32(c as u32))
-                    .is_some_and(|c| cx.font_host().and_then(|host| host.glyph_metrics(&opened, c)).is_some());
+                    .is_some_and(|c| cx.with_font_host(|host| host.glyph_metrics(&opened, c)).flatten().is_some());
                 // A list wants every character, a vector one of them.
                 let ok = if let Ok(any) = cx.vector_values(chars) {
                     any.is_empty() || any.into_iter().any(|c| has(cx, c))
@@ -1364,7 +1364,7 @@ fn font_get_glyphs(cx, font_object: Value, from: Value, to: Value; optional obje
     let integer = |n: i64| Value::integer(n).unwrap();
     let mut glyphs = Vec::with_capacity(chars.len());
     for (index, &code) in chars.iter().enumerate() {
-        let metrics = char::from_u32(code as u32).and_then(|c| cx.font_host()?.glyph_metrics(&opened, c));
+        let metrics = char::from_u32(code as u32).and_then(|c| cx.with_font_host(|host| host.glyph_metrics(&opened, c)).flatten());
         glyphs.push(match metrics {
             None => Value::NIL,
             Some(m) => {
@@ -1380,7 +1380,7 @@ fn font_get_glyphs(cx, font_object: Value, from: Value, to: Value; optional obje
 // from them goes, as free_realized_fontsets.
 defsubr! { name = "clear-font-cache", gnu = "font.c:4576", effect = Global,
 fn clear_font_cache(cx) {
-    if let Some(host) = cx.font_host() { host.clear_font_cache(); }
+    cx.with_font_host(|host| host.clear_font_cache());
     cx.forget_font_objects();
     cx.fontsets_mut().touch();
     cx.note_fontset_change();
@@ -1392,7 +1392,7 @@ fn font_info(cx, name: Value; optional frame: Value) {
     let is_font = font_kind(cx, name).is_some();
     if !is_font && !matches!(cx.kind(name), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", name)); }
     cx.windows().check_live_frame(frame)?;
-    if cx.font_host().is_none() {
+    if !cx.has_font_host() {
         // The initial terminal's one font is "tty" (VM2-WIN5), whose
         // metrics are the frame's canonical character, which the host lays
         // out. Any other font does not open.
@@ -1424,7 +1424,7 @@ fn font_info(cx, name: Value; optional frame: Value) {
 fn char_font(cx: &mut Leaf<'_>, ch: i64) -> Out {
     let Some(ch) = u32::try_from(ch).ok().and_then(char::from_u32) else { return Ok(Value::NIL) };
     let request = cx.default_font_request()?;
-    let Some((opened, code)) = cx.font_host().and_then(|host| host.char_font(&request, ch)) else { return Ok(Value::NIL) };
+    let Some((opened, code)) = cx.with_font_host(|host| host.char_font(&request, ch)).flatten() else { return Ok(Value::NIL) };
     let object = font_object(cx, &opened)?;
     Ok(cx.cons(object, Value::integer(i64::from(code)).unwrap()))
 }
@@ -1434,7 +1434,7 @@ fn internal_char_font(cx, position: Value; optional ch: Value) -> Step {
     if position == Value::NIL {
         let Some(c) = ch.integer_value().filter(|c| (0..=0x3fffff).contains(c)) else { return Err(Fault::Wrong("characterp", ch)) };
         // Without a display, terminal_glyph_code: the initial terminal has none.
-        if cx.font_host().is_none() { return Ok(Step::Done(Value::NIL)); }
+        if !cx.has_font_host() { return Ok(Step::Done(Value::NIL)); }
         return Ok(Step::Done(char_font(cx, c)?));
     }
     let shape = cx.buffer_shape()?;
@@ -1445,7 +1445,7 @@ fn internal_char_font(cx, position: Value; optional ch: Value) -> Step {
     }
     if ch != Value::NIL && !ch.integer_value().is_some_and(|c| c >= 0) { return Err(Fault::Wrong("wholenump", ch)); }
     let buffer = cx.current_buffer()?;
-    if cx.windows().get_buffer_window(buffer, Value::NIL)? == Value::NIL || cx.font_host().is_none() {
+    if cx.windows().get_buffer_window(buffer, Value::NIL)? == Value::NIL || !cx.has_font_host() {
         return Ok(Step::Done(Value::NIL));
     }
     if ch != Value::NIL { return Ok(Step::Done(char_font(cx, ch.integer_value().unwrap())?)); }
@@ -1472,7 +1472,7 @@ fn font_at_window(cx: &mut Leaf<'_>, buffer: Value, saved: &[Value]) -> Next {
         if !(shape.begv <= at && at < shape.zv) {
             return Err(Fault::Range3(position, Value::integer(shape.begv).unwrap(), Value::integer(shape.zv).unwrap()));
         }
-        if cx.font_host().is_none() { return Ok(Step::Done(Value::NIL)); }
+        if !cx.has_font_host() { return Ok(Step::Done(Value::NIL)); }
         let f = cx.intern("char-after");
         return Ok(Step::Call { f, args: vec![Value::integer(at).unwrap()], then: font_object_of_char, saved: vec![] });
     }
@@ -1480,7 +1480,7 @@ fn font_at_window(cx: &mut Leaf<'_>, buffer: Value, saved: &[Value]) -> Next {
     cx.string_shape(string)?;
     let ch = match usize::try_from(at) { Ok(at) => cx.string_char(string, at)?, Err(_) => None };
     let Some(ch) = ch else { return Err(Fault::Range(string, position)) };
-    if cx.font_host().is_none() { return Ok(Step::Done(Value::NIL)); }
+    if !cx.has_font_host() { return Ok(Step::Done(Value::NIL)); }
     font_object_of_char(cx, Value::integer(i64::from(ch)).unwrap(), &[])
 }
 fn font_object_of_char(cx: &mut Leaf<'_>, ch: Value, _: &[Value]) -> Next {

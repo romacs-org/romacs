@@ -5,6 +5,10 @@ use crate::{coordinates::ByteOffset, data::Object, overlay_order::SortItem, prop
 mod tests;
 #[path = "mode_line.rs"]
 mod mode_line;
+/// The status bar's last fitted band, kept for a click to read
+/// (`Vm::status_bar_line`, `status_bar_target`).
+#[derive(Clone)]
+pub(crate) struct BarLine(mode_line::Band);
 #[path = "status_bar.rs"]
 mod status_bar;
 #[path = "mini_window.rs"]
@@ -403,6 +407,12 @@ impl DisplayState {
     /// character COLUMN; none past its line.
     pub(super) fn bar_target(&self, column: usize) -> Option<u64> {
         self.bar_line.filter(|(chars, _)| column < *chars).map(|(_, id)| id)
+    }
+    /// Forget the status bar's click map and its last expansion: a display
+    /// detached or replaced shows neither (`Vm::set_display_host`).
+    pub(crate) fn forget_status_bar(&mut self) {
+        self.bar_line = None;
+        self.bar_cache = None;
     }
     /// Forget a deleted window's last publication. Ids are monotonic and never
     /// reused, so without this the map grows for the life of the VM.
@@ -1208,7 +1218,7 @@ impl Vm {
             let preferred = rank.len() as u32;
             (rank, preferred)
         });
-        if changed && let Some(host) = self.window_system_host() { host.set_fontsets(std::sync::Arc::clone(&state)); }
+        if changed { self.with_window_system_host(|host| host.set_fontsets(std::sync::Arc::clone(&state))); }
         state
     }
     pub fn font_alternative_state(&mut self) -> Result<romacs_layout_input::FontAlternativeState> {
@@ -3332,10 +3342,10 @@ impl Vm {
         // A run is the adjacent pieces whose value is one object: a string's
         // own property is the object it carries (split at every face or
         // help boundary), a `:propertize''s the datum all its pieces share.
-        let identity = |vm: &mut Vm, form: &std::rc::Rc<Form>| -> Result<std::result::Result<Value, *const Form>> {
-            Ok(match &**form { Form::Object(object) => Ok(object.value(vm)?), _ => Err(std::rc::Rc::as_ptr(form)) })
+        let identity = |vm: &mut Vm, form: &std::sync::Arc<Form>| -> Result<std::result::Result<Value, *const Form>> {
+            Ok(match &**form { Form::Object(object) => Ok(object.value(vm)?), _ => Err(std::sync::Arc::as_ptr(form)) })
         };
-        let mut runs: Vec<(std::ops::Range<usize>, &std::rc::Rc<Form>, std::result::Result<Value, *const Form>)> = vec![];
+        let mut runs: Vec<(std::ops::Range<usize>, &std::sync::Arc<Form>, std::result::Result<Value, *const Form>)> = vec![];
         for (range, projected) in props {
             let Some((_, form)) = projected.iter().find(|(name, _)| *name == "display") else { continue };
             let id = identity(self, form)?;
@@ -3408,7 +3418,7 @@ impl Vm {
             for (range, projected) in &band.props {
                 for (name, form) in projected.iter() {
                     let property = self.intern_property_key(name);
-                    let key = (std::rc::Rc::as_ptr(form), *name);
+                    let key = (std::sync::Arc::as_ptr(form), *name);
                     let value = match made.get(&key) {
                         Some(&value) => value,
                         None => { let value = self.ml_prop_value(form)?; made.insert(key, value); value }

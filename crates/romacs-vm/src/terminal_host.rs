@@ -174,7 +174,8 @@ impl Vm {
         if host.is_some() {
             self.declare_terminal_errors()?;
         }
-        self.terminal_host = host.map(|host| Box::new(crate::host_calls::Counted(host)) as Box<dyn TerminalHost>);
+        let host = host.map(|host| Box::new(crate::host_calls::Counted(host)) as Box<dyn TerminalHost>);
+        self.ui_set(host, |ui| &mut ui.terminal_host);
         Ok(())
     }
 
@@ -188,23 +189,23 @@ impl Vm {
 
     /// Snapshot without evaluating Lisp, selecting windows or sending PTY input.
     pub fn terminal_snapshot(&mut self, session: u64) -> Result<TerminalSnapshot, String> {
-        self.terminal_host.as_mut().ok_or("No terminal host attached")?.snapshot(session)
+        self.with_terminal_host(|host| host.snapshot(session))?
     }
 
     /// Query input flags without materializing terminal history.
     pub fn terminal_input_state(&mut self, session: u64) -> Result<TerminalInputState, String> {
-        self.terminal_host.as_mut().ok_or("No terminal host attached")?.input_state(session)
+        self.with_terminal_host(|host| host.input_state(session))?
     }
 
     /// Send explicit input to a live terminal session.
     pub fn terminal_send(&mut self, session: u64, bytes: &[u8]) -> Result<(), String> {
-        self.terminal_host.as_mut().ok_or("No terminal host attached")?.send(session, bytes)
+        self.with_terminal_host(|host| host.send(session, bytes))?
     }
 
     /// Resize the terminal grid and PTY as one native operation.
     pub fn terminal_resize(&mut self, session: u64, columns: u16, rows: u16) -> Result<(), String> {
         if columns == 0 || rows == 0 { return Err("Invalid terminal geometry".into()); }
-        self.terminal_host.as_mut().ok_or("No terminal host attached")?.resize(session, columns, rows)
+        self.with_terminal_host(|host| host.resize(session, columns, rows))?
     }
 
 
@@ -212,8 +213,7 @@ impl Vm {
     pub fn poll_terminal_output(&mut self) -> Result<bool, String> {
         use crate::coordinates::ByteOffset;
         use crate::data::Object;
-        let Some(host) = self.terminal_host.as_mut() else { return Ok(false); };
-        let ready = host.changed_sessions();
+        let Ok(ready) = self.with_terminal_host(|host| host.changed_sessions()) else { return Ok(false); };
         if self.terminal_bindings.is_empty() { return Ok(false); }
         self.ensure_windows()?;
         let mut changed = false;
@@ -224,7 +224,7 @@ impl Vm {
                 (binding.buffer, binding.session, binding.revision)
             };
             if !self.live_buffer_value(buffer) {
-                self.terminal_host.as_mut().ok_or("No terminal host attached")?.close(session)?;
+                self.with_terminal_host(|host| host.close(session))??;
                 self.terminal_bindings.remove(index);
                 self.terminal_ended(session, buffer);
                 changed |= self.buffer_is_displayed(buffer)?;

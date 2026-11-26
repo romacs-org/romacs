@@ -10,11 +10,13 @@
 //! (`world_quiescent` requires none), so a restored VM never names another
 //! VM's entry.
 use crate::Vm;
+use crate::display_host::{Display, DisplayHost};
 use crate::layout_host::LayoutHost;
 use crate::owner::display::OwnerUi;
 use crate::session_host::SessionHost;
+use crate::terminal_host::TerminalHost;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -23,6 +25,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) struct Ui {
     pub(crate) layout_host: Option<Box<dyn LayoutHost>>,
     pub(crate) session_host: Option<SessionHost>,
+    /// The window system, closed until the session opens it.
+    pub(crate) display: Option<Display>,
+    pub(crate) terminal_host: Option<Box<dyn TerminalHost>>,
     /// An owner's display and the windows it laid out (owner/display.rs).
     pub(crate) owner: Option<OwnerUi>,
 }
@@ -30,19 +35,22 @@ pub(crate) struct Ui {
 impl Ui {
     /// Whether no host is attached.
     fn is_empty(&self) -> bool {
-        self.layout_host.is_none() && self.session_host.is_none() && self.owner.is_none()
+        self.layout_host.is_none() && self.session_host.is_none() && self.display.is_none() && self.terminal_host.is_none()
+            && self.owner.is_none()
     }
 }
 
-/// An entry, shared between the thread's map and a borrow in progress: the
-/// map's borrow ends before an entry's starts, so a host that runs Lisp in
-/// another VM reaches that VM's entry, never this one's borrow.
+/// An entry, shared between the thread's map and a borrow in progress: for a
+/// host call (`Vm::ui`) the map's borrow ends before the entry's starts, so a
+/// host that runs Lisp in another VM reaches that VM's entry, never this
+/// one's borrow. A read that runs no host code (`Vm::ui_ref`) holds both.
 // CELL(Plain): hosts, no Lisp value.
 type UiEntry = Rc<RefCell<Ui>>;
 
 thread_local! {
-    /// This thread's UIs, by VM key.
-    static UIS: RefCell<HashMap<u64, UiEntry>> = RefCell::new(HashMap::new());
+    /// This thread's UIs, by VM key: read on every host query, so hashed
+    /// cheaply and initialised without a lazy check.
+    static UIS: RefCell<FxHashMap<u64, UiEntry>> = const { RefCell::new(FxHashMap::with_hasher(FxBuildHasher)) };
 }
 
 /// Keys never reused in the process.
@@ -94,11 +102,16 @@ impl Vm {
         Some(f(&mut ui))
     }
 
-    /// F on this VM's UI for a read that runs no host code.
+    /// F on this VM's UI for a read that runs no host code: read in place,
+    /// under the map's borrow, as F reaches no other VM.
     pub(crate) fn ui_ref<R>(&self, f: impl FnOnce(&Ui) -> R) -> Option<R> {
-        let entry = self.ui_entry()?;
-        let ui = entry.borrow();
-        Some(f(&ui))
+        let key = self.ui_key.as_ref()?.0;
+        UIS.with(|uis| {
+            let uis = uis.borrow();
+            let entry = uis.get(&key);
+            debug_assert!(entry.is_some(), "a VM with hosts attached moved to another thread: detach them first");
+            entry.map(|entry| f(&entry.borrow()))
+        })
     }
 
     /// This VM's entry, entered on this thread at its first attach.
@@ -133,6 +146,23 @@ impl Vm {
         };
         self.ui_settle();
         drop(old);
+    }
+
+    /// F on the open display's host, None while the frame is on the
+    /// initial terminal.
+    pub(crate) fn with_window_system_host<R>(&mut self, f: impl FnOnce(&mut (dyn DisplayHost + 'static)) -> R) -> Option<R> {
+        self.ui(|ui| ui.display.as_mut().filter(|display| display.open).map(|display| f(display.host.as_mut()))).flatten()
+    }
+
+    /// F on the attached display, open or not.
+    pub(crate) fn with_display<R>(&mut self, f: impl FnOnce(&mut Display) -> R) -> Option<R> {
+        self.ui(|ui| ui.display.as_mut().map(f)).flatten()
+    }
+
+    /// F on the terminal service, or the error a terminal command gives
+    /// without one.
+    pub(crate) fn with_terminal_host<R>(&mut self, f: impl FnOnce(&mut (dyn TerminalHost + 'static)) -> R) -> Result<R, String> {
+        self.ui(|ui| ui.terminal_host.as_mut().map(|host| f(host.as_mut()))).flatten().ok_or_else(|| "No terminal host attached".into())
     }
 }
 

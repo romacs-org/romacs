@@ -80,7 +80,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("site_leaf", Free),
     ("signal_handlers", Root), ("backtrace", Root), ("profiler", Root),
     ("propagated_escape_hooked", Free), ("propagated_eval_depth", Free), ("propagate_next", Free),
-    ("host_input", Free), ("host_wait", Free), ("deferred_event", Free), ("ui_key", Free), ("display", Free), ("visual", Free), ("idle_since", Free),
+    ("host_input", Free), ("host_wait", Free), ("deferred_event", Free), ("ui_key", Free), ("visual", Free), ("idle_since", Free),
     ("typing", Free),
     ("redisplay_since_mark", Free), ("treesit_plain", Free), ("treesit_deferred", Free), ("treesit_parse_owed", Free),
     ("quit", Free), ("force_quit_count", Free), ("deferred_escapes", Free), ("quit_slots", Free),
@@ -88,7 +88,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("face_keys", Free),
     ("debug_event_slots", Free), ("echo_function_slots", Free), ("keymap_generation", Free), ("process_jobs", Free), ("subprocesses", Free),
     ("environment_snapshot", Free), ("trapped", Free), ("retrap", Free), ("doc_file", Free),
-    ("terminal_host", Free), ("terminal_bindings", Root),
+    ("terminal_bindings", Root),
     // The buffer list's order: read at every mark and rewritten when objects
     // move. Its buffers' name slots are symbols Lisp can set, so the order
     // roots them itself (buffer_order.rs).
