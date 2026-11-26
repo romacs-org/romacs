@@ -124,3 +124,54 @@ fn an_autoloaded_prefix_map_reads_as_unbound() {
          (list (romacs--read-key-sequence nil t nil) romacs--key-sequence-command)))");
     assert_eq!(got, "([f5 97] nil)");
 }
+
+/// A VM with the prelude and the command loop's Lisp half, collecting and
+/// moving every live object at each Lisp entry from then on.
+fn moving_vm() -> Vm {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude_raw().unwrap();
+    // Any read installs the Lisp half; then the collector moves at every entry.
+    shown(&mut vm, "(let ((unread-command-events (list 'f1))) (read-key-sequence-vector nil))");
+    vm.set_gc_moving(true);
+    vm.set_gc_stress(1);
+    vm
+}
+
+/// A prefix help key taken under a moving collector: the checkpoint's
+/// binding and maps are traced and moved with it.
+#[test]
+fn a_prefix_help_checkpoint_survives_moving_collections() {
+    let mut vm = moving_vm();
+    let got = shown(&mut vm, "(progn (setq queue (list 24 8 97) romacs--host-input t)
+       (use-local-map (make-sparse-keymap)) (define-key (current-local-map) [24 97] 'done)
+       (setq romacs--prefix-help-functions (list (lambda (_p _e) (garbage-collect) t)))
+       (fset 'romacs--read-host-char (lambda (&rest _) (prog1 (car queue) (setq queue (cdr queue)))))
+       (prog1 (list (romacs--read-key-sequence nil t nil) romacs--key-sequence-command (this-command-keys-vector))
+         (setq romacs--host-input nil romacs--prefix-help-functions nil)))");
+    vm.set_gc_stress(0);
+    assert_eq!(got, "([24 97] done [24 97])");
+}
+
+/// A `switch-frame' read after a prefix waits, traced, for the read after
+/// the sequence.
+#[test]
+fn a_delayed_switch_frame_survives_moving_collections() {
+    let mut vm = moving_vm();
+    let got = shown(&mut vm, "(progn (use-local-map (make-sparse-keymap)) (define-key (current-local-map) [24 97] 'done)
+       (let ((unread-command-events (list 24 (list 'switch-frame (selected-frame)) 97)))
+         (list (read-key-sequence-vector nil) (car (read-event)) (eq (car (cdr (read-event nil nil 0))) nil))))");
+    vm.set_gc_stress(0);
+    assert_eq!(got, "([24 97] switch-frame t)");
+}
+
+/// An input method whose function reads a key sequence of its own, under a
+/// moving collector.
+#[test]
+fn an_input_method_reading_keys_survives_moving_collections() {
+    let mut vm = moving_vm();
+    let got = shown(&mut vm, "(let ((input-method-function (lambda (c) (list c (aref (read-key-sequence-vector nil) 0))))
+                                    (unread-command-events (list ?a (list 'f9 1))))
+                                (list (read-event nil t) (read-event nil t)))");
+    vm.set_gc_stress(0);
+    assert_eq!(got, "(97 (f9 1))");
+}

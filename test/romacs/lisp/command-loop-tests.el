@@ -1157,5 +1157,126 @@ none."
     (should (equal command-loop-tests--log '(cleanup)))
     (command-loop-tests--assert-key [f6] '(f12))))
 
+;; Rows from the C2 r1 reviews (Sol B1-B5, Opus B1).
+
+(defvar romacs--host-input)
+(defvar romacs--prefix-help-functions)
+
+(ert-deftest command-loop-tests-nested-read-in-remap-sequence-watcher ()
+  "A read nested in a watcher of `current-key-remap-sequence' leaves the
+translation it is bound for intact."
+  (command-loop-tests--with-input (list 'f5 'f12)
+    (let ((watch (lambda (&rest _)
+                   (let ((unread-command-events (list ?z)))
+                     (read-event nil nil 0)))))
+      (define-key key-translation-map [f5] (lambda (_) [f6]))
+      (add-variable-watcher 'current-key-remap-sequence watch)
+      (unwind-protect
+          (should (equal (command-loop-tests--key) [f6]))
+        (remove-variable-watcher 'current-key-remap-sequence watch))
+      (should (equal unread-command-events '(f12))))))
+
+(ert-deftest command-loop-tests-nested-read-in-remapped-watcher ()
+  "A read nested in a watcher of the reader's own result variable leaves
+the keys it returns intact."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list ?a)
+    (let ((watch (lambda (&rest _)
+                   (let ((unread-command-events (list ?z)))
+                     (read-event nil nil 0)))))
+      (add-variable-watcher 'romacs--key-sequence-remapped watch)
+      (unwind-protect
+          (should (equal (romacs--read-key-sequence nil t nil) [97]))
+        (remove-variable-watcher 'romacs--key-sequence-remapped watch)))))
+
+(ert-deftest command-loop-tests-reader-writes-at-their-boundary ()
+  "The count of input events is written before the event becomes a command
+key or `last-input-event', as the Lisp reader wrote them."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list ?a)
+    (let* ((last-input-event nil)
+           (seen nil)
+           (watch (lambda (&rest _) (push (list (this-command-keys-vector) last-input-event) seen))))
+      (add-variable-watcher 'num-nonmacro-input-events watch)
+      (unwind-protect (read-event)
+        (remove-variable-watcher 'num-nonmacro-input-events watch))
+      (should (equal seen '(([] nil)))))))
+
+(ert-deftest command-loop-tests-escaped-reader-write-is-dropped ()
+  "A watcher that throws out of a read's first write leaves the writes
+after it undone, then and in the next read."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list ?a)
+    (let* ((last-input-event nil)
+           (log nil)
+           (count (lambda (&rest _) (throw 'abort :abort)))
+           (last (lambda (_ value &rest _) (push value log))))
+      (add-variable-watcher 'num-nonmacro-input-events count)
+      (add-variable-watcher 'last-input-event last)
+      (unwind-protect
+          (let ((first (list (catch 'abort (read-event)) (this-command-keys-vector) last-input-event log)))
+            (remove-variable-watcher 'num-nonmacro-input-events count)
+            (should (equal (append first (list (read-event nil nil 0) last-input-event log))
+                           '(:abort [] nil nil nil nil nil))))
+        (remove-variable-watcher 'num-nonmacro-input-events count)
+        (remove-variable-watcher 'last-input-event last)))))
+
+(ert-deftest command-loop-tests-prefix-help-keeps-command-keys ()
+  "A taken prefix help key restores the command keys as they were, a read
+the help function made in between included."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input nil
+    (local-set-key [24 97] #'ignore)
+    (let* ((queue (list 24 8 97))
+           (log nil)
+           (romacs--host-input t)
+           (romacs--prefix-help-functions
+            (list (lambda (_prefix _event)
+                    (let ((unread-command-events (list 'f6)))
+                      (push (read-key-sequence-vector nil) log))
+                    t))))
+      (cl-letf (((symbol-function 'romacs--read-host-char) (lambda (&rest _) (pop queue))))
+        (should (equal (list (romacs--read-key-sequence nil t nil) (this-command-keys-vector)
+                             (this-single-command-raw-keys) log)
+                       '([24 97] [24 97] [24 97] ([f6]))))))))
+
+(ert-deftest command-loop-tests-input-method-queue-shares-its-tail ()
+  "The events an input method returns after its first are queued as its
+own list's tail, which `nconc' extends."
+  (command-loop-tests--with-input (list ?a)
+    (let* ((reply (list 120 121))
+           (input-method-function
+            (lambda (_c) (setq unread-post-input-method-events (list 122)) reply)))
+      (should (equal (list (read-event nil t) reply unread-post-input-method-events)
+                     '(120 (120 121 122) (121 122)))))))
+
+(ert-deftest command-loop-tests-direct-read-prompt-before-key-reset ()
+  "A direct read shows its prompt while the caller's command keys stand,
+then starts its own."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list ?a)
+    (set--this-command-keys "x")
+    (let ((noninteractive nil)
+          (seen nil))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (&rest _) (push (this-command-keys-vector) seen) nil)))
+        (should (equal (list (read-key-sequence-vector "Key: ") seen)
+                       '([97] ([120]))))))))
+
+(ert-deftest command-loop-tests-input-method-keys-saved-before-echo ()
+  "An input method's call saves and empties the command keys before the
+echo area is cleared for it, and puts them back after."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list (cons t ?a))
+    (set--this-command-keys "x")
+    (let ((seen nil)
+          (input-method-function (lambda (c) (list c))))
+      (message "shown")
+      (cl-letf* ((clear (symbol-function 'romacs--clear-echo))
+                 ((symbol-function 'romacs--clear-echo)
+                  (lambda () (push (this-command-keys-vector) seen) (funcall clear))))
+        (should (equal (list (read-event nil t) seen (this-command-keys-vector))
+                       '(97 ([]) [120 97])))))))
+
 (provide 'command-loop-tests)
 ;;; command-loop-tests.el ends here
