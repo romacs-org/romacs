@@ -149,7 +149,7 @@ impl Vm {
         for handler in &mut self.mutator.signal_handlers { handler.visit_values(&mut |v| values.push(*v)); }
         self.mutator.backtrace.visit_values(&mut |v| values.push(*v));
         self.profiler.visit_values(&mut |v| values.push(*v));
-        self.forwarded.visit_values(&mut |v| values.push(*v));
+        self.visit_runtime_tables(&mut |v| values.push(*v));
         values.extend_from_slice(&self.standard_case_tables);
         values.push(self.command_point.1);
         self.charsets.trace(&mut values);

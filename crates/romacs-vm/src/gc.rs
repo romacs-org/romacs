@@ -607,12 +607,23 @@ impl Vm {
         // A panic in a host wait drops its host, as it did when the wait
         // kept it on the native stack.
         self.host_wait = None;
+        // So does a panic inside a key read its activations (command_loop).
+        self.reads = crate::command_loop::Reads::default();
         // A collection the panic stopped may have left the generations
         // false: a minor makes the old entries it reads again young for its
         // length, and a sweep stopped part way leaves old, clean survivors
         // naming young entries it did not reach. With everything promoted
         // no such edge is left; nothing is freed.
         self.promote_all();
+    }
+    /// The runtime's own tables of Values, roots outside every value cell:
+    /// GNU's C globals and `buffer_defaults` (forwarded.rs; per-buffer
+    /// values are traced with their buffer), the input streams and the key
+    /// reads in progress (command_loop/stream.rs).
+    pub(super) fn visit_runtime_tables(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        self.forwarded.visit_values(visit);
+        self.streams.visit_values(visit);
+        self.reads.visit_values(visit);
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
         let base = self.mutator.external_roots.len();
@@ -1521,7 +1532,7 @@ impl Vm {
             rewrite(&mut s.function);
             rewrite(&mut s.plist);
         }
-        self.forwarded.visit_values(&mut |v| rewrite(v));
+        self.visit_runtime_tables(&mut |v| rewrite(v));
         for v in &mut self.standard_case_tables { rewrite(v); }
         rewrite(&mut self.command_point.1);
         for v in self.finalizers.iter_mut().chain(self.doomed_finalizers.iter_mut()) { rewrite(v); }
@@ -2121,9 +2132,7 @@ impl Vm {
         }
         self.mutator.backtrace.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         self.profiler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
-        // GNU's C globals and `buffer_defaults`: roots outside every value
-        // cell (forwarded.rs). Per-buffer values are traced with their buffer.
-        self.forwarded.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        self.visit_runtime_tables(&mut |v| if keep(v) { pending.push(*v) });
         pending.extend_from_slice(&self.standard_case_tables);
         pending.push(self.command_point.1);
         self.charsets.trace(&mut pending);

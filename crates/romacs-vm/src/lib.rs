@@ -31,6 +31,7 @@ mod obarray;
 mod names;
 mod command_set;
 mod command;
+mod command_loop;
 mod interpreted_closure;
 use interpreted_closure::{CaptureBinding, CaptureLayout, CaptureSlot};
 mod cell_pairs;
@@ -1601,6 +1602,13 @@ pub struct Vm {
     variable_redirects: Vec<Option<VariableRedirect>>,
     /// Storage of GNU's built-in (C) variables; collector roots (`gc.rs`).
     forwarded: forwarded::Forwarded,
+    /// The input streams (GNU's KBOARDs, `command_loop/stream.rs`), reached
+    /// through `streams` and `streams_mut`; collector roots.
+    streams: command_loop::Streams,
+    /// The key reads in progress and the reader's scratch
+    /// (`command_loop::Reads`): no image holds a read; collector roots.
+    #[snapshot(at_rest)]
+    reads: command_loop::Reads,
     fixnum_slots: [usize; 2],
     /// `char-property-alias-alist' and `default-text-properties', which
     /// textget reads for every property a character does not have.
@@ -1849,6 +1857,8 @@ impl Vm {
             defun_start_epoch: 0,
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
+            streams: command_loop::Streams::default(),
+            reads: command_loop::Reads::default(),
             fixnum_slots: [usize::MAX; 2],
             textget_slots: [usize::MAX; 2],
             gc_stats: HeapStats::default(),
@@ -1970,11 +1980,6 @@ impl Vm {
             "current-prefix-arg",
             "last-command-event",
             "command-history",
-            // keyboard.c this_command_keys, this_single_command_key_start
-            // and raw_keybuf (prims/keyboard.rs, lisp/vm/keyboard.el).
-            "romacs--command-keys",
-            "romacs--single-command-key-start",
-            "romacs--raw-command-keys",
             // minibuf.c / buffer.c DEFVARs read by call-interactively's
             // add-to-history fallback and `*' code. GNU's buffer-read-only
             // is per-buffer; VM2's is one global (DIVERGENCES VM2-CALLINT1).

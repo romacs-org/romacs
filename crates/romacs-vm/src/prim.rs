@@ -282,8 +282,24 @@ mod leaf {
     }
     #[allow(dead_code)]
     impl<'a> Leaf<'a> {
-        pub(in crate::prim) fn new(vm: &'a mut Vm) -> Self {
+        pub(crate) fn new(vm: &'a mut Vm) -> Self {
             Leaf { vm }
+        }
+        /// The input stream's command keys (`command_loop::Streams`).
+        pub(crate) fn command_keys(&self) -> &[Value] {
+            self.vm.streams().keys(crate::command_loop::MAIN)
+        }
+        /// Where the stream's single command's keys start.
+        pub(crate) fn single_command_key_start(&self) -> usize {
+            self.vm.streams().single_key_start(crate::command_loop::MAIN)
+        }
+        /// The raw keys of the stream's last key sequence.
+        pub(crate) fn raw_command_keys(&self) -> &[Value] {
+            self.vm.streams().raw_keys(crate::command_loop::MAIN)
+        }
+        /// Write the stream's command keys (`Streams::store`).
+        pub(crate) fn store_command_keys(&mut self, store: crate::command_loop::Store<'_>) {
+            self.vm.streams_mut().store(crate::command_loop::MAIN, store);
         }
         /// A command step begins (`Vm::typing_begin').
         pub(crate) fn typing_begin(&mut self) {

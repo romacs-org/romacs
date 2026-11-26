@@ -351,6 +351,11 @@ impl Vm {
         let slot = self.slot(UNREAD_SWITCH_FRAME);
         match std::mem::replace(&mut self.slots[slot].value, Value::NIL) { Value::UNBOUND => Value::NIL, event => event }
     }
+    /// Whether a `switch-frame' waits in `unread_switch_frame'.
+    pub(crate) fn unread_switch_frame_waits(&mut self) -> bool {
+        let slot = self.slot(UNREAD_SWITCH_FRAME);
+        !matches!(self.slots[slot].value, Value::NIL | Value::UNBOUND)
+    }
     /// read_key_sequence's `delayed_switch_frame' at its end: EVENT is
     /// read next.
     pub(crate) fn set_unread_switch_frame(&mut self, event: Value) {

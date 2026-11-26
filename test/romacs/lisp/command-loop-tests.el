@@ -46,6 +46,14 @@
          (unwind-protect (progn ,@body)
            (clear-this-command-keys t))))))
 
+(defun command-loop-tests--install-reader ()
+  "Install the reader's Lisp half now, as a VM's first read does, so an
+override of one of its functions made after it is not undone by that read."
+  (unless (fboundp 'romacs--clear-echo)
+    (let ((unread-command-events (list ?z)))
+      (read-event))
+    (clear-this-command-keys)))
+
 (defun command-loop-tests--queues ()
   "Return the remaining events in read priority order."
   (list unread-post-input-method-events unread-command-events
@@ -837,7 +845,7 @@ Beta's romacs--read-key-sequence returns the down event."
 
 (ert-deftest command-loop-tests-timer-requeue-during-read ()
   "GNU translates a timed-wait requeue through keyboard-translate-table.
-Beta's romacs--read-char retries it through the unread branch."
+Romacs's read_char retries it through the unread branch."
   :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
   (command-loop-tests--with-input nil
     (let ((keyboard-translate-table (make-char-table 'keyboard-translate-table))
@@ -900,9 +908,8 @@ Beta's romacs--top-level reaches batch startup without a catch."
 (defvar command-loop-tests--minor-active nil)
 
 (ert-deftest command-loop-tests-prefix-wait-keeps-follow-map ()
-  "GNU dispatches through the saved prefix map.
-Beta's romacs--read-key-sequence refollows the changed map."
-  :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
+  "A prefix's maps are the ones taken when its first event came: a timer that
+enables a minor mode during the wait for the next key changes nothing."
   (command-loop-tests--with-input (list 24)
     (local-set-key [24 ?a] #'command-loop-tests--fallback)
     (let* ((map (make-sparse-keymap))
@@ -1043,6 +1050,105 @@ Beta's romacs--read-batch-wait resumes on the fallback timer without dispatching
 
 (defvar romacs--sequence-end-functions)
 
+(ert-deftest command-loop-tests-click-remap-point-maps ()
+  "A click's final remap reads point's maps, not the click's (keyboard.c:11866).
+Point is off the clicked character's `keymap' property, so only the local
+map's remap applies."
+  (command-loop-tests--with-input nil
+    (insert "xyz")
+    (goto-char 3)
+    (let ((map (make-sparse-keymap)))
+      (define-key map [mouse-1] #'forward-char)
+      (define-key map [remap forward-char] #'command-loop-tests--replacement)
+      (put-text-property 1 2 'keymap map)
+      (local-set-key [remap forward-char] #'command-loop-tests--fallback)
+      (cl-letf (((get 'mouse-1 'event-kind) 'mouse-click))
+        (let ((unread-command-events (list (list 'mouse-1 (command-loop-tests--posn 1)) 'f12))
+              (pre-command-hook (list (lambda () (push this-command command-loop-tests--log)))))
+          (recursive-edit))
+        (should (equal (reverse command-loop-tests--log)
+                       '(command-loop-tests--fallback fallback exit-recursive-edit)))
+        (should-not unread-command-events)))))
+
+(ert-deftest command-loop-tests-click-remap-other-buffer ()
+  "GNU remaps a click by point's maps in the clicked window's buffer.
+Beta's reader remaps it in the reading buffer; fixed in C5."
+  :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
+  (command-loop-tests--with-input nil
+    (let ((other (generate-new-buffer " *command-loop-click*")))
+      (unwind-protect
+          (let ((window (split-window nil nil t))
+                (map (make-sparse-keymap)))
+            (define-key map [mouse-1] #'forward-char)
+            (with-current-buffer other
+              (use-local-map (make-sparse-keymap))
+              (local-set-key [remap forward-char] #'command-loop-tests--replacement)
+              (insert "xyz")
+              (put-text-property 1 2 'keymap map)
+              (goto-char 3))
+            (local-set-key [remap forward-char] #'command-loop-tests--fallback)
+            (set-window-buffer window other)
+            (cl-letf (((get 'mouse-1 'event-kind) 'mouse-click))
+              (let ((unread-command-events
+                     (list (list 'mouse-1 (list window 1 '(0 . 0) 0 nil 1 '(0 . 0) nil '(0 . 0) '(1 . 1)))
+                           'f12)))
+                (recursive-edit)))
+            (should (equal command-loop-tests--log '(replacement))))
+        (kill-buffer other)))))
+
+(ert-deftest command-loop-tests-read-event-huge-timeout ()
+  "A timed read with a huge or infinite SECONDS still reads a queued event."
+  (command-loop-tests--with-input (list ?a ?b)
+    (should (eq (read-event nil nil most-positive-fixnum) ?a))
+    (should (eq (read-event nil nil 1.0e+INF) ?b))))
+
+(defvar command-loop-tests--remap-mode nil)
+
+(ert-deftest command-loop-tests-remap-after-translation-callout ()
+  "The final remap reads the active maps as a translation function left them."
+  (command-loop-tests--with-input (list 'f5 'f12)
+    (let* ((map (make-sparse-keymap))
+           (command-loop-tests--remap-mode nil)
+           (minor-mode-map-alist (list (cons 'command-loop-tests--remap-mode map))))
+      (define-key map [remap forward-char] #'command-loop-tests--replacement)
+      (local-set-key [f5] #'forward-char)
+      (define-key key-translation-map [f5]
+                  (lambda (_) (setq command-loop-tests--remap-mode t) nil))
+      (let ((pre-command-hook (list (lambda () (push this-command command-loop-tests--log)))))
+        (recursive-edit))
+      (should (equal (reverse command-loop-tests--log)
+                     '(command-loop-tests--replacement replacement exit-recursive-edit)))
+      (should-not unread-command-events))))
+
+(ert-deftest command-loop-tests-sequence-end-once ()
+  "Each read whose sequence started runs `romacs--sequence-end-functions'
+once, on every exit, nested reads included; a read that read nothing runs
+none."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list 'f5 'f6 'f7 'f8 'f12)
+    (let* ((count 0) (counts nil)
+           (romacs--sequence-end-functions (list (lambda () (setq count (1+ count))))))
+      (define-key key-translation-map [f6] (lambda (_) (throw 'escape 'translation)))
+      (local-set-key [f5] #'ignore)
+      (local-set-key [f7] (list 'menu-item "x" 'ignore :filter
+                                (lambda (binding)
+                                  (push (read-key-sequence-vector nil) command-loop-tests--log)
+                                  binding)))
+      (command-loop-tests--key)
+      (push count counts)
+      (should (eq (catch 'escape (command-loop-tests--key)) 'translation))
+      (push count counts)
+      (should (equal (command-loop-tests--key) [f7]))
+      (push count counts)
+      (let ((unread-command-events nil)
+            (executing-kbd-macro "")
+            (executing-kbd-macro-index 0))
+        (should (equal (command-loop-tests--key) [])))
+      (push count counts)
+      (should (equal (reverse counts) '(1 2 4 4)))
+      (should (equal command-loop-tests--log '([f8])))
+      (should (equal unread-command-events '(f12))))))
+
 (ert-deftest command-loop-tests-reader-cleanup-after-throw ()
   (command-loop-tests--with-input (list 'f5 'f6 'f12)
     (define-key key-translation-map [f5] (lambda (_) (throw 'outer 'body)))
@@ -1058,6 +1164,217 @@ Beta's romacs--read-batch-wait resumes on the fallback timer without dispatching
                   'replacement)))
     (should (equal command-loop-tests--log '(cleanup)))
     (command-loop-tests--assert-key [f6] '(f12))))
+
+;; Rows from the C2 r1 reviews (Sol B1-B5, Opus B1).
+
+(defvar romacs--host-input)
+(defvar romacs--prefix-help-functions)
+
+(ert-deftest command-loop-tests-nested-read-in-remap-sequence-watcher ()
+  "A read nested in a watcher of `current-key-remap-sequence' leaves the
+translation it is bound for intact."
+  (command-loop-tests--with-input (list 'f5 'f12)
+    (let ((watch (lambda (&rest _)
+                   (let ((unread-command-events (list ?z)))
+                     (read-event nil nil 0)))))
+      (define-key key-translation-map [f5] (lambda (_) [f6]))
+      (add-variable-watcher 'current-key-remap-sequence watch)
+      (unwind-protect
+          (should (equal (command-loop-tests--key) [f6]))
+        (remove-variable-watcher 'current-key-remap-sequence watch))
+      (should (equal unread-command-events '(f12))))))
+
+(ert-deftest command-loop-tests-nested-read-in-remapped-watcher ()
+  "A read nested in a watcher of the reader's own result variable leaves
+the keys it returns intact."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list ?a)
+    (let ((watch (lambda (&rest _)
+                   (let ((unread-command-events (list ?z)))
+                     (read-event nil nil 0)))))
+      (add-variable-watcher 'romacs--key-sequence-remapped watch)
+      (unwind-protect
+          (should (equal (romacs--read-key-sequence nil t nil) [97]))
+        (remove-variable-watcher 'romacs--key-sequence-remapped watch)))))
+
+(ert-deftest command-loop-tests-reader-writes-at-their-boundary ()
+  "The count of input events is written before the event becomes a command
+key or `last-input-event', as the Lisp reader wrote them."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list ?a)
+    (let* ((last-input-event nil)
+           (seen nil)
+           (watch (lambda (&rest _) (push (list (this-command-keys-vector) last-input-event) seen))))
+      (add-variable-watcher 'num-nonmacro-input-events watch)
+      (unwind-protect (read-event)
+        (remove-variable-watcher 'num-nonmacro-input-events watch))
+      (should (equal seen '(([] nil)))))))
+
+(ert-deftest command-loop-tests-escaped-reader-write-is-dropped ()
+  "A watcher that throws out of a read's first write leaves the writes
+after it undone, then and in the next read."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list ?a)
+    (let* ((last-input-event nil)
+           (log nil)
+           (count (lambda (&rest _) (throw 'abort :abort)))
+           (last (lambda (_ value &rest _) (push value log))))
+      (add-variable-watcher 'num-nonmacro-input-events count)
+      (add-variable-watcher 'last-input-event last)
+      (unwind-protect
+          (let ((first (list (catch 'abort (read-event)) (this-command-keys-vector) last-input-event log)))
+            (remove-variable-watcher 'num-nonmacro-input-events count)
+            (should (equal (append first (list (read-event nil nil 0) last-input-event log))
+                           '(:abort [] nil nil nil nil nil))))
+        (remove-variable-watcher 'num-nonmacro-input-events count)
+        (remove-variable-watcher 'last-input-event last)))))
+
+(ert-deftest command-loop-tests-prefix-help-keeps-command-keys ()
+  "A taken prefix help key restores the command keys as they were, a read
+the help function made in between included."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--install-reader)
+  (command-loop-tests--with-input nil
+    (local-set-key [24 97] #'ignore)
+    (let* ((queue (list 24 8 97))
+           (log nil)
+           (romacs--host-input t)
+           (romacs--prefix-help-functions
+            (list (lambda (_prefix _event)
+                    (let ((unread-command-events (list 'f6)))
+                      (push (read-key-sequence-vector nil) log))
+                    t))))
+      (cl-letf (((symbol-function 'romacs--read-host-char) (lambda (&rest _) (pop queue))))
+        (should (equal (list (romacs--read-key-sequence nil t nil) (this-command-keys-vector)
+                             (this-single-command-raw-keys) log)
+                       '([24 97] [24 97] [24 97] ([f6]))))))))
+
+(ert-deftest command-loop-tests-input-method-queue-shares-its-tail ()
+  "The events an input method returns after its first are queued as its
+own list's tail, which `nconc' extends."
+  (command-loop-tests--with-input (list ?a)
+    (let* ((reply (list 120 121))
+           (input-method-function
+            (lambda (_c) (setq unread-post-input-method-events (list 122)) reply)))
+      (should (equal (list (read-event nil t) reply unread-post-input-method-events)
+                     '(120 (120 121 122) (121 122)))))))
+
+(ert-deftest command-loop-tests-direct-read-prompt-before-key-reset ()
+  "A direct read shows its prompt while the caller's command keys stand,
+then starts its own."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list ?a)
+    (set--this-command-keys "x")
+    (let ((noninteractive nil)
+          (seen nil))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (&rest _) (push (this-command-keys-vector) seen) nil)))
+        (should (equal (list (read-key-sequence-vector "Key: ") seen)
+                       '([97] ([120]))))))))
+
+(ert-deftest command-loop-tests-input-method-keys-saved-before-echo ()
+  "An input method's call saves and empties the command keys before the
+echo area is cleared for it, and puts them back after.  The message shows
+from the watcher of the queue's pop, the write just before the method."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--install-reader)
+  (command-loop-tests--with-input nil
+    (set--this-command-keys "x")
+    (setq unread-command-events (list (cons t ?a)))
+    ;; Batch keeps no message in the echo area: an interactive one does.
+    (let* ((noninteractive nil)
+           (seen nil)
+           (method-keys nil)
+           (input-method-function
+            (lambda (c) (setq method-keys (this-command-keys-vector)) (list c)))
+           (watch (lambda (_ _ operation _)
+                    (when (eq operation 'set) (message "shown")))))
+      (cl-letf* ((clear (symbol-function 'romacs--clear-echo))
+                 ((symbol-function 'romacs--clear-echo)
+                  (lambda () (push (this-command-keys-vector) seen) (funcall clear))))
+        (add-variable-watcher 'unread-command-events watch)
+        (unwind-protect
+            (should (equal (list (read-event nil t) seen method-keys (this-command-keys-vector))
+                           '(97 ([]) [] [120 97])))
+          (remove-variable-watcher 'unread-command-events watch))))))
+
+;; Row from the C2 r3 review (Sol B9).
+
+(ert-deftest command-loop-tests-unread-wrapper-decoded-after-watcher ()
+  "An `unread-command-events' entry is decoded after its pop's watcher ran,
+which may change both its wrapper and its event, as the Lisp reader did.
+GNU's C pop runs no watcher."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input nil
+    (set--this-command-keys "x")
+    (let* ((entry (cons t 97))
+           (count num-nonmacro-input-events)
+           (watch (lambda (_ _ operation _)
+                    (when (eq operation 'set) (setcar entry 'no-record) (setcdr entry 98)))))
+      (setq unread-command-events (list entry))
+      (add-variable-watcher 'unread-command-events watch)
+      (unwind-protect
+          (should (equal (list (read-event) (this-command-keys-vector)
+                               (- num-nonmacro-input-events count) last-input-event)
+                         '(98 [120] 0 98)))
+        (remove-variable-watcher 'unread-command-events watch)))))
+
+;; Rows from the C2 r2 reviews (Sol B2, B4).
+
+(ert-deftest command-loop-tests-host-echo-cleared-after-watcher ()
+  "A host event clears the echo area as it shows after the write of
+`input-method-previous-message', whose watcher may show a message."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--install-reader)
+  (command-loop-tests--with-input nil
+    (let* ((noninteractive nil)
+           (seen nil)
+           (queue (list 97))
+           (romacs--host-input t)
+           (input-method-function 'list)
+           (watch (lambda (&rest _) (message "from watcher"))))
+      (message nil)
+      (add-variable-watcher 'input-method-previous-message watch)
+      (unwind-protect
+          (cl-letf* (((symbol-function 'romacs--read-host-char) (lambda (&rest _) (pop queue)))
+                     (clear (symbol-function 'romacs--clear-echo))
+                     ((symbol-function 'romacs--clear-echo)
+                      (lambda () (push (this-command-keys-vector) seen) (funcall clear))))
+            (should (equal (list (read-event nil nil 5) (current-message) seen)
+                           '(97 nil ([])))))
+        (remove-variable-watcher 'input-method-previous-message watch)))))
+
+(ert-deftest command-loop-tests-switch-frame-classified-after-watcher ()
+  "The event read is classified as a delayed `switch-frame' after the
+write of `quit-flag', as its watcher left it."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input nil
+    (local-set-key [f5] #'ignore)
+    (let* ((event (list 'switch-frame (selected-frame)))
+           (watch (lambda (&rest _)
+                    (when (eq (car-safe last-input-event) 'switch-frame)
+                      (setcar last-input-event 'f5)))))
+      (setq unread-command-events (list event 'f6))
+      (add-variable-watcher 'quit-flag watch)
+      (unwind-protect
+          (should (equal (list (read-key-sequence-vector nil) unread-command-events)
+                         (list (vector event) '(f6))))
+        (remove-variable-watcher 'quit-flag watch))
+      (should (eq (car event) 'f5)))))
+
+(ert-deftest command-loop-tests-input-method-circular-tail ()
+  "An input method's circular tail is refused as `nconc' refuses it."
+  (command-loop-tests--with-input (list ?a)
+    (let* ((tail (list 121))
+           (input-method-function (lambda (_c) (setcdr tail tail) (cons 120 tail))))
+      (should (eq (car (should-error (read-event nil t))) 'circular-list)))))
+
+(ert-deftest command-loop-tests-input-method-non-list-tail ()
+  "An input method's non-list tail is refused as `nconc' refuses it."
+  (command-loop-tests--with-input (list ?a)
+    (let ((input-method-function (lambda (_c) (cons 120 'bad))))
+      (should (equal (should-error (read-event nil t))
+                     '(wrong-type-argument consp bad))))))
 
 (provide 'command-loop-tests)
 ;;; command-loop-tests.el ends here

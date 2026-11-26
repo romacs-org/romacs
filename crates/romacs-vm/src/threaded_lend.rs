@@ -199,6 +199,16 @@ pub(crate) fn call_frame<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<
         vm.reader_call(values[0], &values[1..])
     }, b, then)
 }
+/// `call_frame` while an escape is pending, as an exit's cleanup runs: the
+/// escape is kept across the call, rooted, and pending after it unless the
+/// call made its own, which replaces it (`Vm::call_lisp_at_write`).
+pub(crate) fn call_frame_keeping_escape<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, frame: &RootFrame, b: B,
+    then: impl FnOnce(&mut Vm, B, Result<Value>) -> R + Copy + 'static) -> R {
+    m.request(&EngineKey, gc, |vm| {
+        let values = vm.rooted_values(frame).to_vec();
+        vm.call_lisp_at_write(values[0], &values[1..]).map(|()| Value::NIL)
+    }, b, then)
+}
 /// The prepared Lisp SOURCE (`Vm::call_prepared_source_propagating`) on the
 /// arguments rooted in FRAME, as a request, THEN consuming its value at once.
 pub(crate) fn call_source<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, source: &'static str, frame: Option<&RootFrame>, b: B,

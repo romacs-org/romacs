@@ -150,6 +150,12 @@ impl Vm {
         let walked = walk.run(self)?;
         Ok((walk, walked))
     }
+    /// `key_walk` of the EVENTS (one or two) held off the heap, as the key
+    /// reader follows one event or looks up `[remap COMMAND]`.
+    pub(crate) fn key_walk_events(&mut self, map: Value, events: &[Value], defaults: bool) -> Result<(KeyWalk, Walked)> {
+        let held = [events.first().copied().unwrap_or(Value::NIL), events.get(1).copied().unwrap_or(Value::NIL)];
+        self.walk_keys(map, Keys::Inline(held), events.len().min(2), defaults)
+    }
     /// WALK, stopped at a filter, resumed with the filter's RESULT.
     pub(crate) fn key_walk_resume(&mut self, walk: &mut KeyWalk, result: Value) -> Result<Walked> {
         let pending = std::mem::replace(&mut walk.pending, Pending::None);

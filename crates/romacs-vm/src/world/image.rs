@@ -54,6 +54,7 @@ impl Vm {
             ("propagated_escape", self.mutator.propagated_escape.is_none()),
             ("host_input", self.host_input.is_none()),
             ("host_wait", self.host_wait.is_none()),
+            ("reads", self.reads.idle()), // no key read in progress (command_loop)
             ("ui_key", self.ui_key.is_none()),
             ("display", self.display.is_none()),
             // Restored as the renderer's default, which the options in the
@@ -84,7 +85,6 @@ impl Vm {
             ("profiler", self.profiler.is_idle()),
             // A thread of this process: the running parse of a visit.
             ("treesit_early", crate::treesit::early_idle() && !self.objects.iter().any(|o| matches!(o, crate::data::Object::Buffer(b) if b.treesit.early.is_some()))),
-            ("suspended", self.mutator_rest.suspended.is_empty()),
             // The collector's reentry state: no engine running or suspended,
             // no frame holding Values out of its sight.
             ("suspended_stacks", self.mutator.stack.depth() == 0),

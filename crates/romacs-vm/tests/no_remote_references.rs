@@ -112,6 +112,8 @@ const FIELDS: &[(&str, Class)] = &[
     // An alias names a symbol slot, a Value in all but type.
     ("variable_redirects", Owed),
     ("forwarded", Root),
+    // The input streams and the reads in progress (command_loop/stream.rs).
+    ("streams", Root), ("reads", Root),
     ("fixnum_slots", Free), ("textget_slots", Free),
     ("gc_stats", Free), ("gc_times", Free), ("gc_census", Free), ("collection_log", Free), ("gc_retained", Free), ("gc_payload_bytes", Free),
     ("gc_retained_slots", Free), ("gc_code", Free), ("gc_floor", Free), ("job_budget", Free), ("gc_retained_payload", Free),

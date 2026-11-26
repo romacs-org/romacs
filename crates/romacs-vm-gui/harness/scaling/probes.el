@@ -225,7 +225,7 @@ comment and string syntax, its summaries made by one parse to the end."
 
 ;;;; Processes and timers
 
-;;;; Input methods (lisp/vm/keyboard.el `romacs--read-char')
+;;;; Input methods (read_char, crates/romacs-vm/src/command_loop/read_char.rs)
 
 ;;;; Mode line (lisp/ui/romacs-mode-line.el)
 
