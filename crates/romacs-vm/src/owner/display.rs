@@ -101,6 +101,9 @@ impl Vm {
 
     /// What a redisplay runs before it snapshots, once for every window
     /// laid out after it; the layouts of windows no longer live forgotten.
+    // Out of line, as `pane_lay_out`: a leaf runs it by `Vm::leaf_lisp`,
+    // whose copy would otherwise hold it in the engine's code.
+    #[inline(never)]
     pub(crate) fn panes_prepare(&mut self) -> Result<()> {
         self.prepare_redisplay()?;
         let mut live = HashSet::new();
@@ -118,6 +121,11 @@ impl Vm {
     /// under the request's view, every id the master's window's. Its
     /// window ends are applied, so the window's own queries answer from
     /// this layout.
+    // Out of line: a leaf runs it by `Vm::leaf_lisp`, whose copy would
+    // otherwise hold it in the engine's code, where the dispatch lint
+    // (`threaded_dispatch_tests.rs`) reads its `dyn OwnerDisplay` call
+    // as a call through an instruction's handler slot.
+    #[inline(never)]
     pub(crate) fn pane_lay_out(&mut self, window: crate::Value, request: PaneRequest) -> Result<()> {
         let id = self.window(window)?.id;
         let frame = self.pane_snapshot(id)?;
