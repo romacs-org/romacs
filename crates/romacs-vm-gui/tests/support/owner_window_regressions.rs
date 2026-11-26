@@ -390,7 +390,7 @@ fn display_buffer_allows_the_caller_to_request_no_window() {
 
 mod round_three {
     use super::{
-        BUFFER, FrameGlyph, GlyphRowRole, Owner, PanePicture, SIZE, WINDOW, assert_same_paint,
+        FrameGlyph, GlyphRowRole, Owner, PanePicture, SIZE, WINDOW, assert_same_paint,
         fringed_master, request_box, with_owner, with_pinned_fonts,
     };
 
