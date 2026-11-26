@@ -1,14 +1,12 @@
-# The files of the Lisp tree that fail `--compile-lisp-tree` today, one
-# `PATH: reason` a line, PATH from the tree's root. Read by
-# lisp_tree_compiles.rs, which fails on a failure not listed here and on an
-# entry whose file now compiles: a fix deletes its line. An entry is added
-# only by a reviewed change, which shows it with its reason in the diff. A
-# listed file that comes to fail for another reason is not caught, nor is a
-# file turned source-only by a .dir-locals.el outside the tree.
-lisp/emacs-lisp/shortdoc-doc.el: a constant the store's codec cannot serialise: a hash table
-lisp/international/titdic-cnv.el: CNS 11643 characters above U+10FFFF, no Unicode map yet (romacs#321)
-lisp/language/ethio-util.el: Ethiopic characters above U+10FFFF, no Unicode map yet (romacs#320)
-lisp/language/ethiopic.el: Ethiopic characters above U+10FFFF, no Unicode map yet (romacs#320)
-lisp/leim/quail/ethiopic.el: Ethiopic characters above U+10FFFF, no Unicode map yet (romacs#320)
-lisp/leim/quail/quick-cns.el: CNS 11643 characters above U+10FFFF, no Unicode map yet (romacs#321)
-lisp/leim/quail/tsang-cns.el: CNS 11643 characters above U+10FFFF, no Unicode map yet (romacs#321)
+# Known --compile-lisp-tree failures, one PATH: diagnostic a line.
+# Use the path relative to the runtime tree and the diagnostic without its
+# leading "line N: ". New or changed diagnostics fail the check. Recovered
+# files are reported and removed only by the trunk recorder.
+# The legacy character tables need Unicode maps (romacs#320 and romacs#321).
+lisp/emacs-lisp/shortdoc-doc.el: a constant that cannot be serialised: hash table
+lisp/international/titdic-cnv.el: (error "invalid Unicode text")
+lisp/language/ethio-util.el: (error "invalid Unicode text")
+lisp/language/ethiopic.el: (error "invalid Unicode text")
+lisp/leim/quail/ethiopic.el: (error "invalid Unicode text")
+lisp/leim/quail/quick-cns.el: (error "invalid Unicode text")
+lisp/leim/quail/tsang-cns.el: (error "invalid Unicode text")
