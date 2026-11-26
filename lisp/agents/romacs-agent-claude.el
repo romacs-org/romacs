@@ -472,9 +472,11 @@ line (`romacs-agent--claude-result-events')."
                when (equal btype "text")
                collect (list :type 'status :text (gethash "text" block) :parent parent))))))
 
-(defun romacs-agent--claude-result-events (line api-error)
+(defun romacs-agent--claude-result-events (line api-error &optional refused)
   "Decode a Claude Code result LINE, API-ERROR the code its turn's API
-error said (`romacs-agent--claude-assistant-events'), or nil."
+error said (`romacs-agent--claude-assistant-events'), or nil; REFUSED,
+its account refused a request of the turn
+\(`romacs-agent--claude-rate-limit-event')."
   (list (list :type 'done :cost (gethash "total_cost_usd" line)
               :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
               ;; Its account's sign-in refused.
@@ -483,8 +485,11 @@ error said (`romacs-agent--claude-assistant-events'), or nil."
               ;; Refused at a usage limit: its instance's, or its model's
               ;; alone (one that needs usage credits the account has spent;
               ;; its other models still run).
-              :limit (pcase (gethash "api_error" line)
-                       ("usage_limit_reached" t) ("model_requires_usage_credits" 'model))
+              ;; A turn that says no API error at all, a compaction's, ends
+              ;; at the limit its account's report said it was refused at.
+              :limit (pcase (romacs-agent--value (gethash "api_error" line))
+                       ("usage_limit_reached" t) ("model_requires_usage_credits" 'model)
+                       ('nil (and refused (not api-error) t)))
               :reason (romacs-agent--claude-reason line)
               :duration (let ((ms (gethash "duration_ms" line))) (and (numberp ms) (/ ms 1000.0)))
               :context-window (let ((usage (gethash "modelUsage" line)) (window nil))
@@ -496,15 +501,19 @@ error said (`romacs-agent--claude-assistant-events'), or nil."
                                 window))))
 
 (defun romacs-agent--claude-rate-limit-event (line)
-  "Decode the usage window reported in Claude Code LINE."
+  "Decode the usage window reported in Claude Code LINE.  One that refuses
+its account is kept for the turn's end (`romacs-agent--claude-result-events'):
+a failed compaction's end says no API error of its own."
   (let ((info (gethash "rate_limit_info" line)))
     (when (hash-table-p info)
-      (list (list :type 'rate-limit
-                  :status (romacs-agent--claude-limit-status (gethash "status" info))
-                  :used (romacs-agent--value (gethash "utilization" info))
-                  :resets (romacs-agent--value (gethash "resetsAt" info))
-                  :window (romacs-agent--value (gethash "rateLimitType" info))
-                  :windows (romacs-agent--claude-windows info))))))
+      (let ((event (list :type 'rate-limit
+                         :status (romacs-agent--claude-limit-status (gethash "status" info))
+                         :used (romacs-agent--value (gethash "utilization" info))
+                         :resets (romacs-agent--value (gethash "resetsAt" info))
+                         :window (romacs-agent--value (gethash "rateLimitType" info))
+                         :windows (romacs-agent--claude-windows info))))
+        (cons event (and (romacs-agent-refuses-account-p event)
+                         (list (list :type 'handshake :state (list :refused t)))))))))
 
 (defun romacs-agent--claude-events (session line)
   "Decode a Claude Code output LINE using SESSION's context."
@@ -518,7 +527,8 @@ error said (`romacs-agent--claude-assistant-events'), or nil."
      (list :compacting (romacs-agent-compacting session))
      (pcase (gethash "type" line)
        ("stream_event" (list :message (romacs-agent-message session)))
-       ("result" (list :api-error (plist-get (romacs-agent-driver-state session) :api-error)))
+       ("result" (let ((state (romacs-agent-driver-state session)))
+                   (list :api-error (plist-get state :api-error) :refused (plist-get state :refused))))
        ("assistant"
         (list :streamed (gethash (gethash "id" (gethash "message" line)) (romacs-agent-streamed session))))
        ("control_request" (list :owed (plist-get (romacs-agent-driver-state session) :owed)))
@@ -550,10 +560,12 @@ error said (`romacs-agent--claude-assistant-events'), or nil."
               ("assistant"
                (romacs-agent--claude-assistant-events line parent (plist-get context :streamed)))
               ("user" (romacs-agent--claude-user-events line parent compacting))
-              ("result" (let ((api-error (plist-get context :api-error)))
-                          ;; Its turn's error ends with it.
+              ("result" (let ((api-error (plist-get context :api-error))
+                              (refused (plist-get context :refused)))
+                          ;; Its turn's error and refusal end with it.
                           (append (and api-error (list (list :type 'handshake :state (list :api-error nil))))
-                                  (romacs-agent--claude-result-events line api-error))))
+                                  (and refused (list (list :type 'handshake :state (list :refused nil))))
+                                  (romacs-agent--claude-result-events line api-error refused))))
               ("control_request"
                (romacs-agent--claude-control-request (plist-get context :owed)
                                                    (gethash "request_id" line) (gethash "request" line)))
@@ -799,8 +811,9 @@ EFFORT.  Neither can be cleared in a live harness: `restart' then."
   (pcase (gethash "type" line)
     ("user" (list (list :type 'input :text (romacs-agent--text-of (gethash "content" (gethash "message" line)))
                         :images (append (gethash "images" line) nil))
-                  ;; Spoken to before any initialize: a run of before, ready as it is.
-                  (list :type 'handshake :state (list :spoken t))))
+                  ;; Spoken to before any initialize: a run of before, ready as
+                  ;; it is.  A refusal reported before it was another turn's.
+                  (list :type 'handshake :state (list :spoken t :refused nil))))
     ("control_request"
      (pcase (gethash "subtype" (gethash "request" line))
        ("initialize" (list (list :type 'handshake :state (list :initialize (gethash "request_id" line)))))
