@@ -124,9 +124,9 @@ board's is `thread')."
 (defun romacs-list-row ()
   "The row on point's line, or nil: anywhere on it, its newline too, as a
 mark put over its first columns (`tabulated-list-put-tag') carries none."
-  (let ((start (line-beginning-position)))
+  (let ((start (pos-bol)))
     (or (get-text-property start 'romacs-list-row)
-        (let* ((end (min (point-max) (1+ (line-end-position))))
+        (let* ((end (min (point-max) (1+ (pos-eol))))
                (at (next-single-property-change start 'romacs-list-row nil end)))
           (and (< at end) (get-text-property at 'romacs-list-row))))))
 
@@ -138,7 +138,7 @@ mark put over its first columns (`tabulated-list-put-tag') carries none."
       (when-let* ((at (text-property-search-forward 'romacs-list-row id
                                                     (lambda (id row) (equal id (plist-get row :id))))))
         (goto-char (prop-match-beginning at))
-        (line-beginning-position)))))
+        (pos-bol)))))
 
 (defun romacs-list-goto (id)
   "Move to the row named ID, when it shows; return where it starts."

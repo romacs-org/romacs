@@ -66,7 +66,13 @@
     (romacs-list-next 1)
     (should (eq (tabulated-list-get-id) 'fig))
     (romacs-list-previous 1)
-    (should (eq (tabulated-list-get-id) 'apple))))
+    (should (eq (tabulated-list-get-id) 'apple))
+    ;; A field on its first character: still the line's row.
+    (tabulated-list-set-col 0 (propertize "APPLE" 'field 'name 'front-sticky t))
+    (should (eq (plist-get (romacs-list-row) :id) 'apple))
+    (should (equal (romacs-list-tabulated-tests--ids) '(apple fig)))
+    (romacs-list-goto 'apple)
+    (should (= (point) (point-min)))))
 
 (ert-deftest romacs-list-tabulated-updating-prints-as-gnu-does ()
   (romacs-list-tabulated-tests--with (romacs-list-tabulated-tests--fruit)
