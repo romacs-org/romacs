@@ -1367,6 +1367,49 @@ mod tests {
         assert!(matches!(outcome, Err(_)), "the scan stops for the event before its setup's stop for Lisp");
     }
 
+    /// A SIGUSR1 a safepoint saw while `debug-on-event' was nil stays
+    /// queued, its arrival flag cleared; once `debug-on-event' names it, a
+    /// short list scan's entry stops for it before its setup, as the full
+    /// probe would (Sol's r5 case). It raises a real signal, so it runs in
+    /// a child of its own.
+    #[test]
+    fn a_debug_event_queued_across_a_safepoint_stops_a_list_scan_at_entry() {
+        const CHILD: &str = "ROMACS_SYNTAX_QUEUED_EVENT_CHILD";
+        let own = "prim::leaf::syntax_scan::tests::a_debug_event_queued_across_a_safepoint_stops_a_list_scan_at_entry";
+        if std::env::var_os(CHILD).is_none() {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", own, "--nocapture"]).env(CHILD, "1").output().unwrap();
+            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            assert!(out.status.success() && text.contains("1 passed"), "{text}");
+            return;
+        }
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.eval_source_raw(r#"(progn (set-buffer (get-buffer-create "queued event"))
+          (insert "x " (make-string 100000 ?x))
+          (set (make-local-variable 'parse-sexp-lookup-properties) t)
+          (set (make-local-variable 'syntax-propertize--done) 1)
+          (setq debug-on-event nil))"#).unwrap();
+        crate::host::catch_user_signals().unwrap();
+        rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::USR1).unwrap();
+        let sigusr1 = 1 << crate::host::USER_SIGNAL_NAMES.iter().position(|&name| name == "sigusr1").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !crate::host::user_signal_waiting(sigusr1) {
+            assert!(std::time::Instant::now() < deadline, "the signal reached the mailbox");
+            std::thread::yield_now();
+        }
+        assert!(!vm.take_debug_event(), "no event is taken while debug-on-event is nil");
+        assert!(crate::host::user_signal_waiting(sigusr1), "the signal stays queued");
+        vm.eval_source_raw("(setq debug-on-event 'sigusr1)").unwrap();
+        vm.enter_busy();
+        let args = [Value::integer(1).unwrap(), Value::integer(1).unwrap(), Value::NIL, Value::NIL, Value::NIL, Value::NIL];
+        let outcome = {
+            let mut leaf = super::Leaf { vm: &mut vm };
+            leaf.quittable(|leaf| leaf.syntax_scan(super::Op::ScanSexps, &args, Value::NIL, Value::NIL))
+        };
+        assert!(matches!(outcome, Err(_)), "the scan stops for the queued event before its setup's stop for Lisp");
+    }
+
     /// A quit pending when a scan whose count no text can use up starts is
     /// the indexed path's to answer, which `listing` sent it to: its entry
     /// probe stops it and counts the quit decline.
