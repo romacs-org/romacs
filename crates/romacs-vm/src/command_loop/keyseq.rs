@@ -197,9 +197,13 @@ fn vs<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, place: (usize, usize)) -> Done<
 /// they make their own, which replaces it), then the frame popped. The keys
 /// are left in `Reads::result`.
 fn read<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, flags: (bool, bool, bool)) -> Done<()> {
-    let depth = m.leaf(flags, |vm, flags| vm.reads.push(MAIN, KeyseqFrame::new(flags)));
+    let (depth, walks) = m.leaf(flags, |vm, flags| (vm.reads.push(MAIN, KeyseqFrame::new(flags)), vm.reads.walks.len()));
     let outcome = body(m, gc.by_ref(), depth);
-    let (started, kept) = m.leaf(depth, |vm, depth| (frame(vm, depth).started, vm.root_frame(&[vm.reads.result])));
+    // A walk an escape left at its filter is this read's to drop.
+    let (started, kept) = m.leaf((depth, walks), |vm, (depth, walks)| {
+        vm.reads.walks.truncate(walks);
+        (frame(vm, depth).started, vm.root_frame(&[vm.reads.result]))
+    });
     let ended = if started { end_hooks(m, gc, outcome.is_err()) } else { Ok(()) };
     m.leaf((depth, kept, outcome, ended), |vm, (depth, kept, outcome, ended)| {
         let [result] = vm.release_frame(kept);

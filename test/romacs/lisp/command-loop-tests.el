@@ -1088,6 +1088,12 @@ Beta's reader remaps it in the reading buffer; fixed in C5."
             (should (equal command-loop-tests--log '(replacement))))
         (kill-buffer other)))))
 
+(ert-deftest command-loop-tests-read-event-huge-timeout ()
+  "A timed read with a huge or infinite SECONDS still reads a queued event."
+  (command-loop-tests--with-input (list ?a ?b)
+    (should (eq (read-event nil nil most-positive-fixnum) ?a))
+    (should (eq (read-event nil nil 1.0e+INF) ?b))))
+
 (defvar command-loop-tests--remap-mode nil)
 
 (ert-deftest command-loop-tests-remap-after-translation-callout ()

@@ -71,11 +71,25 @@ fn escapes_pop_every_frame() {
                      (setq key-translation-map (make-sparse-keymap))
                      (define-key key-translation-map [f5] (lambda (_) (throw 'out 'thrown)))
                      (define-key key-translation-map [f6] (lambda (_) (error \"bad\")))
+                     (use-local-map (make-sparse-keymap))
+                     ;; A filter whose nested read throws: caught inside it,
+                     ;; the outer read goes on; uncaught, both reads leave.
+                     (define-key (current-local-map) [f8] (list 'menu-item \"x\" 'ignore :filter
+                       (lambda (b) (catch 'inner (let ((key-translation-map (make-sparse-keymap)))
+                                                   (define-key key-translation-map [f9] (lambda (_) (throw 'inner nil)))
+                                                   (read-key-sequence-vector nil)))
+                               b)))
+                     (define-key (current-local-map) [f10] (list 'menu-item \"x\" 'ignore :filter
+                       (lambda (b) (read-key-sequence-vector nil) b)))
                      nil)");
-    let got = shown(&mut vm, "(let ((unread-command-events (list 'f5 'f6 'f7)))
+    let got = shown(&mut vm, "(let ((unread-command-events (list 'f5 'f6 'f7 'f8 'f9 'f10 'f5)))
                                 (list (catch 'out (read-key-sequence-vector nil))
                                       (condition-case e (read-key-sequence-vector nil) (error (car (cdr e))))
-                                      (read-key-sequence-vector nil) ends))");
-    assert_eq!(got, "(thrown \"bad\" [f7] 3)");
-    assert_eq!(vm.reads.depth(super::MAIN), 0);
+                                      (read-key-sequence-vector nil)
+                                      (read-key-sequence-vector nil)
+                                      (catch 'out (read-key-sequence-vector nil))
+                                      ends))");
+    assert_eq!(got, "(thrown \"bad\" [f7] [f8] thrown 7)");
+    assert_eq!(vm.reads.depth(super::MAIN), 0, "every read's frame popped");
+    assert!(vm.reads.walks.is_empty(), "no walk left at a filter");
 }

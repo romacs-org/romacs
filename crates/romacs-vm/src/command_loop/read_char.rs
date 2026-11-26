@@ -60,7 +60,10 @@ pub(super) fn read_char<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, args: CharArg
 }
 
 fn read<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, own: &RootFrame, mut args: CharArgs) -> Done<bool> {
-    let end = args.seconds.map(|seconds| crate::host::monotonic() + std::time::Duration::from_secs_f64(seconds.max(0.0)));
+    // Clamped as the host wait clamps it (`host_input.rs`): a huge or
+    // infinite SECONDS bounds nothing it could reach.
+    let end = args.seconds.and_then(|seconds| std::time::Duration::try_from_secs_f64(seconds.clamp(0.0, 1e9)).ok())
+        .map(|wait| crate::host::monotonic() + wait);
     let mut quit = false;
     let taken = loop {
         let (source, packed) = step(m, gc.by_ref(), own, take_queued)?;
@@ -390,7 +393,7 @@ fn filtered<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, place: (usize, usize), (a
         }
         let prompt = super::arg(vm, place, 0);
         let seconds = super::arg(vm, place, 2);
-        let seconds = seconds.integer_value().map(|n| i32::try_from(n).map_or(f64::MAX, f64::from)).or_else(|| Leaf::new(vm).float_value(seconds).ok());
+        let seconds = seconds.integer_value().map(|n| if n <= 0 { 0.0 } else { i32::try_from(n).map_or(1e9, f64::from) }).or_else(|| Leaf::new(vm).float_value(seconds).ok());
         Ok(((prompt != Value::NIL).then(|| vm.root_frame(&[prompt])), seconds, super::arg(vm, place, 1) != Value::NIL))
     })?;
     // `message_with_string`'s echo, which is not logged (keyboard.c:10776).
