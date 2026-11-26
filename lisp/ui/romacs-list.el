@@ -56,8 +56,9 @@
   "Lists of rows, a line each."
   :group 'romacs)
 
-(defface romacs-list-row '((t :inherit highlight :extend t))
-  "A list's row at point.")
+(defface romacs-list-row '((t :inherit hl-line :extend t))
+  "A list's row at point: the theme's current line, its background alone,
+so each column keeps its own face.")
 
 (defface romacs-list-rule '((t :inherit shadow))
   "The rule before a list's group.")

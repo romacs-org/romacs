@@ -33,7 +33,7 @@
 (require 'romacs-agent-history)
 (require 'romacs-list)
 
-(defface romacs-agent-board-row '((t :inherit romacs-list-row))
+(defface romacs-agent-board-row '((t :inherit highlight :extend t))
   "The agent board's row at point."
   :group 'romacs-agent)
 
