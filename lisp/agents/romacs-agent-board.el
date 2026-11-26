@@ -33,7 +33,7 @@
 (require 'romacs-agent-history)
 (require 'romacs-list)
 
-(defface romacs-agent-board-row '((t :inherit romacs-list-row))
+(defface romacs-agent-board-row '((t :inherit highlight :extend t))
   "The agent board's row at point."
   :group 'romacs-agent)
 
@@ -845,7 +845,8 @@ A parent:ID term matches the threads directly delegated by session ID."
   "The agent board: every agent thread by project, what wants you first.
 \\{romacs-agent-board-mode-map}"
   :interactive nil
-  (setq-local revert-buffer-function #'romacs-agent-board--revert
+  (setq-local cursor-type nil
+              revert-buffer-function #'romacs-agent-board--revert
               hl-line-face 'romacs-agent-board-row
               romacs-list-redraw-function #'romacs-agent-board--redraw
               romacs-list-line-function #'romacs-agent-board--line

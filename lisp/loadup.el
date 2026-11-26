@@ -285,6 +285,8 @@
 (load "newcomment")
 
 (load "replace")
+;; Romacs: the list tabulated-list-mode derives from (ledger/divergences/LISP-TABULATED-LIST.md).
+(load "ui/romacs-list")
 (load "emacs-lisp/tabulated-list")
 (load "buff-menu")
 

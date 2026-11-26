@@ -16,6 +16,9 @@
    (yellow "#c49619") (blue "#3c98e0") (magenta "#e2468f") (cyan "#3cafa5")
    (orange "#db5823") (keyword "#93a61a") (function "#3c98e0") (type "#c49619")
    (constant "#3c98e0") (string "#93a61a") (variable "#8d9fa1") (builtin "#3c98e0")
-   (comment "#62787f") (doc "#35a69c") (number "#7a7ed2")))
+   (comment "#62787f") (doc "#35a69c") (number "#7a7ed2")
+   ;; Solarized's base02, its own "background highlights": its selection
+   ;; mixed into its background is too close to the background to see.
+   (bg-highlight "#073642")))
 
 ;;; solarized-dark-high-contrast-theme.el ends here

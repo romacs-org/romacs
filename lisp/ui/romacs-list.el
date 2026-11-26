@@ -31,21 +31,31 @@
 ;;
 ;; It draws once per batch: a mode calls its redraw after a batch of
 ;; changes, never per row.
+;;
+;; loadup.el loads it before tabulated-list.el, whose mode derives from
+;; it, while this directory is not yet on `load-path': what it uses from
+;; here loads later, truncation as a list's mode starts, the banner and
+;; hl-line as they are first used.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'hl-line)
-(require 'romacs-truncate)
-(require 'romacs-banner)
+
+(declare-function romacs-truncate "romacs-truncate" (string width &optional padding))
+(declare-function romacs-banner-still "romacs-banner" (pattern cols rows faces &optional epoch moving))
+(declare-function romacs-banner-show "romacs-banner" (id buffer start pattern cols rows faces moving &optional epoch))
+(declare-function romacs-banner-stop "romacs-banner" (id))
+(declare-function romacs-banner-random-epoch "romacs-banner" ())
+(declare-function hl-line-highlight "hl-line" ())
 
 (defgroup romacs-list nil
   "Lists of rows, a line each."
   :group 'romacs)
 
-(defface romacs-list-row '((t :inherit highlight :extend t))
-  "A list's row at point.")
+(defface romacs-list-row '((t :inherit hl-line :extend t))
+  "A list's row at point: the theme's current line, its background alone,
+so each column keeps its own face.")
 
 (defface romacs-list-rule '((t :inherit shadow))
   "The rule before a list's group.")
@@ -112,28 +122,36 @@ board's is `thread')."
 ;;; Rows in the buffer
 
 (defun romacs-list-row ()
-  "The row on point's line, or nil."
-  (get-text-property (line-beginning-position) 'romacs-list-row))
+  "The row on point's line, or nil: anywhere on it, its newline too, as a
+mark put over its first columns (`tabulated-list-put-tag') carries none."
+  (let ((start (pos-bol)))
+    (or (get-text-property start 'romacs-list-row)
+        (let* ((end (min (point-max) (1+ (pos-eol))))
+               (at (next-single-property-change start 'romacs-list-row nil end)))
+          (and (< at end) (get-text-property at 'romacs-list-row))))))
 
 (defun romacs-list--find (id)
-  "Where the row named ID starts, or nil."
+  "Where the line of the row named ID starts, or nil."
   (when id
     (save-excursion
       (goto-char (point-min))
       (when-let* ((at (text-property-search-forward 'romacs-list-row id
                                                     (lambda (id row) (equal id (plist-get row :id))))))
-        (prop-match-beginning at)))))
+        (goto-char (prop-match-beginning at))
+        (pos-bol)))))
 
 (defun romacs-list-goto (id)
   "Move to the row named ID, when it shows; return where it starts."
   (when-let* ((at (romacs-list--find id))) (goto-char at)))
 
 (defun romacs-list-shown-rows ()
-  "The rows the list shows, in order."
-  (let ((rows nil) (at (point-min)))
-    (while at
-      (when-let* ((row (get-text-property at 'romacs-list-row))) (push row rows))
-      (setq at (next-single-property-change at 'romacs-list-row)))
+  "The rows the list shows, in order: one a line."
+  (let ((rows nil))
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (when-let* ((row (romacs-list-row))) (push row rows))
+        (forward-line 1)))
     (nreverse rows)))
 
 (defun romacs-list--spot (position)
@@ -212,6 +230,7 @@ for its mode, else the mode's own; `random', one of them."
 
 (defun romacs-list--banner (pattern rows width)
   "WIDTH columns of the banner in PATTERN at rest, for ROWS."
+  (require 'romacs-banner)
   (romacs-banner-still pattern width 1 romacs-list-banner-faces
                        (with-memoization romacs-list--epoch (romacs-banner-random-epoch))
                        (funcall romacs-list-live-function rows)))
@@ -234,6 +253,10 @@ for its mode, else the mode's own; `random', one of them."
       (setq first nil)
       (insert (propertize (funcall romacs-list-line-function row width) 'romacs-list-row row) "\n"))))
 
+(defun romacs-list--stop-banner ()
+  "Show the list's banner no more: there is none unless one was shown."
+  (when (featurep 'romacs-banner) (romacs-banner-stop (romacs-list--banner-id))))
+
 (defun romacs-list-draw (rows width)
   "Draw ROWS, WIDTH columns wide, in the current buffer: the row point was
 on stays under point, else its line.  Shown anew, point is on the first
@@ -252,7 +275,7 @@ row, in a level past its heading."
     (if pattern
         (romacs-banner-show (romacs-list--banner-id) (current-buffer) (point-min) pattern width 1
                             romacs-list-banner-faces (funcall romacs-list-live-function rows) romacs-list--epoch)
-      (romacs-banner-stop (romacs-list--banner-id)))
+      (romacs-list--stop-banner))
     (goto-char (point-min))
     (cond ((romacs-list-goto id))
           ((null id) (unless (romacs-list-row) (romacs-list-next 1))
@@ -274,6 +297,15 @@ count: slack, so a row's last column is not cut."
        (if windows (apply #'min (mapcar #'window-body-width windows)) (frame-width)))
      3))
 
+(defun romacs-list-highlight ()
+  "Highlight the row at point now: hl-line moves it after a command, and a
+draw that no command made is followed by none.  Not from a buffer the
+selected window does not show while the highlight follows that window
+\(`hl-line-sticky-flag' nil): it would take the highlight from it."
+  (when (and (bound-and-true-p hl-line-mode)
+             (or (bound-and-true-p hl-line-sticky-flag) (eq (window-buffer) (current-buffer))))
+    (hl-line-highlight)))
+
 (defun romacs-list-render (buffer rows &optional width)
   "Draw ROWS in BUFFER's list, WIDTH columns wide, by default as wide as
 its windows: each window showing it keeps the row at its point and at
@@ -293,8 +325,11 @@ its start, or once drawn first, the row the draw put point on."
           (set-window-point window (romacs-list--back at))
           (set-window-start window (save-excursion (goto-char (romacs-list--back start)) (line-beginning-position))
                             t)))
-      (when hl-line-mode
-        (if windows (with-selected-window (car windows) (hl-line-highlight)) (hl-line-highlight)))
+      ;; A sticky highlight is drawn in the first window showing the list;
+      ;; one that follows the selected window is left to it.
+      (if (and windows (bound-and-true-p hl-line-sticky-flag))
+          (with-selected-window (car windows) (romacs-list-highlight))
+        (romacs-list-highlight))
       (when (and windows (not romacs-list--ticker)
                  (text-property-not-all (point-min) (point-max) 'romacs-list-live nil))
         (setq romacs-list--ticker (run-at-time 1 1 #'romacs-list--tick buffer))))))
@@ -334,7 +369,7 @@ while the list shows one; else stop."
 (defun romacs-list--stop ()
   "Stop the list's clock and banner: its buffer goes, or leaves the mode."
   (romacs-list--stop-ticker)
-  (romacs-banner-stop (romacs-list--banner-id)))
+  (romacs-list--stop-banner))
 
 ;;; Windows
 
@@ -412,7 +447,9 @@ up, on the row of the level it came from."
   "A list of rows, a line each, under a banner.
 \\{romacs-list-mode-map}"
   :interactive nil
-  (setq-local truncate-lines t cursor-type nil
+  ;; Loaded now, its directory on `load-path': its cells cut through it.
+  (require 'romacs-truncate)
+  (setq-local truncate-lines t
               revert-buffer-function #'romacs-list--revert
               hl-line-face 'romacs-list-row)
   ;; After every mode's body, before the mode hooks: a derived mode's
