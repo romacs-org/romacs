@@ -49,6 +49,12 @@ def publish(bars: Path, draft: Path, kind: str) -> bool:
 
 def measure(kind: str, bars: Path, target: Path, work: Path, env: dict[str, str]) -> None:
     """Build the GUI and write the harness draft in WORK."""
+    env = dict(env, CARGO_TARGET_DIR=str(target), ROMACS_RUNTIME_ROOT=str(ROOT), PYTHONDONTWRITEBYTECODE='1')
+    paths = (env['ROMACS_TOOLCHAIN_BIN'], env.get('ROMACS_DISPLAY_TOOLS'),
+             os.path.dirname(env['ROMACS_TEST_LABWC']), env.get('PATH', os.defpath))
+    env['PATH'] = os.pathsep.join(path for path in paths if path)
+    env.pop('ROMACS_HARNESS_WLR_ENV', None)
+    env.pop('ROMACS_LISP_DIR', None)
     build = ['cargo', 'build', '--profile', 'gate', '--locked', '--offline', '-p', 'romacs-vm-gui',
              '--bin', 'romacs-vm-gui']
     record = [sys.executable, '-B', str(STAGES / f'{kind}_stages_live.py'), '--binary', str(target / 'gate/romacs-vm-gui'),
@@ -67,19 +73,14 @@ def main() -> int:
 
     if not bar_writer_allowed(ROOT):
         parser.error('recording stage bars requires beta or FORGE_TRUNK_JOB=1')
-    for name in ('ROMACS_TOOLCHAIN_BIN', 'CARGO_TARGET_DIR'):
+    for name in ('ROMACS_TOOLCHAIN_BIN', 'ROMACS_TEST_LABWC', 'CARGO_TARGET_DIR'):
         if not os.environ.get(name):
             parser.error(f'set {name} for the recorder')
     target = Path(os.environ['CARGO_TARGET_DIR']).resolve()
-    env = dict(os.environ, CARGO_TARGET_DIR=str(target), ROMACS_RUNTIME_ROOT=str(ROOT), PYTHONDONTWRITEBYTECODE='1')
-    env['PATH'] = os.pathsep.join(path for path in (env['ROMACS_TOOLCHAIN_BIN'], env.get('ROMACS_DISPLAY_TOOLS'),
-                                                   env.get('PATH', os.defpath)) if path)
-    env.pop('ROMACS_HARNESS_WLR_ENV', None)
-    env.pop('ROMACS_LISP_DIR', None)
     bars = STAGES / f'{kind}_stages_bars.json'
     try:
         with tempfile.TemporaryDirectory(prefix=f'romacs-{kind}-bars-') as work:
-            measure(kind, bars, target, Path(work), env)
+            measure(kind, bars, target, Path(work), dict(os.environ))
             changed = publish(bars, Path(work) / 'draft.json', kind)
     except subprocess.CalledProcessError as error:
         return error.returncode if error.returncode > 0 else 1
