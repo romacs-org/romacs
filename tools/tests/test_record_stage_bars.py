@@ -2,14 +2,35 @@ import importlib.machinery
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'record-stage-bars'
 LOADER = importlib.machinery.SourceFileLoader('record_stage_bars', str(SCRIPT))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 recorder = importlib.util.module_from_spec(SPEC)
 LOADER.exec_module(recorder)
+
+
+class Measurement(unittest.TestCase):
+    def test_harness_finds_randr_beside_the_pinned_compositor(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            work = Path(scratch)
+            headless = work / 'headless'
+            headless.mkdir()
+            randr = headless / 'wlr-randr'
+            randr.touch(mode=0o700)
+            env = {'ROMACS_TOOLCHAIN_BIN': str(work / 'rust'),
+                   'ROMACS_TEST_LABWC': str(headless / 'labwc'),
+                   'PATH': '/usr/bin:/bin', 'XDG_RUNTIME_DIR': '/run/user/live'}
+            with patch.object(recorder.subprocess, 'run') as run:
+                recorder.measure('display', work / 'bars.json', work / 'target', work, env)
+            child = run.call_args.kwargs['env']
+            self.assertEqual(shutil.which('wlr-randr', path=child['PATH']), str(randr))
+            self.assertEqual(child['PATH'].split(':')[0], env['ROMACS_TOOLCHAIN_BIN'])
+            self.assertEqual(child['XDG_RUNTIME_DIR'], env['XDG_RUNTIME_DIR'])
 
 
 class Publication(unittest.TestCase):
