@@ -524,7 +524,7 @@ fn global_hook_not_run() {
     with_owner(|owner| {
         owner.seed();
         owner.run(
-            r#"
+            r"
             (romacs--run-window-change-functions)
             (setq test-global 0 test-local 0 test-config nil)
             (add-hook 'window-buffer-change-functions
@@ -538,7 +538,7 @@ fn global_hook_not_run() {
                         (lambda ()
                           (push (window-body-width (selected-window) t) test-config)) nil t))
             nil
-        "#,
+        ",
         );
         owner.show(WINDOW, 1, SIZE, true);
         assert_eq!(owner.run("(list test-global (> test-local 0))"), "(0 t)");
@@ -646,7 +646,7 @@ fn d1_frame_iteration() {
         owner.show(WINDOW, 1, SIZE, true);
         owner.show(OTHER, 2, (260, 120), false);
         let result = owner.run(&format!(
-            r#"
+            r"
             (select-frame test-f1)
             (let ((frames (frame-list))
                   (root (frame-root-window test-f1))
@@ -667,7 +667,7 @@ fn d1_frame_iteration() {
                     (= (length seen) 3)
                     (and (memq root seen) (memq left seen) (memq right seen) t)
                     f1-buffers))
-        "#
+        "
         ));
         assert_eq!(result, r#"(t t t t (" *owner-root*"))"#);
     });
