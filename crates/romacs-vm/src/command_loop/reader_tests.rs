@@ -67,6 +67,7 @@ fn nested_reads_survive_moving_collections() {
 #[test]
 fn escapes_pop_every_frame() {
     let mut vm = Vm::new();
+    vm.install_lisp_prelude_raw().unwrap();
     shown(&mut vm, "(progn (setq ends 0 romacs--sequence-end-functions (list (lambda () (setq ends (1+ ends)))))
                      (setq key-translation-map (make-sparse-keymap))
                      (define-key key-translation-map [f5] (lambda (_) (throw 'out 'thrown)))
@@ -109,4 +110,17 @@ fn a_buffer_change_in_the_wait_replays_the_sequence() {
          (list (romacs--read-key-sequence nil t nil) romacs--key-sequence-command (buffer-name)
                (this-command-keys-vector))))");
     assert_eq!(got, "([f5 f6] in-b \"b\" [f5 f6])");
+}
+
+/// A prefix bound to a keymap still to autoload: the next event is unbound,
+/// as the Lisp reader found it (VM2-AUTOLOAD1), not an error.
+#[test]
+fn an_autoloaded_prefix_map_reads_as_unbound() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude_raw().unwrap();
+    let got = shown(&mut vm, "(progn (autoload 'c2-map \"c2-nowhere\" nil nil 'keymap)
+       (use-local-map (make-sparse-keymap)) (define-key (current-local-map) [f5] 'c2-map)
+       (let ((unread-command-events (list 'f5 ?a)))
+         (list (romacs--read-key-sequence nil t nil) romacs--key-sequence-command)))");
+    assert_eq!(got, "([f5 97] nil)");
 }

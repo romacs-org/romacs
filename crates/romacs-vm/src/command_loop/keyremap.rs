@@ -97,7 +97,7 @@ fn remap_step<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, which: us
             // No map to scan: the walk of nothing.
             return Ok((Value::NIL, [Value::NIL; 2], 0, true));
         }
-        Ok((scan.map, [keyseq::lookup_event_at(vm, depth, scan.end), Value::NIL], 1, true))
+        Ok((keyseq::followable(vm, scan.map), [keyseq::lookup_event_at(vm, depth, scan.end), Value::NIL], 1, true))
     })?;
     let function = step(m, gc.by_ref(), (depth, which, doit), |vm, (depth, which, doit)| {
         let mut next = vm.reads.result;

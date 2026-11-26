@@ -340,6 +340,12 @@ fn reading(vm: &mut Vm, depth: usize) -> bool {
 pub(super) fn keymapp(vm: &Vm, object: Value) -> bool {
     vm.resolve_keymap(object).is_some() || vm.autoloaded_keymap(object)
 }
+/// MAP as a walk follows it: a keymap, or a list of keymaps; a keymap still
+/// to autoload is nothing yet, so its events are unbound, as the Lisp
+/// reader's `key-binding` found them (VM2-AUTOLOAD1: GNU loads it).
+pub(super) fn followable(vm: &Vm, map: Value) -> Value {
+    if map.tag_is(3) || vm.resolve_keymap(map).is_some() { map } else { Value::NIL }
+}
 
 /// The prefix up to `first_unbound` is unbound with no translation left
 /// to try: drop it and replay what follows it. Whether it did.
@@ -513,7 +519,7 @@ fn lookup<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize) -> Done<()> {
     walk(m, gc.by_ref(), depth, |vm, depth| {
         let f = frame(vm, depth);
         let (binding, key) = (f.binding, f.key);
-        Ok((binding, [lookup_event(vm, key), Value::NIL], 1, true))
+        Ok((followable(vm, binding), [lookup_event(vm, key), Value::NIL], 1, true))
     })?;
     step(m, gc.by_ref(), depth, |vm, depth| {
         let binding = vm.reads.result;
