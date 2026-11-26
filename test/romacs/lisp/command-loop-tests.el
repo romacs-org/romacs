@@ -1265,20 +1265,84 @@ then starts its own."
 
 (ert-deftest command-loop-tests-input-method-keys-saved-before-echo ()
   "An input method's call saves and empties the command keys before the
-echo area is cleared for it, and puts them back after."
+echo area is cleared for it, and puts them back after.  The message shows
+from the watcher of the queue's pop, the write just before the method."
   (skip-unless (fboundp 'romacs--take-user-signal))
-  (command-loop-tests--with-input (list (cons t ?a))
+  (command-loop-tests--with-input nil
     (set--this-command-keys "x")
+    (setq unread-command-events (list (cons t ?a)))
     ;; Batch keeps no message in the echo area: an interactive one does.
-    (let ((noninteractive nil)
-          (seen nil)
-          (input-method-function (lambda (c) (list c))))
-      (message "shown")
+    (let* ((noninteractive nil)
+           (seen nil)
+           (method-keys nil)
+           (input-method-function
+            (lambda (c) (setq method-keys (this-command-keys-vector)) (list c)))
+           (watch (lambda (_ _ operation _)
+                    (when (eq operation 'set) (message "shown")))))
       (cl-letf* ((clear (symbol-function 'romacs--clear-echo))
                  ((symbol-function 'romacs--clear-echo)
                   (lambda () (push (this-command-keys-vector) seen) (funcall clear))))
-        (should (equal (list (read-event nil t) seen (this-command-keys-vector))
-                       '(97 ([]) [120 97])))))))
+        (add-variable-watcher 'unread-command-events watch)
+        (unwind-protect
+            (should (equal (list (read-event nil t) seen method-keys (this-command-keys-vector))
+                           '(97 ([]) [] [120 97])))
+          (remove-variable-watcher 'unread-command-events watch))))))
+
+;; Rows from the C2 r2 reviews (Sol B2, B4).
+
+(ert-deftest command-loop-tests-host-echo-cleared-after-watcher ()
+  "A host event clears the echo area as it shows after the write of
+`input-method-previous-message', whose watcher may show a message."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input nil
+    (let* ((noninteractive nil)
+           (seen nil)
+           (queue (list 97))
+           (romacs--host-input t)
+           (input-method-function 'list)
+           (watch (lambda (&rest _) (message "from watcher"))))
+      (message nil)
+      (add-variable-watcher 'input-method-previous-message watch)
+      (unwind-protect
+          (cl-letf* (((symbol-function 'romacs--read-host-char) (lambda (&rest _) (pop queue)))
+                     (clear (symbol-function 'romacs--clear-echo))
+                     ((symbol-function 'romacs--clear-echo)
+                      (lambda () (push (this-command-keys-vector) seen) (funcall clear))))
+            (should (equal (list (read-event nil nil 5) (current-message) seen)
+                           '(97 nil ([])))))
+        (remove-variable-watcher 'input-method-previous-message watch)))))
+
+(ert-deftest command-loop-tests-switch-frame-classified-after-watcher ()
+  "The event read is classified as a delayed `switch-frame' after the
+write of `quit-flag', as its watcher left it."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input nil
+    (local-set-key [f5] #'ignore)
+    (let* ((event (list 'switch-frame (selected-frame)))
+           (watch (lambda (&rest _)
+                    (when (eq (car-safe last-input-event) 'switch-frame)
+                      (setcar last-input-event 'f5)))))
+      (setq unread-command-events (list event 'f6))
+      (add-variable-watcher 'quit-flag watch)
+      (unwind-protect
+          (should (equal (list (read-key-sequence-vector nil) unread-command-events)
+                         (list (vector event) '(f6))))
+        (remove-variable-watcher 'quit-flag watch))
+      (should (eq (car event) 'f5)))))
+
+(ert-deftest command-loop-tests-input-method-circular-tail ()
+  "An input method's circular tail is refused as `nconc' refuses it."
+  (command-loop-tests--with-input (list ?a)
+    (let* ((tail (list 121))
+           (input-method-function (lambda (_c) (setcdr tail tail) (cons 120 tail))))
+      (should (eq (car (should-error (read-event nil t))) 'circular-list)))))
+
+(ert-deftest command-loop-tests-input-method-non-list-tail ()
+  "An input method's non-list tail is refused as `nconc' refuses it."
+  (command-loop-tests--with-input (list ?a)
+    (let ((input-method-function (lambda (_c) (cons 120 'bad))))
+      (should (equal (should-error (read-event nil t))
+                     '(wrong-type-argument consp bad))))))
 
 (provide 'command-loop-tests)
 ;;; command-loop-tests.el ends here
