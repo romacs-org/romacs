@@ -4,6 +4,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'romacs-list)
+(require 'romacs-banner)
 
 (declare-function romacs--run-window-change-functions "window-change")
 
