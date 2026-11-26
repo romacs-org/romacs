@@ -39,3 +39,7 @@ slow-timeout = { period = "3600s", terminate-after = 1, grace-period = "0s" }
 filter = 'test(/(^|::)(every_file_of_the_lisp_tree_compiles_but_the_known_failures|an_installers_tree_compile_keys_by_the_world_its_first_compile_built)$/)'
 slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }
 threads-required = 4
+
+[[profile.default.overrides]]
+filter = 'test(/(^|::)every_file_of_the_lisp_tree_compiles_but_the_known_failures$/)'
+success-output = "final"

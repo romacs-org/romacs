@@ -548,7 +548,10 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
                           "filter = 'test(/(^|::)(every_file_of_the_lisp_tree_compiles_but_the_known_failures"
                           "|an_installers_tree_compile_keys_by_the_world_its_first_compile_built)$/)'\n"
                           'slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }\n'
-                          'threads-required = 4\n')
+                          'threads-required = 4\n'
+                          '[[profile.default.overrides]]\n'
+                          "filter = 'test(/(^|::)every_file_of_the_lisp_tree_compiles_but_the_known_failures$/)'\n"
+                          'success-output = "final"\n')
         nextest = ['cargo', 'nextest']
         config_flags = ['--config-file', str(config), '--user-config-file', 'none']
         flags = cargo_flags(src)
