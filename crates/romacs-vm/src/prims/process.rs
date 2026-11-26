@@ -439,9 +439,9 @@ fn proc_deactivate(cx, process: Value) {
 }}
 
 defsubr! { name = "romacs--proc-select", gnu = "process.c:5358", effect = Global,
-fn proc_select(cx, wait_proc: Value, just_this_one: Value, seconds: Value; optional read_kbd: Value) {
+fn proc_select(cx, wait_proc: Value, just_this_one: Value, seconds: Value; optional read_kbd: Value, send_proc: Value) {
     let seconds = if seconds == Value::NIL { None } else { Some(cx.float_value(seconds).or_else(|_| seconds.integer_value().map(|n| n as f64).ok_or_else(|| Fault::Wrong("numberp", seconds)))?) };
-    cx.process_select(wait_proc, just_this_one != Value::NIL, seconds, read_kbd != Value::NIL)
+    cx.process_select(wait_proc, just_this_one != Value::NIL, seconds, read_kbd != Value::NIL, send_proc)
 }}
 
 // How many waits on processes have found something to handle since startup (output,
