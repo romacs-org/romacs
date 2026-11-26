@@ -4628,7 +4628,7 @@ def models_real(args, base):
     none known at first; a real Codex session's model menu (C-c o m) shows
     what is known and asks Codex in the background, and the open menu comes
     to list what Codex's own app-server answers `model/list'; opened again
-    it lists the same, and the capabilities tool says the same.  `romacs-agent-refresh-models' asks Claude Code too.
+    it lists the same, and the capabilities tool says the same.  `romacs-agent-refresh' asks Claude Code too.
     Free, but needs the real programs: not a default workflow."""
     a = Agents(args, base, 'mr')
     try:
@@ -4692,7 +4692,7 @@ def models_real(args, base):
             '(decode-coding-string (json-serialize (romacs-agent-tools--capabilities (romacs-mcp--object))) (quote utf-8))')))
         result['capabilities'] = {p['providerInstanceId']: [m['id'] for m in p['models']]
                                   for p in capabilities['providers']}
-        a.eval('(progn (romacs-agent-refresh-models) t)')
+        a.eval('(progn (romacs-agent-refresh) t)')
         until((kept / 'claude.json').exists, 60, 'claude models kept')
         result['claude'] = known('claude')
         result['ok'] = (result['before'] == [] and bool(result['listed'])

@@ -93,22 +93,10 @@ the first of `romacs-agent-providers'."
 \(HARNESS ROW...), a ROW being (ID :label LABEL :efforts EFFORTS
 :default-effort EFFORT).  A row of an id the harness reports fills in what
 the report leaves out: a label, a default effort.  Each harness reports its
-own models (`romacs-agent-refresh-models'), and an instance's own :models go
+own models (`romacs-agent-refresh'), and an instance's own :models go
 before both (`romacs-agent--models').  Starting one names its ID to the
 harness; no model named leaves the choice to the harness's configuration."
   :type '(alist :key-type symbol :value-type (repeat sexp)) :group 'romacs-agent)
-
-(defcustom romacs-agent-models-refresh-interval 30
-  "Minutes between asks of each harness for its models: every enabled
-instance is asked again that often, in the background once Romacs is
-idle, and a picker asks one whose answer is older.  Nil asks each once a
-run, when a picker first wants its models."
-  :type '(choice (const :tag "Once a run" nil) number)
-  :initialize #'custom-initialize-default
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (when (fboundp 'romacs-agent--models-schedule) (romacs-agent--models-schedule)))
-  :group 'romacs-agent)
 
 (defcustom romacs-agent-select-timeout 10
   "Seconds a harness has to confirm a new model or effort before the
@@ -908,8 +896,10 @@ instances) is derived again when it changes.")
                            next message carries them; else `restart':
                            resumed with the new option words
   :models-probe (INSTANCE) optional: how INSTANCE's program is asked for
-                           its models with no session, or nil when it is
-                           not to be, a plist: :argv its
+                           its models with no session, nil when it is
+                           not to be, or a string saying why not now
+                           (it must never renew the account's sign-in
+                           under its sessions), else a plist: :argv its
                            words, :input what it reads, and :read a
                            function of each object it writes, nil until
                            (:models ROWS) or (:error TEXT) answers
@@ -969,8 +959,11 @@ instances) is derived again when it changes.")
       the account configured at HOME (its configuration directory,
       absolute), without a turn: CALLBACK is called once with a
       `rate-limit' event naming every window that binds the account,
-      or nil when that is not known now.  An account at its limit is
-      asked again and again (`romacs-agent-room-check-interval');
+      or with nil and a string saying why it is not known now.  It
+      reads the sign-in its harness keeps and never renews it: only the
+      harness's own sessions do, or a renewal rotates the tokens under
+      them.  An account at its limit is asked again and again
+      (`romacs-agent-room-check-interval'), any by `romacs-agent-refresh';
   :credentials-stamp (HOME)   optional: the stamp of the account's
       sign-in configured at HOME, its credentials file's
       (`romacs-agent--file-stamp'), which changes as it signs in again:
@@ -1246,8 +1239,8 @@ whatever the editor's own environment and the user manager's say."
 (defun romacs-agent--models-stamp (instance)
   "What models kept for INSTANCE hold for: its program, resolved; nil when
 it is not found.  Not the file's time: a version manager's shim keeps its
-own while the harness behind it changes, and every program is asked again
-on the run's first look and each `romacs-agent-models-refresh-interval'."
+own while the harness behind it changes: an updated harness is asked
+again, as nothing is kept for it."
   (when-let* ((found (executable-find (plist-get instance :program))))
     (file-truename found)))
 
@@ -1328,15 +1321,18 @@ and what follows the last."
   "Ask INSTANCE's program for its models in the background, keeping what
 it reports (`romacs-agent--keep-models'), then call DONE, when given, with
 \(:models ROWS) or (:error TEXT).  Nothing when its driver cannot be
-asked, or a probe of it runs; the process otherwise."
+asked, or a probe of it runs; the process otherwise.  One its driver
+will not ask now is not asked, DONE told why, and stays due."
   (let* ((name (plist-get instance :name))
          (program (plist-get instance :program))
          (probe (plist-get (romacs-agent--driver-of (plist-get instance :harness)) :models-probe)))
     (when (and probe (stringp program) (executable-find program)
                (not (process-live-p (gethash name romacs-agent--models-probes))))
       (condition-case err
-          (when-let* ((asked (funcall probe instance)))
-            (puthash name (romacs-agent--probe-process instance asked done) romacs-agent--models-probes))
+          (pcase (funcall probe instance)
+            ((and (pred stringp) why) (when done (funcall done (list :error why))) nil)
+            ((and (pred consp) asked)
+             (puthash name (romacs-agent--probe-process instance asked done) romacs-agent--models-probes)))
         (error (puthash name (float-time) romacs-agent--models-probes)
                (when done (funcall done (list :error (error-message-string err))))
                nil)))))
@@ -1402,13 +1398,15 @@ buffer should it not start."
 (defun romacs-agent--enabled-instances ()
   (cl-remove-if-not (lambda (i) (plist-get i :enabled)) (romacs-agent-instances)))
 
-(defun romacs-agent--models-due (instances asked now minutes)
-  "Those of INSTANCES to ask for their models at NOW: by ASKED
-\(`romacs-agent--models-probes'), never asked in this run, or last
-answered MINUTES or more before (nil: never again)."
+(defun romacs-agent--models-due (instances asked)
+  "Those of INSTANCES to ask for their models: by ASKED
+\(`romacs-agent--models-probes'), not asked in this run, and with nothing
+kept for their present program (`romacs-agent--models-kept').  Sessions
+report their models as they start; a harness is otherwise asked only
+when asked to (`romacs-agent-refresh')."
   (cl-remove-if (lambda (instance)
-                  (let ((last (gethash (plist-get instance :name) asked)))
-                    (and last (not (and (numberp last) minutes (>= (- now last) (* 60 minutes)))))))
+                  (or (gethash (plist-get instance :name) asked)
+                      (romacs-agent--models-kept instance)))
                 instances))
 
 (defun romacs-agent--want-models (&optional instances)
@@ -1416,57 +1414,7 @@ answered MINUTES or more before (nil: never again)."
 the background when it is due (`romacs-agent--models-due'): what is kept
 is shown meanwhile, and a picker open shows what it reports."
   (mapc #'romacs-agent--probe-models
-        (romacs-agent--models-due (or instances (romacs-agent--enabled-instances)) romacs-agent--models-probes
-                                  (float-time) romacs-agent-models-refresh-interval)))
-
-(defun romacs-agent--ask-models-again (&optional say)
-  "Ask every enabled instance's harness for its models again, in the
-background; SAY what each reports."
-  (dolist (instance (romacs-agent--enabled-instances))
-    (let* ((name (plist-get instance :name))
-           (report (lambda (outcome)
-                     (pcase outcome
-                       (`(:models ,rows) (message "Models of %s: %d reported" name (length rows)))
-                       (`(:error ,why) (message "Models of %s: %s" name why))))))
-      (cond ((process-live-p (gethash name romacs-agent--models-probes))
-             (when say (message "Models of %s: being asked" name)))
-            ((romacs-agent--probe-models instance (and say report)))
-            (say (message "Models of %s: not asked (no program found, or its harness reports none)" name))))))
-
-(defun romacs-agent-refresh-models ()
-  "Ask every enabled agent instance's harness for its models again, in
-the background, and say what each reports."
-  (interactive)
-  (romacs-agent--ask-models-again t))
-
-(defvar romacs-agent--models-timer nil
-  "The timer asking harnesses for their models every
-`romacs-agent-models-refresh-interval' minutes, or nil.")
-
-(defvar romacs-agent--models-idle nil
-  "The idle timer a tick left to ask, until it runs, or nil.")
-
-(defun romacs-agent--models-ask-idle ()
-  (setq romacs-agent--models-idle nil)
-  (romacs-agent--ask-models-again))
-
-(defun romacs-agent--models-tick ()
-  "Ask every harness for its models again, once Romacs is idle: one ask
-for the ticks before it is."
-  (unless (memq romacs-agent--models-idle timer-idle-list)
-    (setq romacs-agent--models-idle (run-with-idle-timer 2 nil #'romacs-agent--models-ask-idle))))
-
-(defun romacs-agent--models-schedule ()
-  "Run `romacs-agent--models-tick' every `romacs-agent-models-refresh-interval'
-minutes, or not at all when it is nil."
-  (dolist (timer (list romacs-agent--models-timer romacs-agent--models-idle))
-    (when (timerp timer) (cancel-timer timer)))
-  (setq romacs-agent--models-idle nil)
-  (setq romacs-agent--models-timer
-        (when-let* ((minutes romacs-agent-models-refresh-interval) (seconds (* 60 minutes)))
-          (run-at-time seconds seconds #'romacs-agent--models-tick))))
-
-(unless (timerp romacs-agent--models-timer) (romacs-agent--models-schedule))
+        (romacs-agent--models-due (or instances (romacs-agent--enabled-instances)) romacs-agent--models-probes)))
 
 (defun romacs-agent--models (instance)
   "The models INSTANCE offers, each (ID . PLIST): its own :models, what
@@ -3951,12 +3899,96 @@ again draws new work, and what waited for its reset goes on."
         (condition-case err
             (funcall (plist-get (romacs-agent--driver-of harness) :usage)
                      (romacs-agent--home harness (plist-get instance :config-dir))
-                     (lambda (report)
+                     (lambda (report &optional _why)
                        (remhash name romacs-agent--room-asking)
                        (when report (romacs-agent-note-room name report))))
           (error (remhash name romacs-agent--room-asking)
                  (message "Asking %s's usage: %s" name (error-message-string err)))))))
   (romacs-agent--room-watch))
+
+;;; Asking every account again
+
+(defun romacs-agent--refresh-usage (instance answer)
+  "Ask INSTANCE's usage by its harness's :usage, kept as its limit report
+\(`romacs-agent-note-room'); ANSWER with (:report EVENT), (:error TEXT),
+or nil when its harness cannot say."
+  (let ((name (plist-get instance :name)) (harness (plist-get instance :harness)))
+    (if-let* ((usage (plist-get (romacs-agent--driver-of harness) :usage)))
+        (condition-case err
+            (funcall usage (romacs-agent--home harness (plist-get instance :config-dir))
+                     (lambda (report &optional why)
+                       (when report
+                         (with-demoted-errors "romacs-agent: keeping usage: %S"
+                           (romacs-agent-note-room name report)))
+                       (funcall answer (if report (list :report report) (list :error (or why "not known"))))))
+          (error (funcall answer (list :error (error-message-string err)))))
+      (funcall answer nil))))
+
+(defun romacs-agent--refresh-models (instance answer)
+  "Ask INSTANCE's harness for its models (`romacs-agent--probe-models');
+ANSWER with its outcome, or nil when it cannot be asked now."
+  (let ((answered nil))
+    (cond ((process-live-p (gethash (plist-get instance :name) romacs-agent--models-probes))
+           (funcall answer (list :error "being asked already")))
+          ((or (romacs-agent--probe-models instance (lambda (outcome) (setq answered t) (funcall answer outcome)))
+               answered))
+          (t (funcall answer nil)))))
+
+(defun romacs-agent--refresh-line (result)
+  "RESULT, one account's of `romacs-agent-refresh', as a line."
+  (let ((name (car result)) (usage (plist-get (cdr result) :usage)) (models (plist-get (cdr result) :models)))
+    (format "%s: %s; %s" (propertize name 'face 'bold)
+            (pcase usage
+              (`(:report ,report)
+               (format "usage %d%% (%s)" (round (* 100 (or (plist-get report :used) 0)))
+                       (or (plist-get report :window) "limit")))
+              (`(:error ,why) (format "usage not known: %s" why))
+              (_ "no usage to ask"))
+            (pcase models
+              (`(:models ,rows) (format "%d models" (length rows)))
+              (`(:error ,why) (format "models not asked: %s" why))
+              (_ "models not asked")))))
+
+(defun romacs-agent--refresh-say (results)
+  (message "%s" (if results (mapconcat #'romacs-agent--refresh-line results "\n") "No agent account is enabled")))
+
+(define-obsolete-function-alias 'romacs-agent-refresh-models #'romacs-agent-refresh "0.0.22")
+
+;;;###autoload
+(defun romacs-agent-refresh (&optional done)
+  "Ask every enabled account, now, what Romacs otherwise learns only from
+its sessions: its usage, kept as its limit report, and its models, kept
+for the pickers.  For a change Romacs is not told of: a usage limit
+reset or lifted, a new model.  Neither is asked on a timer.
+
+Each harness asks without renewing the account's sign-in (its :usage and
+:models-probe): one whose sign-in is due to renew says so, and its next
+session renews it.  DONE, when given, is called once every answer is
+in, with a list of (NAME :usage OUTCOME :models OUTCOME), an outcome
+being (:report EVENT), (:models ROWS), (:error TEXT), or nil when the
+harness cannot be asked; interactively, each account's is said."
+  (interactive (list #'romacs-agent--refresh-say))
+  (let* ((instances (romacs-agent--enabled-instances))
+         (results (mapcar (lambda (i) (list (plist-get i :name) :usage nil :models nil)) instances))
+         ;; One for the asking itself: an answer that comes at once ends nothing.
+         (pending 1)
+         (settle (lambda () (when (and (zerop (cl-decf pending)) done) (funcall done results))))
+         (answer (lambda (name key)
+                   (cl-incf pending)
+                   (let ((once nil))
+                     (lambda (outcome)
+                       (unless once
+                         (setq once t)
+                         (setf (plist-get (cdr (assoc name results)) key) outcome)
+                         (funcall settle)))))))
+    (when (called-interactively-p 'interactive)
+      (message "Asking %d agent accounts..." (length instances)))
+    (dolist (instance instances)
+      (let ((name (plist-get instance :name)))
+        (romacs-agent--refresh-usage instance (funcall answer name :usage))
+        (romacs-agent--refresh-models instance (funcall answer name :models))))
+    (funcall settle)
+    results))
 
 (defun romacs-agent--room-window-name (name)
   "NAME, a window's as reports of before named it, as windows are now."
