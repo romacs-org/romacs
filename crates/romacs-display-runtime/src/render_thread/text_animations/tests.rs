@@ -151,10 +151,39 @@ fn a_banner_moves_in_its_stops_colours_and_keeps_its_motion_for_its_pattern_and_
     assert!((animations.running[&1].moved - moved).abs() < 1e-9);
     animations.replace(vec![(1, banner(Pattern::Rain, 3))]);
     assert_eq!(animations.running[&1].moved, 0.0);
-    // Cells, never a scene; with motion off the evaluator's still frame
-    // shows alone.
+    // Cells, never a scene.
     assert!(!banner(Pattern::Sweep, 0).kind.scened());
-    let frame = FrameGlyphBuffer::new();
-    assert!(located(&frame, &banner(Pattern::Sweep, 0)).is_some());
-    assert_eq!(located(&frame, &TextAnimation { still: true, ..banner(Pattern::Sweep, 0) }), None);
+}
+
+#[test]
+fn a_banner_is_placed_on_its_own_cells_and_never_over_other_text() {
+    use romacs_display_protocol::face::BoxVerticalEdges;
+    use romacs_display_protocol::frame_glyphs::GlyphRowRole;
+    use romacs_display_protocol::text_animation::located;
+    use romacs_display_protocol::types::{DisplayWindowId, FaceId};
+    use romacs_logo::banner::Pattern;
+    // Two rows of a still banner (braille and block shades), then a list row.
+    let lines = ["⠀⠔▒▓█⠀", "⡀⠀░⠀⠀⠂", "a row "];
+    let draw = |gutter: bool| {
+        let mut frame = FrameGlyphBuffer::new();
+        frame.char_width = 8.0;
+        frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+        for (row, line) in lines.iter().enumerate() {
+            let text = if gutter { format!("{} {line}", row + 1) } else { (*line).to_string() };
+            for (c, ch) in text.chars().enumerate() {
+                frame.add_char_on_row(ch, (c as f32 * 8.0, 100.0 + row as f32 * 16.0, row as u32), (8.0, 16.0, 12.0),
+                                      FaceId::new(0), BoxVerticalEdges::Both);
+            }
+        }
+        frame
+    };
+    let placed = TextAnimation { cols: 6, rows: 2, rise: Some((100.0, 16.0)), ..banner(Pattern::Sweep, 0) };
+    assert_eq!(located(&draw(false), &placed).map(|a| a.top), Some(0));
+    // A line-number gutter where the block would start: the still frame alone.
+    assert_eq!(located(&draw(true), &placed), None);
+    // A block taller than the banner's rows reaches the list's text: refused.
+    assert_eq!(located(&draw(false), &TextAnimation { rows: 3, ..placed.clone() }), None);
+    // Not placed by the host, or motion off: the still frame alone.
+    assert_eq!(located(&draw(false), &TextAnimation { rise: None, ..placed.clone() }), None);
+    assert_eq!(located(&draw(false), &TextAnimation { still: true, ..placed }), None);
 }

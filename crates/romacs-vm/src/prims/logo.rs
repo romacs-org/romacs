@@ -61,12 +61,12 @@ defsubr! { name = "romacs--banner-frame", gnu = "romacs:logo", effect = Reads,
 fn romacs_banner_frame(cx, pattern: Value, cols: Value, rows: Value, faces: Value; optional epoch: Value, time: Value) {
     use romacs_logo::banner;
     let count = |v: Value| v.integer_value().map(|n| usize::try_from(n).unwrap_or(0)).ok_or_else(|| Fault::Wrong("integerp", v));
-    let shape = banner::Pattern::named(&cx.symbol_name(pattern)?).ok_or(Fault::Wrong("romacs-banner-pattern-p", pattern))?;
+    let shape = banner::Pattern::named(&cx.symbol_name(pattern)?).ok_or_else(|| Fault::Wrong("romacs-banner-pattern-p", pattern))?;
     let faces = elements(cx, faces)?;
     let (cols_v, rows_v) = (cols, rows);
     let (cols, rows) = (count(cols)?, count(rows)?);
     if !banner::valid(cols, rows, faces.len()) { return Err(Fault::Range(cols_v, rows_v)); }
-    let epoch = if epoch == Value::NIL { 0 } else { epoch.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or(Fault::Wrong("natnump", epoch))? };
+    let epoch = if epoch == Value::NIL { 0 } else { epoch.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or_else(|| Fault::Wrong("natnump", epoch))? };
     let time = if time == Value::NIL { 0.0 } else { number(cx, time)? };
     let cells = banner::frame(shape, cols, rows, faces.len(), epoch, time);
     let mut text = String::with_capacity(cells.len() * 3 + rows);

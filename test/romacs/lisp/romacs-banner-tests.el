@@ -10,19 +10,23 @@
            (still (romacs-banner-still pattern 17 2 faces 5))
            (lines (split-string still "\n")))
       (should (equal (mapcar #'length lines) '(17 17)))
-      ;; Every lit cell is in one of the faces; the same epoch, the same frame.
+      ;; Every lit cell is one face's foreground alone, as the display
+      ;; paints it; the same epoch, the same frame.
       (dotimes (i (length still))
         (let ((face (get-text-property i 'face still)))
-          (should (or (null face) (memq face faces)))))
+          (should (or (null face) (member face (romacs-banner--foregrounds faces))))))
       (should (equal-including-properties still (romacs-banner-still pattern 17 2 faces 5)))))
   ;; The thread is romacs-working's.
   (should (equal-including-properties (romacs-banner-still 'thread 8 1 '(romacs-working-running) 0 t)
                                       (romacs-working-still 8 'running 'romacs-working-running))))
 
 (ert-deftest romacs-banner-refuses-what-the-display-cannot-draw ()
+  ;; Wider than the display draws: as wide as it draws.
+  (should (= (length (romacs-banner-still 'wave 900 1 '(success))) 400))
+  (should (= (length (romacs-banner-still 'thread 900 1 '(success))) 400))
   (should-error (romacs-banner-still 'wave 0 1 '(success)) :type 'args-out-of-range)
   (should-error (romacs-banner-still 'wave 10 1 nil) :type 'args-out-of-range)
-  (should-error (romacs-banner-still 'wave 10 1 '(a b c d e)) :type 'args-out-of-range)
+  (should-error (romacs-banner-still 'wave 10 1 '(bold italic bold italic bold)) :type 'args-out-of-range)
   (should-error (romacs-banner-still 'zigzag 10 1 '(success))))
 
 (ert-deftest romacs-banner-is-registered-only-while-it-moves ()
@@ -35,6 +39,12 @@
           (romacs-banner-show 'banner-test (current-buffer) (point-min) 'rain 10 1 '(success) t 7)
           (should (romacs-animate--get 'banner-test))
           (should (equal (plist-get (romacs-banner--element 'banner-test) :kind) '(banner rain 7 (success))))
+          ;; At rest again: nothing kept, nothing registered.
+          (romacs-banner-show 'banner-test (current-buffer) (point-min) 'rain 10 1 '(success) nil 7)
+          (should-not (romacs-animate--get 'banner-test))
+          (should-not (romacs-banner--element 'banner-test))
+          (romacs-banner-show 'banner-test (current-buffer) (point-min) 'rain 900 1 '(success) t 7)
+          (should (= (plist-get (romacs-banner--element 'banner-test) :cols) 400))
           ;; Shown again moving: the same registration, so its motion goes on.
           (let ((key (romacs-animate--slot (romacs-animate--get 'banner-test) :key)))
             (romacs-banner-show 'banner-test (current-buffer) (point-min) 'rain 10 1 '(success warning) t 7)
@@ -56,6 +66,11 @@
     (should (romacs-animate--get 'banner-kill))
     (kill-buffer buffer)
     (should-not (romacs-animate--get 'banner-kill))
-    (should-not (romacs-banner--element 'banner-kill))))
+    ;; Shown again elsewhere, it is registered there.
+    (with-temp-buffer
+      (insert (romacs-banner-still 'wave 6 1 '(success)) "\n")
+      (romacs-banner-show 'banner-kill (current-buffer) 1 'wave 6 1 '(success) t)
+      (should (eq (romacs-animate-buffer 'banner-kill) (current-buffer)))
+      (romacs-banner-stop 'banner-kill))))
 
 ;;; romacs-banner-tests.el ends here

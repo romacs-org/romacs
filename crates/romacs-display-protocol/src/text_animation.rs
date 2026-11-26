@@ -290,46 +290,50 @@ fn text_slot(glyph: &FrameGlyph, animation: &TextAnimation) -> Option<DisplaySlo
     }
 }
 
-/// ANIMATION's window's first text row and column in FRAME, where its
-/// block is placed from.
-/// ANIMATION as FRAME shows it: a working thread only on its own row,
-/// a glyph row within the laid row the host placed it on
-/// (`TextAnimation::placed`'s RISE: a taller glyph on its line moves its
-/// text down within that row), whose cells must all hold braille,
-/// the thread's still frame, so it never paints over text not its own;
-/// none while motion is off, the evaluator's still frame showing alone.
-/// A banner as it is, or none while motion is off, as a thread.  Any
+/// ANIMATION as FRAME shows it: a working thread or a banner only where
+/// its own cells are, from a glyph row within the laid row the host
+/// placed it on (`TextAnimation::placed`'s RISE: a taller glyph on its
+/// line moves its text down within that row) whose cells, and those of
+/// the block's rows below it, all hold its still frame's kind of
+/// character (braille, and a banner's block shades), so it never paints
+/// over text not its own (a line-number gutter, a wrapped line); none
+/// while motion is off, the evaluator's still frame showing alone.  Any
 /// other kind as it is.
 pub fn located(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<TextAnimation> {
-    match animation.kind {
-        TextAnimationKind::Working { .. } => {}
-        TextAnimationKind::Banner { .. } if animation.still => return None,
-        _ => return Some(animation.clone()),
-    }
+    let banner = match animation.kind {
+        TextAnimationKind::Working { .. } => false,
+        TextAnimationKind::Banner { .. } => true,
+        TextAnimationKind::Logo { .. } => return Some(animation.clone()),
+    };
     if animation.still {
         return None;
     }
     let (first_row, first_col) = origin(frame, animation)?;
-    let text = |glyph: &FrameGlyph| match glyph {
-        FrameGlyph::Char { slot_id, char, y, row_role: GlyphRowRole::Text, .. }
-            if slot_id.window_id.get() as u64 == animation.window => Some((*slot_id, *char, *y)),
-        _ => None,
-    };
     let (top, height) = animation.rise?;
-    // The glyph rows within that laid row; the thread's is the one whose
-    // cells are all braille.
-    let mut rows: Vec<u32> = frame.glyphs.iter().filter_map(text)
-        .filter(|&(_, _, y)| y > top - 0.5 && y < top + height.max(1.0)).map(|(slot, ..)| slot.row).collect();
+    let ours = |c: char| ('\u{2800}'..='\u{28ff}').contains(&c) || (banner && matches!(c, '░' | '▒' | '▓' | '█'));
+    // The glyph rows within that laid row, and the cells of its kind of
+    // character, by row and column from the window's first.
+    let mut rows: Vec<u32> = vec![];
+    let mut owned = std::collections::HashSet::new();
+    for glyph in &frame.glyphs {
+        if let FrameGlyph::Char { slot_id, char, y, row_role: GlyphRowRole::Text, .. } = glyph
+            && slot_id.window_id.get() as u64 == animation.window
+        {
+            if *y > top - 0.5 && *y < top + height.max(1.0) { rows.push(slot_id.row); }
+            if ours(*char) { owned.insert((slot_id.row, u32::from(slot_id.col - first_col))); }
+        }
+    }
     rows.sort_unstable();
     rows.dedup();
-    let braille = |row: u32, col: u32| frame.glyphs.iter().filter_map(text).any(|(slot, char, _)| {
-        slot.row == row && u32::from(slot.col - first_col) == col && ('\u{2800}'..='\u{28ff}').contains(&char)
-    });
-    let row = rows.into_iter().find(|&row| (0..animation.cols).all(|col| braille(row, col)))?;
+    let row = rows.into_iter().find(|&row| {
+        (0..animation.rows).all(|r| (0..animation.cols).all(|col| owned.contains(&(row + r, col))))
+    })?;
     let top = i32::try_from(i64::from(row) - i64::from(first_row)).ok()?;
     Some(TextAnimation { top, ..animation.clone() })
 }
 
+/// ANIMATION's window's first text row and column in FRAME, where its
+/// block is placed from.
 fn origin(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<(u32, u16)> {
     frame.glyphs.iter().filter_map(|glyph| text_slot(glyph, animation)).fold(None, |origin: Option<(u32, u16)>, slot| {
         Some(origin.map_or((slot.row, slot.col), |(r, c)| (r.min(slot.row), c.min(slot.col))))

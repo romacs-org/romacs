@@ -796,10 +796,10 @@ impl Vm {
             // Keyed by animation and window: each window showing one has its
             // own motion.
             let window = self.window(window)?.id;
-            // A working thread is placed by the host on the row its layout
-            // lays START on: START as a byte of the text it published.
+            // A working thread or a banner is placed by the host on the row
+            // its layout lays START on: START as a byte of the text it published.
             let anchor = match kind {
-                TextAnimationKind::Working { .. } => {
+                TextAnimationKind::Working { .. } | TextAnimationKind::Banner { .. } => {
                     let byte = self.shown_text(buffer).ok().and_then(|b| {
                         let pos = (start.max(1) as usize - 1).min(b.len_chars());
                         b.byte_of_char(coordinates::CharOffset(pos)).ok().map(|o| o.0)

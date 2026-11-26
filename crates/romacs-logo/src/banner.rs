@@ -187,7 +187,7 @@ fn sweep(cols: usize, rows: usize, stops: usize, moved: f64) -> Vec<Cell> {
         // 0 at the band's edges and beyond, 1 at its centre.
         let light = (1.0 - (col as f64 + 0.5 - centre).abs() / half).max(0.0);
         if light == 0.0 {
-            return (' ', None);
+            return (BLANK, None);
         }
         let shade = ((light * SHADES.len() as f64).floor() as usize).min(SHADES.len() - 1);
         let stop = ((light * stops as f64).floor() as usize).min(stops - 1);
@@ -221,7 +221,7 @@ mod tests {
                 for moved in [0.0, 0.2, 1.3, 7.7] {
                     for (ch, stop) in frame(pattern, 40, 2, stops, 9, moved) {
                         assert!(stop.is_none_or(|s| s < stops), "{pattern:?} stop {stop:?} of {stops}");
-                        assert_eq!(stop.is_none(), ch == BLANK || ch == ' ', "{pattern:?}: an empty cell has no colour");
+                        assert_eq!(stop.is_none(), ch == BLANK, "{pattern:?}: an empty cell is blank braille, with no colour");
                     }
                 }
             }

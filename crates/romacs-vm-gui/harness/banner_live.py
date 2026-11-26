@@ -43,7 +43,14 @@ INIT = r'''
         (goto-char (point-max))
         (romacs-banner-show (intern (format "banner-live-%s" pattern)) buffer (point-min) pattern 48 3
                             banner-live-faces moving 7))))
-  (balance-windows))
+  (balance-windows)
+  (redisplay)
+  ;; Each banner's block in frame pixels, for the shots to compare.
+  (with-temp-file (expand-file-name "blocks" temporary-file-directory)
+    (dolist (window (window-list))
+      (pcase-let ((`(,left ,top . ,_) (window-inside-pixel-edges window)))
+        (insert (format "%s %dx%d+%d+%d\n" (buffer-name (window-buffer window))
+                        (* 48 (frame-char-width)) (* 3 (line-pixel-height)) left top))))))
 (run-at-time 3 nil #'banner-live-show t)
 (defun banner-live-busy (file seconds)
   "Write FILE, then hold the main VM SECONDS, then write FILE.done."
@@ -74,22 +81,28 @@ def main():
             subprocess.run([tool('grim'), str(path)], env=session.env, check=True, timeout=10)
             return path
 
-        def differ(x, y):
-            """Pixels that differ between two shots."""
-            out = subprocess.run([tool('magick'), 'compare', '-metric', 'AE', str(x), str(y), 'null:'],
+        def differ(x, y, region):
+            """Pixels that differ between two shots in REGION (WxH+X+Y)."""
+            out = subprocess.run([tool('magick'), 'compare', '-metric', 'AE', f'{x}[{region}]', f'{y}[{region}]', 'null:'],
                                  capture_output=True, text=True)
             return float(out.stderr.split()[0] or 0)
+
+        def blocks():
+            return dict(line.rsplit(' ', 1) for line in (tmp / 'blocks').read_text().splitlines())
 
         fio.wait(lambda: (tmp / 'busy').exists(), 60, 'the busy loop', session.process)
         time.sleep(0.5)
         busy = [shot(f'busy-{i}') for i in range(4) if not time.sleep(0.6)]
         busy_still = not (tmp / 'busy.done').exists()
-        moved = min(differ(x, y) for x, y in zip(busy, busy[1:]))
+        moving = blocks()
+        # Each banner's own block moved between every two shots.
+        moved = {name: min(differ(x, y, region) for x, y in zip(busy, busy[1:])) for name, region in moving.items()}
         fio.wait(lambda: (tmp / 'rest').exists(), 60, 'the banners at rest', session.process)
         time.sleep(1.0)
         rest = [shot(f'rest-{i}') for i in range(3) if not time.sleep(0.6)]
-        rested = max(differ(x, y) for x, y in zip(rest, rest[1:]))
-        report['checks'] = [{'check': 'every shot moves while the main VM is busy', 'ok': busy_still and moved > 0,
+        rested = max(differ(x, y, region) for x, y in zip(rest, rest[1:]) for region in blocks().values())
+        report['checks'] = [{'check': 'every banner moves while the main VM is busy',
+                             'ok': busy_still and len(moved) == 4 and min(moved.values()) > 0,
                              'detail': {'least_changed_pixels': moved, 'busy_throughout': busy_still}},
                             {'check': 'at rest they stand still', 'ok': rested == 0, 'detail': {'changed_pixels': rested}}]
     ok = all(c['ok'] for c in report['checks']) and report['checks']
