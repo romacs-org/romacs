@@ -1298,6 +1298,27 @@ from the watcher of the queue's pop, the write just before the method."
                            '(97 ([]) [] [120 97])))
           (remove-variable-watcher 'unread-command-events watch))))))
 
+;; Row from the C2 r3 review (Sol B9).
+
+(ert-deftest command-loop-tests-unread-wrapper-decoded-after-watcher ()
+  "An `unread-command-events' entry is decoded after its pop's watcher ran,
+which may change both its wrapper and its event, as the Lisp reader did.
+GNU's C pop runs no watcher."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input nil
+    (set--this-command-keys "x")
+    (let* ((entry (cons t 97))
+           (count num-nonmacro-input-events)
+           (watch (lambda (_ _ operation _)
+                    (when (eq operation 'set) (setcar entry 'no-record) (setcdr entry 98)))))
+      (setq unread-command-events (list entry))
+      (add-variable-watcher 'unread-command-events watch)
+      (unwind-protect
+          (should (equal (list (read-event) (this-command-keys-vector)
+                               (- num-nonmacro-input-events count) last-input-event)
+                         '(98 [120] 0 98)))
+        (remove-variable-watcher 'unread-command-events watch)))))
+
 ;; Rows from the C2 r2 reviews (Sol B2, B4).
 
 (ert-deftest command-loop-tests-host-echo-cleared-after-watcher ()
