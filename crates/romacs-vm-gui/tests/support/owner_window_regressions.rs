@@ -26,7 +26,7 @@ fn request_box(
     ));
 }
 
-fn fringed_master(left_margin: u32) -> ((u32, u32), FrameGlyphBuffer) {
+fn fringed_master(width: u32, left_margin: u32) -> ((u32, u32), FrameGlyphBuffer) {
     let mut vm = Vm::new();
     vm.set_frame_geometry(80, 25, 1, 1).unwrap();
     romacs_vm_gui::startup::drive_loadup(&mut vm, &romacs_vm_gui::startup::lisp_dir()).unwrap();
@@ -34,7 +34,7 @@ fn fringed_master(left_margin: u32) -> ((u32, u32), FrameGlyphBuffer) {
         romacs_vm_gui::fonts::Display::new().unwrap(),
     )));
     assert!(vm.open_display());
-    vm.set_frame_geometry(400, 260, 20, 10).unwrap();
+    vm.set_frame_geometry(width, 260, 20, 10).unwrap();
     vm.eval_source(&format!(
         "{FACE} {CONTENT}
          (set-window-buffer nil test-buffer)
@@ -43,7 +43,7 @@ fn fringed_master(left_margin: u32) -> ((u32, u32), FrameGlyphBuffer) {
     ))
     .unwrap();
     let target = vm.selected_window_id().unwrap();
-    let mut snapshot = vm.frame_snapshot(400, 260).unwrap();
+    let mut snapshot = vm.frame_snapshot(width, 260).unwrap();
     snapshot
         .windows
         .retain(|window| window.snapshot.id == target);
@@ -51,7 +51,7 @@ fn fringed_master(left_margin: u32) -> ((u32, u32), FrameGlyphBuffer) {
     let left = 8 + left_margin * 10;
     assert_eq!(
         (window.x, window.snapshot.width),
-        (left, 396 - left),
+        (left, width - 4 - left),
         "master text insets"
     );
     window.y = 0;
@@ -71,7 +71,7 @@ fn fringed_master(left_margin: u32) -> ((u32, u32), FrameGlyphBuffer) {
 #[test]
 fn fringes_and_margin_match_master_layout() {
     with_pinned_fonts(|| {
-        let (size, expected) = fringed_master(1);
+        let (size, expected) = fringed_master(400, 1);
         let mut owner = Owner::new();
         assert_smaller_pane_preserves_f1_size(&mut owner);
         owner.run("(with-current-buffer test-buffer (setq-local mode-line-format \"pane\"))");
@@ -487,7 +487,7 @@ mod round_three {
     #[test]
     fn a_new_fringe_request_supersedes_a_window_override() {
         with_pinned_fonts(|| {
-            let (size, expected) = fringed_master(0);
+            let (size, expected) = fringed_master(400, 0);
             let mut owner = Owner::new();
             owner.seed();
             request_box(&mut owner, 1, size, (4, 2), (20, 10));
@@ -496,6 +496,36 @@ mod round_three {
                 "(set-window-fringes (test-pane-window {WINDOW}) 0 0)"
             ));
 
+            request_box(&mut owner, 2, size, (8, 4), (20, 10));
+            let picture = owner.shown(WINDOW);
+            assert_eq!(
+                (picture.head.request, (picture.width, picture.height)),
+                (2, size)
+            );
+            assert_same_paint(picture, expected, true);
+        });
+    }
+
+    #[test]
+    fn growing_a_pane_restores_fringes_that_only_fit_at_the_new_width() {
+        with_pinned_fonts(|| {
+            let (size, expected) = fringed_master(160, 8);
+            let mut owner = Owner::new();
+            owner.seed();
+            request_box(&mut owner, 1, (100, size.1), (8, 4), (20, 10));
+            assert_eq!(owner.shown(WINDOW).width, 100);
+            assert_eq!(
+                owner.run(&format!(
+                    "(let* ((window (test-pane-window {WINDOW}))
+                            (before (window-fringes window)))
+                       (set-window-fringes window 0 0)
+                       (set-window-margins window 8 0)
+                       (list before (window-fringes window)
+                             (car (window-margins window)) (window-body-width window t)))"
+                )),
+                "((8 4 nil nil) (0 0 nil nil) 8 20)",
+                "the margin leaves two text columns while the override is in effect"
+            );
             request_box(&mut owner, 2, size, (8, 4), (20, 10));
             let picture = owner.shown(WINDOW);
             assert_eq!(
