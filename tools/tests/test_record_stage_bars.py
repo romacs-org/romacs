@@ -25,13 +25,15 @@ class Measurement(unittest.TestCase):
             randr.touch(mode=0o700)
             env = {'ROMACS_TOOLCHAIN_BIN': str(work / 'rust'),
                    'ROMACS_TEST_LABWC': str(headless / 'labwc'),
-                   'PATH': '/usr/bin:/bin', 'XDG_RUNTIME_DIR': '/run/user/live'}
+                   'PATH': '/usr/bin:/bin', 'XDG_RUNTIME_DIR': '/run/user/live',
+                   'CARGO_INCREMENTAL': '1'}
             with patch.object(recorder.subprocess, 'run') as run:
                 recorder.measure('display', work / 'bars.json', work / 'target', work, env)
             child = run.call_args.kwargs['env']
             self.assertEqual(shutil.which('wlr-randr', path=child['PATH']), str(randr))
             self.assertEqual(child['PATH'].split(':')[0], env['ROMACS_TOOLCHAIN_BIN'])
             self.assertEqual(child['XDG_RUNTIME_DIR'], env['XDG_RUNTIME_DIR'])
+            self.assertEqual(run.call_args_list[0].kwargs['env']['CARGO_INCREMENTAL'], '0')
 
     def test_retry_keeps_only_the_passing_draft(self):
         with tempfile.TemporaryDirectory() as scratch:
@@ -70,6 +72,18 @@ class Measurement(unittest.TestCase):
 
 
 class Publication(unittest.TestCase):
+    def test_changed_snapshot_keeps_existing_workload_and_metric_order(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            current = Path(scratch) / 'bars.json'
+            draft = Path(scratch) / 'draft.json'
+            current.write_text('{"first":{"count_note":"why","count":5},"second":{"count":5}}')
+            draft.write_text('{"second":{"count":5},"third":{"count":1},"first":{"count":4,"new":1}}')
+            self.assertTrue(recorder.publish(current, draft, 'display'))
+            updated = json.loads(current.read_text())
+            self.assertEqual(list(updated), ['first', 'second', 'third'])
+            self.assertEqual(list(updated['first']), ['count_note', 'count', 'new'])
+            self.assertEqual(updated['first'], {'count_note': 'why', 'count': 4, 'new': 1})
+
     def test_tightens_cost_and_reuse_without_changing_coverage(self):
         current = {'typed': {'rows_reused': 36, 'glyphs_walked': 228, 'own_instructions': 1_000,
                              'extra_frames': 'report', 'own_instructions_note': 'why'}}

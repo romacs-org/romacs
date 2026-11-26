@@ -15,17 +15,19 @@ STAGES = ROOT / 'crates/romacs-vm-gui/harness'
 
 
 def tightened(current: dict, draft: dict, kind: str) -> dict:
-    """Retain existing coverage and any tighter limit."""
-    rows = {name: dict(figures) for name, figures in draft.items()}
-    for name, figures in current.items():
+    """Retain existing order, coverage and any tighter limit."""
+    rows = {name: dict(figures) for name, figures in current.items()}
+    for name, figures in draft.items():
         recorded = rows.setdefault(name, {})
-        for figure, before in figures.items():
-            after = recorded.get(figure)
-            if after is None or isinstance(before, str):
-                recorded[figure] = before
-            elif type(before) in (int, float):
-                limit = max if kind == 'render' and figure == 'rows_reused' else min
-                recorded[figure] = limit(before, after)
+        for figure, after in figures.items():
+            if figure in recorded:
+                before = recorded[figure]
+                if after is None or isinstance(before, str):
+                    continue
+                if type(before) in (int, float):
+                    limit = max if kind == 'render' and figure == 'rows_reused' else min
+                    after = limit(before, after)
+            recorded[figure] = after
     return rows
 
 
@@ -49,7 +51,9 @@ def publish(bars: Path, draft: Path, kind: str) -> bool:
 
 def measure(kind: str, bars: Path, target: Path, work: Path, env: dict[str, str]) -> Path:
     """Build the GUI and return the draft from a passing harness run."""
-    env = dict(env, CARGO_TARGET_DIR=str(target), ROMACS_RUNTIME_ROOT=str(ROOT), PYTHONDONTWRITEBYTECODE='1')
+    # Instruction bars must use the same non-incremental build as the landing check.
+    env = dict(env, CARGO_INCREMENTAL='0', CARGO_TARGET_DIR=str(target), ROMACS_RUNTIME_ROOT=str(ROOT),
+               PYTHONDONTWRITEBYTECODE='1')
     paths = (env['ROMACS_TOOLCHAIN_BIN'], env.get('ROMACS_DISPLAY_TOOLS'),
              os.path.dirname(env['ROMACS_TEST_LABWC']), env.get('PATH', os.defpath))
     env['PATH'] = os.pathsep.join(path for path in paths if path)
