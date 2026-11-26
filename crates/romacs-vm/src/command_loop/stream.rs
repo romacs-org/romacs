@@ -28,6 +28,7 @@ pub(crate) struct InputStream {
 }
 
 /// A write to a stream: the one door its fields have.
+#[derive(Clone, Copy)]
 pub(crate) enum Store<'a> {
     /// `add_command_key`: EVENT after the keys.
     PushKey(Value),

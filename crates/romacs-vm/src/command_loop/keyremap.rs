@@ -1,5 +1,5 @@
 //! keyboard.c's translation scans (`keyremap`, `keyremap_step`) and the
-//! order read_key_sequence runs them in: `input-decode-map` over every
+//! order `read_key_sequence` runs them in: `input-decode-map` over every
 //! sequence, the function key map over an undefined one, and
 //! `key-translation-map` over any, each scanning only what the map before it
 //! has finished with. The scans are a read's (`KeyseqFrame::scans`); a
@@ -45,7 +45,7 @@ impl Scan {
     }
 }
 
-/// The translations tried once N events are read (read_key_sequence's
+/// The translations tried once N events are read (`read_key_sequence`'s
 /// three loops). True when one was made: the keys replaced, and the scans
 /// of the maps before it moved by its change of length.
 pub(super) fn translate<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize) -> Done<bool> {
@@ -84,7 +84,7 @@ pub(super) fn translate<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize)
     Ok(false)
 }
 
-/// keyremap_step: scan WHICH extended by the event at its end. With DOIT,
+/// `keyremap_step`: scan WHICH extended by the event at its end. With DOIT,
 /// when the events from its start through that one are bound to an array
 /// (or to a function returning one), they are replaced by it and the scan
 /// starts again after the replacement: the change of the keys' length.
@@ -103,7 +103,7 @@ fn remap_step<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, which: us
         let mut next = vm.reads.result;
         let f = frame(vm, depth);
         f.scans[which].end += 1;
-        // access_keymap_keyremap: a symbol whose function is an array or keymap.
+        // `access_keymap_keyremap`: a symbol whose function is an array or keymap.
         let cx = Leaf::new(vm);
         if next != Value::NIL && cx.kind(next) == Kind::Symbol {
             let function = cx.symbol_function(next).unwrap_or(Value::NIL);
@@ -114,7 +114,7 @@ fn remap_step<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, which: us
         Ok(doit && crate::prim::prims::vars::function_p(&mut cx, next).unwrap_or(false))
     })?;
     if function {
-        // Called with `current-key-remap-sequence' the events it translates.
+        // Called with `current-key-remap-sequence` the events it translates.
         let names: &'static [&'static str] = &["current-key-remap-sequence"];
         let bind = |vm: &mut Vm, (depth, which): (usize, usize)| {
             let f = frame(vm, depth);
@@ -173,7 +173,7 @@ fn apply(vm: &mut Vm, depth: usize, which: usize, doit: bool) -> Done<Option<isi
     }
 }
 
-/// A string translation's events, as `vconcat' gives them.
+/// A string translation's events, as `vconcat` gives them.
 fn string_events(cx: &Leaf<'_>, string: Value) -> Vec<Value> {
     let mut events = Vec::new();
     let mut i = 0;
@@ -197,8 +197,8 @@ pub(super) fn unshifted_char(c: i64, down: impl FnOnce(i64) -> i64) -> Option<i6
     (lower != base).then_some(lower | (c & !CHAR_BITS))
 }
 
-/// A symbol event's NAME without its `S-' modifier, GNU's modifiers being
-/// spelled in the order A-C-H-M-S-s-: `C-S-f' is `C-f'. None without one.
+/// A symbol event's NAME without its `S-` modifier, GNU's modifiers being
+/// spelled in the order A-C-H-M-S-s-: `C-S-f` is `C-f`. None without one.
 pub(super) fn unshifted_name(name: &str) -> Option<String> {
     let bytes = name.as_bytes();
     let mut at = 0;

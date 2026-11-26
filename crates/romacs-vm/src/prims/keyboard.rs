@@ -11,7 +11,6 @@
 //! (`this-command-keys' and its siblings) are the input stream's. The Rust
 //! half also keeps `recent-keys' recording and `ding'.
 use super::*;
-use crate::prim::leaf::Kind;
 
 /// The Lisp half, evaluated once per VM on first use from the runtime
 /// tree, with minibuf.c's (prims/minibuf.rs), whose recursive edit is this

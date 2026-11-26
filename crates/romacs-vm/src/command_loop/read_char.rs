@@ -1,11 +1,11 @@
 //! keyboard.c `read_char`, with the per-source rules of the Lisp port it
-//! replaces (DESIGN §2.2's table): `unread-post-input-method-events',
-//! `unread-command-events', `unread-input-method-events', the executing
-//! keyboard macro, `unread_switch_frame', then the host keyboard or the
-//! batch wait, whose Lisp (`romacs--read-host-input',
-//! `romacs--read-batch-input') runs timers, processes and special events.
+//! replaces (DESIGN §2.2's table): `unread-post-input-method-events`,
+//! `unread-command-events`, `unread-input-method-events`, the executing
+//! keyboard macro, `unread_switch_frame`, then the host keyboard or the
+//! batch wait, whose Lisp (`romacs--read-host-input`,
+//! `romacs--read-batch-input`) runs timers, processes and special events.
 //! Then the input method, the record and the command keys. And
-//! `read_filtered_event`, behind `read-event' and `read-char'.
+//! `read_filtered_event`, behind `read-event` and `read-char`.
 use super::{Done, M, MAIN, Store, call, call_bound, signal, step, store, var};
 use crate::brand::Gc;
 use crate::gc::RootFrame;
@@ -14,7 +14,7 @@ use crate::{Value, Vm};
 
 /// A `read_char` call: wait at most SECONDS (then no event); the input
 /// method may see a printable first character (METHOD, GNU's nil
-/// PREV_EVENT); a key sequence is being read (KEYMAP_READ).
+/// `PREV_EVENT`); a key sequence is being read (`KEYMAP_READ`).
 #[derive(Clone, Copy)]
 pub(super) struct CharArgs {
     pub(super) seconds: Option<f64>,
@@ -24,6 +24,7 @@ pub(super) struct CharArgs {
 
 /// What `read_char` knows of the event it took, between its steps.
 #[derive(Clone, Copy, Default)]
+#[expect(clippy::struct_excessive_bools, reason = "`read_char`'s own flags, one field each as the Lisp port's locals")]
 struct Taken {
     reread: bool,
     recorded: bool,
@@ -44,9 +45,9 @@ const QUEUED: u8 = 0;
 const HOST: u8 = 1;
 const BATCH: u8 = 2;
 
-/// read_char: the next event in `Reads::result` (nil when SECONDS passed),
+/// `read_char`: the next event in `Reads::result` (nil when SECONDS passed),
 /// recorded as input; whether it was the quit character typed on the host
-/// keyboard (keyboard.c handle_interrupt's C-g).
+/// keyboard (keyboard.c `handle_interrupt`'s C-g).
 pub(super) fn read_char<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, args: CharArgs) -> Done<bool> {
     // The event and the message before it, rooted across the read's Lisp.
     let own = m.leaf((), |vm, ()| vm.root_frame(&[Value::NIL, Value::NIL]));
@@ -102,7 +103,7 @@ fn seconds_value(vm: &mut Vm, seconds: Option<f64>) -> Value {
     seconds.map_or(Value::NIL, |seconds| Leaf::new(vm).float(seconds))
 }
 
-/// The requeued and macro sources, in read_char's order: an event taken
+/// The requeued and macro sources, in `read_char`'s order: an event taken
 /// from one of them, or the source to wait on.
 fn take_queued(vm: &mut Vm, own: &RootFrame) -> Done<(u8, [bool; 4])> {
     let mut taken = Taken::default();
@@ -160,7 +161,7 @@ fn symbol_or_integer(vm: &mut Vm, value: Value) -> bool {
     value.integer_value().is_some() || Leaf::new(vm).kind(value) == Kind::Symbol
 }
 
-/// read_char's undoing of read_char_x_menu_prompt: (EVENT) is EVENT.
+/// `read_char`'s undoing of `read_char_x_menu_prompt`: (EVENT) is EVENT.
 fn unwrap_menu_event(vm: &mut Vm, event: Value) -> Value {
     match Leaf::new(vm).pair(event) {
         Some((head, Value::NIL)) if symbol_or_integer(vm, head) => head,
@@ -168,7 +169,7 @@ fn unwrap_menu_event(vm: &mut Vm, event: Value) -> Value {
     }
 }
 
-/// macros.c at_end_of_macro_p, while `executing-kbd-macro' is non-nil.
+/// macros.c `at_end_of_macro_p`, while `executing-kbd-macro` is non-nil.
 pub(super) fn at_end_of_macro(vm: &mut Vm) -> bool {
     let macro_ = var(vm, "executing-kbd-macro");
     let index = var(vm, "executing-kbd-macro-index").integer_value().unwrap_or(0);
@@ -201,16 +202,16 @@ fn macro_event(vm: &mut Vm) -> Done<Value> {
     Ok(event)
 }
 
-/// Whether read_char has a requeued event: in any of its unread queues, or
-/// a `switch-frame' a focus change queued.
+/// Whether `read_char` has a requeued event: in any of its unread queues, or
+/// a `switch-frame` a focus change queued.
 pub(super) fn unread_p(vm: &mut Vm) -> bool {
     ["unread-post-input-method-events", "unread-command-events", "unread-input-method-events"]
         .iter().any(|name| var(vm, name) != Value::NIL)
         || vm.unread_switch_frame_waits()
 }
 
-/// The host wait's answer, `(EVENT RECORDED QUIT)' or nil, in
-/// `Reads::result`: the event through `keyboard-translate-table' and
+/// The host wait's answer, `(EVENT RECORDED QUIT)` or nil, in
+/// `Reads::result`: the event through `keyboard-translate-table` and
 /// recorded. What it took, whether it was the quit character, whether the
 /// echo area is to be cleared for it (but for help, frame and window
 /// selection events, keyboard.c:3231), and whether the macro being defined
@@ -239,7 +240,7 @@ fn host_event(vm: &mut Vm, own: &RootFrame) -> Done<([bool; 4], bool, bool, bool
     Ok((taken.pack(), quit, message != Value::NIL && !echo_kept(vm, event), macro_store))
 }
 
-/// The macro being defined stores the event read (macros.c store_kbd_macro_char).
+/// The macro being defined stores the event read (macros.c `store_kbd_macro_char`).
 fn store_macro_char<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, own: &RootFrame) -> Done<()> {
     call(m, gc, own, |vm, own| Ok(vec![vm.intern("romacs--store-kbd-macro-char"), vm.rooted(own, 0)]))
 }
@@ -251,8 +252,8 @@ fn echo_kept(vm: &mut Vm, event: Value) -> bool {
     ["help-echo", "switch-frame", "select-window"].iter().any(|name| head == cx.intern(name))
 }
 
-/// keyboard.c read_char: a host character through
-/// `keyboard-translate-table'; a nil entry, or one beyond a string or
+/// keyboard.c `read_char`: a host character through
+/// `keyboard-translate-table`; a nil entry, or one beyond a string or
 /// vector table, is no translation.
 fn keyboard_translate(vm: &mut Vm, event: Value) -> Value {
     let table = var(vm, "keyboard-translate-table");
@@ -270,7 +271,7 @@ fn keyboard_translate(vm: &mut Vm, event: Value) -> Value {
     if entry == Value::NIL { event } else { entry }
 }
 
-/// keyboard.c record_char: lossage and the count of input events, but not
+/// keyboard.c `record_char`: lossage and the count of input events, but not
 /// for keyboard macro input. Whether the macro being defined stores it.
 fn record_char(vm: &mut Vm, event: Value) -> Done<bool> {
     if var(vm, "executing-kbd-macro") != Value::NIL || var(vm, "inhibit--record-char") != Value::NIL { return Ok(false); }
@@ -285,14 +286,14 @@ fn printable(event: Value) -> bool {
     event.integer_value().is_some_and(|c| (32..256).contains(&c) && c != 127)
 }
 
-/// reread_for_input_method: whether the input method sees the event.
+/// `reread_for_input_method`: whether the input method sees the event.
 fn method_due(vm: &mut Vm, (own, post, method): (&RootFrame, bool, bool)) -> bool {
     method && !post && var(vm, "input-method-function") != Value::NIL && printable(vm.rooted(own, 0))
 }
 
-/// The input method on the event: `list' only wipes a message; another
+/// The input method on the event: `list` only wipes a message; another
 /// gives the events it returns, the first read now and the rest next
-/// (`unread-post-input-method-events'), or none, and the message comes
+/// (`unread-post-input-method-events`), or none, and the message comes
 /// back and the read goes on. Its own reads make up keys of their own, so
 /// the command's are kept from them; a C-g it read was its key. Whether it
 /// was called, and whether it gave an event.
@@ -348,7 +349,7 @@ fn method<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, own: &RootFrame, keymap_rea
 
 /// After every source: recorded unless it was, a command key unless the
 /// read was timed (UNTIMED false) or a reread with keys already there, and
-/// `last-input-event'. Whether the macro being defined stores it.
+/// `last-input-event`. Whether the macro being defined stores it.
 fn finish(vm: &mut Vm, (own, taken, untimed): (&RootFrame, [bool; 4], bool)) -> Done<bool> {
     let event = vm.rooted(own, 0);
     if event == Value::NIL { return Ok(false); }
@@ -361,15 +362,15 @@ fn finish(vm: &mut Vm, (own, taken, untimed): (&RootFrame, [bool; 4], bool)) -> 
     Ok(macro_store)
 }
 
-/// keyboard.c read_filtered_event behind `read-event' (ASCII nil),
-/// `read-char' (ASCII and ERROR-NONASCII) and `read-char-exclusive' (ASCII):
+/// keyboard.c `read_filtered_event` behind `read-event` (ASCII nil),
+/// `read-char` (ASCII and ERROR-NONASCII) and `read-char-exclusive` (ASCII):
 /// PROMPT INHERIT-INPUT-METHOD SECONDS.
 pub(crate) fn read_filtered_event(call: ReadCall<'_, '_, '_, '_>, ascii: bool, error_nonascii: bool) -> bool {
     let place = super::place(&call);
     let ReadCall { m, mut gc, out, .. } = call;
     let outcome = super::ensure_lisp_half(m, gc.by_ref()).and_then(|()| filtered(m, gc, place, (ascii, error_nonascii)));
     m.leaf((out, outcome, ascii), |vm, (out, outcome, ascii)| {
-        // Fread_char: a character's modifier bits resolved, or nil.
+        // `Fread_char`: a character's modifier bits resolved, or nil.
         let value = outcome.map(|()| match vm.reads.result {
             event if !ascii => event,
             event => event.integer_value()
@@ -389,16 +390,16 @@ fn filtered<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, place: (usize, usize), (a
         }
         let prompt = super::arg(vm, place, 0);
         let seconds = super::arg(vm, place, 2);
-        let seconds = seconds.integer_value().map(|n| n as f64).or_else(|| Leaf::new(vm).float_value(seconds).ok());
+        let seconds = seconds.integer_value().map(|n| i32::try_from(n).map_or(f64::MAX, f64::from)).or_else(|| Leaf::new(vm).float_value(seconds).ok());
         Ok(((prompt != Value::NIL).then(|| vm.root_frame(&[prompt])), seconds, super::arg(vm, place, 1) != Value::NIL))
     })?;
-    // message_with_string's echo, which is not logged (keyboard.c:10776).
+    // `message_with_string`'s echo, which is not logged (keyboard.c:10776).
     if let Some(prompt) = prompt {
         let shown = call_bound(m, gc.by_ref(), &["message-log-max"], &prompt, |_, _| Ok(vec![Value::NIL]), |vm, prompt| {
             let format = Leaf::new(vm).string("%s");
             Ok(vec![vm.intern("message"), format, vm.rooted(prompt, 0)])
         });
-        m.leaf(prompt, |vm, prompt| vm.drop_frame(prompt));
+        m.leaf(prompt, Vm::drop_frame);
         shown?;
     }
     let delayed = m.leaf((), |vm, ()| vm.root_frame(&[Value::NIL]));
@@ -410,14 +411,14 @@ fn filtered<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, place: (usize, usize), (a
     })
 }
 
-/// Events read until one passes: with ASCII, a `switch-frame' is put off
+/// Events read until one passes: with ASCII, a `switch-frame` is put off
 /// (DELAYED) and a non-character either skipped or, with ERROR-NONASCII,
 /// requeued with an error. The event in `Reads::result`.
 fn filter_events<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, delayed: &RootFrame,
     (seconds, method, ascii, error_nonascii): (Option<f64>, bool, bool, bool)) -> Done<()> {
     loop {
         let quit = read_char(m, gc.by_ref(), CharArgs { seconds, method, keymap_read: false })?;
-        // read_char's quit: maybe_quit acts on a C-g before the event is returned.
+        // `read_char`'s quit: `maybe_quit` acts on a C-g before the event is returned.
         let verdict = step(m, gc.by_ref(), (delayed, quit, seconds.is_some(), (ascii, error_nonascii)),
             |vm, (delayed, quit, timed, (ascii, error_nonascii))| {
             if quit && var(vm, "inhibit-quit") == Value::NIL {
@@ -459,7 +460,7 @@ fn switch_frame_event(vm: &mut Vm, event: Value) -> bool {
 }
 
 /// A function key with an ASCII equivalent is that character, with the
-/// symbol's modifiers; a GUI key (`C-M-m') names its whole character.
+/// symbol's modifiers; a GUI key (`C-M-m`) names its whole character.
 fn ascii_character(vm: &mut Vm, event: Value) -> Value {
     let mut cx = Leaf::new(vm);
     if cx.kind(event) != Kind::Symbol || event == Value::NIL { return event; }

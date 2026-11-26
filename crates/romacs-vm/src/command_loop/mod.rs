@@ -21,7 +21,7 @@ mod keyremap;
 mod keyseq;
 mod read_char;
 #[cfg(test)]
-mod tests;
+mod reader_tests;
 
 pub(crate) use keyseq::{read_key_sequence, read_key_sequence_vs};
 pub(crate) use read_char::read_filtered_event;
@@ -75,7 +75,11 @@ fn store(vm: &mut Vm, name: &str, value: Value) -> Done<()> {
         vm.reads.writes.push((slot, value));
         return Ok(());
     }
-    vm.assign_variable(slot, value).map_err(|error| escape(vm, error))
+    if let Err(error) = vm.assign_variable(slot, value) {
+        escape(vm, error);
+        return Err(());
+    }
+    Ok(())
 }
 /// A leaf of the reader, then the writes it left for watchers (`store`).
 fn step<'b, A: crate::brand::Plain, R: crate::brand::Plain>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, a: A,
@@ -119,7 +123,10 @@ fn called<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, frame: RootFrame) -> Done<()> {
             vm.reads.result = value;
             Ok(())
         }
-        Err(error) => Err(escape(vm, error)),
+        Err(error) => {
+            escape(vm, error);
+            Err(())
+        }
     });
     m.leaf(frame, |vm, frame| {
         vm.drop_frame(frame);
@@ -129,30 +136,39 @@ fn called<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, frame: RootFrame) -> Done<()> {
 }
 /// `call` with the variables NAMES bound to the values BIND gives, as `let`
 /// binds them, around the call.
-fn call_bound<'b, A: crate::brand::Plain + Copy>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, names: &'static [&'static str], a: A,
+fn call_bound<'b, A: crate::brand::Plain + Copy>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, names: &'static [&'static str], a: A,
     bind: impl FnOnce(&mut Vm, A) -> Done<Vec<Value>> + Copy + 'static,
     args: impl FnOnce(&mut Vm, A) -> Done<Vec<Value>> + Copy + 'static) -> Done<()> {
-    let (values, mark) = m.leaf(a, move |vm, a| bind(vm, a).map(|values| (vm.root_frame(&values), vm.mutator.dynamic.len())))?;
+    let values = m.leaf(a, move |vm, a| bind(vm, a).map(|values| vm.root_frame(&values)))?;
+    bound(m, gc, names, values, |m, gc| call(m, gc, a, args))
+}
+/// BODY with the variables NAMES bound to VALUES, as `let` binds them:
+/// unbound after it, or unwound when it escapes. VALUES is released.
+fn bound<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, names: &[&'static str], values: RootFrame,
+    body: impl FnOnce(&mut M<'_, 'b>, Gc<'_, 'b>) -> Done<()>) -> Done<()> {
+    let mark = m.leaf((), |vm, ()| vm.mutator.dynamic.len());
     let mut bound = Ok(());
     for (i, name) in names.iter().enumerate() {
-        let slot = m.leaf(*name, |vm, name| vm.slot(name));
+        let slot = m.leaf(*name, Vm::slot);
         bound = threaded::bind_from(m, gc.by_ref(), slot, &values, i);
         if bound.is_err() { break; }
     }
-    let called = match bound {
-        Ok(()) => call(m, gc.by_ref(), a, args),
-        Err(error) => Err(m.leaf(error, |vm, error| escape(vm, error))),
-    };
-    let unbound = match called {
-        Ok(()) => threaded::unbind_to(m, gc.by_ref(), mark),
-        Err(()) => {
-            threaded::unwind_to(m, gc, mark);
-            Ok(())
+    let outcome = match bound {
+        Ok(()) => body(m, gc.by_ref()),
+        Err(error) => {
+            m.leaf(error, escape);
+            Err(())
         }
     };
-    m.leaf((values, called, unbound), |vm, (values, called, unbound)| {
+    let unbound = if outcome.is_ok() {
+        threaded::unbind_to(m, gc.by_ref(), mark)
+    } else {
+        threaded::unwind_to(m, gc, mark);
+        Ok(())
+    };
+    m.leaf((values, outcome, unbound), |vm, (values, outcome, unbound)| {
         vm.drop_frame(values);
-        called?;
+        outcome?;
         unbound.map_err(|error| escape(vm, error))
     })
 }
@@ -172,7 +188,7 @@ fn ensure_lisp_half<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>) -> Done<()> {
         Ok(vec![eval, form, Value::TRUE])
     })
 }
-/// A string's character as `aref' gives it: a raw byte (CHAR_BYTE8_P) is
+/// A string's character as `aref` gives it: a raw byte (`CHAR_BYTE8_P`) is
 /// the byte itself.
 fn byte_char(c: i64) -> i64 {
     if (0x3f_ff80..=0x3f_ffff).contains(&c) { c - 0x3f_ff00 } else { c }

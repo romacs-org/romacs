@@ -1,6 +1,6 @@
 //! keyboard.c `read_key_sequence`, as the Lisp port had it (its per-source
 //! rules, translation order, fallbacks, fake prefixes, delayed
-//! `switch-frame', prefix help and reader hooks), but following each event
+//! `switch-frame`, prefix help and reader hooks), but following each event
 //! through the maps taken at GNU's three points (DESIGN §2.2): when the
 //! sequence is replayed, when its first real event arrives, and when the
 //! current buffer changed while `read_char` waited.
@@ -51,6 +51,7 @@ struct Checkpoint {
 }
 
 /// One live `read_key_sequence` (DESIGN §2.4).
+#[expect(clippy::struct_excessive_bools, reason = "`read_key_sequence`'s own flags, one field each as GNU's locals")]
 pub(crate) struct KeyseqFrame {
     /// keybuf: N events read, those before MOCK reread first; it holds
     /// max (N, MOCK) events.
@@ -114,10 +115,10 @@ pub(super) fn frame(vm: &mut Vm, depth: usize) -> &mut KeyseqFrame {
     vm.reads.frame(MAIN, depth)
 }
 
-/// `romacs--read-key-sequence' DONT-DOWNCASE-LAST COMMAND
+/// `romacs--read-key-sequence` DONT-DOWNCASE-LAST COMMAND
 /// CAN-RETURN-SWITCH-FRAME, the command loop's read: the events read, or
 /// nil at the end of an executing keyboard macro. It sets
-/// `romacs--key-sequence-command' and `romacs--key-sequence-remapped'.
+/// `romacs--key-sequence-command` and `romacs--key-sequence-remapped`.
 pub(crate) fn read_key_sequence(call: ReadCall<'_, '_, '_, '_>) -> bool {
     let place = super::place(&call);
     let ReadCall { m, mut gc, out, .. } = call;
@@ -129,10 +130,10 @@ pub(crate) fn read_key_sequence(call: ReadCall<'_, '_, '_, '_>) -> bool {
     m.leaf((out, outcome), |vm, (out, outcome)| super::landed(vm, out, outcome.map(|()| vm.reads.result)))
 }
 
-/// `read-key-sequence' and `read-key-sequence-vector' (keyboard.c
-/// read_key_sequence_vs): PROMPT CONTINUE-ECHO DONT-DOWNCASE-LAST
+/// `read-key-sequence` and `read-key-sequence-vector` (keyboard.c
+/// `read_key_sequence_vs`): PROMPT CONTINUE-ECHO DONT-DOWNCASE-LAST
 /// CAN-RETURN-SWITCH-FRAME CMD-LOOP, the keys as a vector, or with STRING as
-/// `make_event_array' gives them.
+/// `make_event_array` gives them.
 pub(crate) fn read_key_sequence_vs(call: ReadCall<'_, '_, '_, '_>, string: bool) -> bool {
     let place = super::place(&call);
     let ReadCall { m, mut gc, out, .. } = call;
@@ -147,7 +148,7 @@ pub(crate) fn read_key_sequence_vs(call: ReadCall<'_, '_, '_, '_>, string: bool)
     })
 }
 
-/// The keys of a direct read, `[]' at a macro's end, as `make_event_array'
+/// The keys of a direct read, `[]` at a macro's end, as `make_event_array`
 /// gives them when STRING.
 fn keys_value(vm: &mut Vm, keys: Value, string: bool) -> Done<Value> {
     let cx = Leaf::new(vm);
@@ -166,7 +167,7 @@ fn vs<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, place: (usize, usize)) -> Done<
         }
         let flag = |i| super::arg(vm, place, i) != Value::NIL;
         let (continue_echo, dont_downcase_last, can_return, cmd_loop) = (flag(1), flag(2), flag(3), flag(4));
-        // read_key_sequence (keyboard.c:10993): an interactive read shows
+        // `read_key_sequence` (keyboard.c:10993): an interactive read shows
         // PROMPT now, unlogged.
         let show = prompt != Value::NIL && var(vm, "executing-kbd-macro") == Value::NIL && var(vm, "noninteractive") == Value::NIL;
         if !continue_echo {
@@ -179,37 +180,16 @@ fn vs<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, place: (usize, usize)) -> Done<
             let format = vm.make_lisp_string(b"%s".to_vec(), false);
             Ok(vec![vm.intern("message"), format, vm.rooted(prompt, 0)])
         });
-        m.leaf(prompt, |vm, prompt| vm.drop_frame(prompt));
+        m.leaf(prompt, Vm::drop_frame);
         shown?;
     }
     // Only the command loop's own reads give the input method the echo area.
-    let methods: &'static [&'static str] = &["input-method-exit-on-first-char", "input-method-use-echo-area"];
-    let (values, mark) = m.leaf(cmd_loop, |vm, cmd_loop| {
+    let values = m.leaf(cmd_loop, |vm, cmd_loop| {
         let flag = if cmd_loop { Value::NIL } else { Value::TRUE };
-        (vm.root_frame(&[flag, flag]), vm.mutator.dynamic.len())
+        vm.root_frame(&[flag, flag])
     });
-    let mut bound = Ok(());
-    for (i, name) in methods.iter().enumerate() {
-        let slot = m.leaf(*name, |vm, name| vm.slot(name));
-        bound = threaded::bind_from(m, gc.by_ref(), slot, &values, i);
-        if bound.is_err() { break; }
-    }
-    let outcome = match bound {
-        Ok(()) => read(m, gc.by_ref(), flags),
-        Err(error) => Err(m.leaf(error, |vm, error| escape(vm, error))),
-    };
-    let unbound = match outcome {
-        Ok(()) => threaded::unbind_to(m, gc, mark),
-        Err(()) => {
-            threaded::unwind_to(m, gc, mark);
-            Ok(())
-        }
-    };
-    m.leaf((values, outcome, unbound), |vm, (values, outcome, unbound)| {
-        vm.drop_frame(values);
-        outcome?;
-        unbound.map_err(|error| escape(vm, error))
-    })
+    let names = &["input-method-exit-on-first-char", "input-method-use-echo-area"];
+    super::bound(m, gc, names, values, |m, gc| read(m, gc, flags))
 }
 
 /// A read on a frame of its own, its exit helper on every exit: the end
@@ -229,7 +209,7 @@ fn read<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, flags: (bool, bool, bool)) ->
     })
 }
 
-/// `romacs--sequence-end-functions', with an escape pending (ESCAPING)
+/// `romacs--sequence-end-functions`, with an escape pending (ESCAPING)
 /// kept across them.
 fn end_hooks<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, escaping: bool) -> Done<()> {
     if !m.leaf((), |vm, ()| var(vm, "romacs--sequence-end-functions") != Value::NIL) { return Ok(()); }
@@ -252,7 +232,7 @@ fn end_hooks<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, escaping: bool) -> Done<()> 
 
 /// The read itself: replays until a sequence is complete.
 fn body<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize) -> Done<()> {
-    step(m, gc.by_ref(), depth, begin)?;
+    m.leaf(depth, begin);
     loop {
         step(m, gc.by_ref(), depth, replay)?;
         while m.leaf(depth, reading) {
@@ -268,7 +248,7 @@ fn body<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize) -> Done<()> {
 }
 
 /// The read's start: its scans over the translation maps.
-fn begin(vm: &mut Vm, depth: usize) -> Done<()> {
+fn begin(vm: &mut Vm, depth: usize) {
     let indec = var(vm, "input-decode-map");
     let fkey = if var_bound(vm, "local-function-key-map") { var(vm, "local-function-key-map") } else { var(vm, "function-key-map") };
     let keytran = var(vm, "key-translation-map");
@@ -277,7 +257,6 @@ fn begin(vm: &mut Vm, depth: usize) -> Done<()> {
     let f = frame(vm, depth);
     f.keys_start = keys_start;
     f.scans = [Scan::new(indec), Scan::new(fkey), Scan::new(keytran)];
-    Ok(())
 }
 
 /// Whether the variable NAME is bound.
@@ -299,18 +278,16 @@ fn replay(vm: &mut Vm, depth: usize) -> Done<()> {
     let (first, second) = (f.keybuf.first().copied().filter(|_| mock > 0), f.keybuf.get(1).copied().filter(|_| mock > 1));
     store(vm, "last-nonmenu-event", Value::NIL)?;
     vm.streams_mut().store(MAIN, Store::TruncateKeys(keys_start));
-    match first {
-        Some(first) => take_maps(vm, depth, first, second.unwrap_or(Value::NIL)),
-        None => {
-            // Until the first event: a keymap, so the loop reads it.
-            let keymap = vm.intern("keymap");
-            let binding = Leaf::new(vm).cons(keymap, Value::NIL);
-            let f = frame(vm, depth);
-            f.binding = binding;
-            f.first_taken = false;
-            Ok(())
-        }
+    if let Some(first) = first {
+        return take_maps(vm, depth, first, second.unwrap_or(Value::NIL));
     }
+    // Until the first event: a keymap, so the loop reads it.
+    let keymap = vm.intern("keymap");
+    let binding = Leaf::new(vm).cons(keymap, Value::NIL);
+    let f = frame(vm, depth);
+    f.binding = binding;
+    f.first_taken = false;
+    Ok(())
 }
 
 /// GNU `active_maps (FIRST, SECOND)`: the active maps where a click among
@@ -337,7 +314,7 @@ fn take_maps(vm: &mut Vm, depth: usize, first: Value, second: Value) -> Done<()>
     Ok(())
 }
 
-/// EVENT_START of EVENT if it is a mouse click with a position, else nil
+/// `EVENT_START` of EVENT if it is a mouse click with a position, else nil
 /// (as `key-binding` finds the click it looks a key up at).
 fn click_start(cx: &mut Leaf<'_>, event: Value) -> Value {
     let Some((head, Some((start, _)))) = cx.pair(event).map(|(head, rest)| (head, cx.pair(rest))) else { return Value::NIL };
@@ -378,15 +355,15 @@ fn drop_unbound(vm: &mut Vm, depth: usize) -> bool {
 }
 
 /// One event of the sequence (`replay_key`): reread, or read from
-/// `read_char`, again after a delayed `switch-frame' or a fake prefix.
+/// `read_char`, again after a delayed `switch-frame` or a fake prefix.
 /// False when the executing macro ended.
 fn event<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize) -> Done<bool> {
     let keys = m.leaf((), |vm, ()| vm.streams().keys(MAIN).len());
     loop {
-        let fresh = step(m, gc.by_ref(), (depth, keys), |vm, (depth, keys)| {
+        let fresh = m.leaf((depth, keys), |vm, (depth, keys)| {
             vm.streams_mut().store(MAIN, Store::TruncateKeys(keys));
             reread(vm, depth)
-        })?;
+        });
         match fresh {
             Some(false) => return Ok(false),
             Some(true) => {
@@ -401,20 +378,20 @@ fn event<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize) -> Done<bool> 
 
 /// The event at N from the keys to reread (None), or whether to read a new
 /// one: false at the end of an executing macro with nothing requeued.
-fn reread(vm: &mut Vm, depth: usize) -> Done<Option<bool>> {
+fn reread(vm: &mut Vm, depth: usize) -> Option<bool> {
     let f = frame(vm, depth);
     if f.n < f.mock {
         let key = f.keybuf[f.n];
         f.key = key;
         f.checkpoint = None;
         vm.streams_mut().store(MAIN, Store::PushKey(key));
-        return Ok(None);
+        return None;
     }
     if var(vm, "executing-kbd-macro") != Value::NIL && read_char::at_end_of_macro(vm) && !read_char::unread_p(vm) {
         frame(vm, depth).state = State::End;
-        return Ok(Some(false));
+        return Some(false);
     }
-    Ok(Some(true))
+    Some(true)
 }
 
 /// Before reading a new event: a command read keeps what the event would
@@ -436,7 +413,7 @@ fn prepare_read(vm: &mut Vm, depth: usize) -> RootFrame {
 
 fn checkpoint(vm: &mut Vm, depth: usize) -> Checkpoint {
     let nonmenu = var(vm, "last-nonmenu-event");
-    let macro_events = if var(vm, "defining-kbd-macro") != Value::NIL { var(vm, "romacs--kbd-macro-events") } else { Value::NIL };
+    let macro_events = if var(vm, "defining-kbd-macro") == Value::NIL { Value::NIL } else { var(vm, "romacs--kbd-macro-events") };
     let (keys, single_start) = (vm.streams().keys(MAIN).len(), vm.streams().single_key_start(MAIN));
     let f = frame(vm, depth);
     Checkpoint { n: f.n, mock: f.mock, binding: f.binding, maps: f.maps, maps_at: f.maps_at, first_taken: f.first_taken,
@@ -446,7 +423,7 @@ fn checkpoint(vm: &mut Vm, depth: usize) -> Checkpoint {
 
 /// A new event from `read_char`, then the reader hooks and, for the first,
 /// its maps (GNU's second point) or, after a buffer change in the wait, a
-/// replay (the third). False to read again (a delayed `switch-frame').
+/// replay (the third). False to read again (a delayed `switch-frame`).
 fn new_event<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, before: RootFrame) -> Done<bool> {
     let method = m.leaf((), |vm, ()| var(vm, "last-nonmenu-event") == Value::NIL);
     let read = read_char::read_char(m, gc.by_ref(), CharArgs { seconds: None, method, keymap_read: true });
@@ -467,7 +444,7 @@ fn new_event<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, before: Ro
         Ok(!delay)
     });
     let changed = m.leaf(&before, |vm, before| vm.rooted(before, 0) != vm.slots[vm.buffer_slot].value);
-    m.leaf(before, |vm, before| vm.drop_frame(before));
+    m.leaf(before, Vm::drop_frame);
     read?;
     if !kept? { return Ok(false); }
     if m.leaf((), |vm, ()| var(vm, "romacs--key-read-functions") != Value::NIL) {
@@ -497,7 +474,7 @@ fn new_event<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, before: Ro
     Ok(true)
 }
 
-/// Whether KEY is a `switch-frame' or `select-window' event.
+/// Whether KEY is a `switch-frame` or `select-window` event.
 fn switch_frame_p(vm: &mut Vm, key: Value) -> bool {
     let cx = Leaf::new(vm);
     let Some((head, _)) = cx.pair(key) else { return false };
@@ -571,7 +548,7 @@ pub(super) fn lookup_event_at(vm: &mut Vm, depth: usize, i: usize) -> Value {
     lookup_event(vm, event)
 }
 
-/// read_key_sequence's fallbacks for an unbound event.
+/// `read_key_sequence`'s fallbacks for an unbound event.
 fn fallbacks<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize) -> Done<()> {
     let help = step(m, gc.by_ref(), depth, |vm, depth| {
         let f = frame(vm, depth);
@@ -611,12 +588,12 @@ fn shift_down(vm: &mut Vm, depth: usize, key: Value, lower: Value, rescan: bool)
 }
 
 /// EVENT without its shift: an upper-case character's lower case, a
-/// shifted one's unshifted, or a symbol's name without `S-'. None for
+/// shifted one's unshifted, or a symbol's name without `S-`. None for
 /// another event.
 fn unshifted(vm: &mut Vm, event: Value) -> Option<Value> {
     let mut cx = Leaf::new(vm);
     if let Some(c) = event.integer_value() {
-        let down = |c: i64| cx.case_convert(Value::integer(c).unwrap_or(Value::NIL), true).ok().and_then(|v| v.integer_value()).unwrap_or(c);
+        let down = |c: i64| cx.case_convert(Value::integer(c).unwrap_or(Value::NIL), true).ok().and_then(Value::integer_value).unwrap_or(c);
         return keyremap::unshifted_char(c, down).and_then(|c| Value::integer(c).ok());
     }
     if cx.kind(event) != Kind::Symbol || event == Value::NIL { return None; }
@@ -624,8 +601,8 @@ fn unshifted(vm: &mut Vm, event: Value) -> Option<Value> {
     keyremap::unshifted_name(&name).map(|name| cx.intern(&name))
 }
 
-/// keyboard.c help_char_p of the event's head: `help-char' or a member of
-/// `help-event-list'.
+/// keyboard.c `help_char_p` of the event's head: `help-char` or a member of
+/// `help-event-list`.
 fn help_event_p(vm: &mut Vm, event: Value) -> bool {
     let head = Leaf::new(vm).pair(event).map_or(event, |(head, _)| head);
     let (help_char, list) = (var(vm, "help-char"), var(vm, "help-event-list"));
@@ -694,7 +671,7 @@ fn restore(vm: &mut Vm, depth: usize) -> Done<()> {
 
 /// The sequence complete: the shift a binding did not need put back, a
 /// translation's events past the binding added to the keys, the delayed
-/// `switch-frame' left for the next read, the binding and its remapping
+/// `switch-frame` left for the next read, the binding and its remapping
 /// for the command loop. The keys (or nil) in `Reads::result`.
 fn finish<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize) -> Done<()> {
     let command = step(m, gc.by_ref(), depth, |vm, depth| {
@@ -737,8 +714,8 @@ fn finish<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize) -> Done<()> {
     })
 }
 
-/// keyboard.c test_undefined of the binding: nil, `undefined', or a
-/// command remapped to `undefined'.
+/// keyboard.c `test_undefined` of the binding: nil, `undefined`, or a
+/// command remapped to `undefined`.
 pub(super) fn undefined<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, depth: usize) -> Done<bool> {
     let known = m.leaf(depth, |vm, depth| {
         let binding = frame(vm, depth).binding;
@@ -753,7 +730,7 @@ pub(super) fn undefined<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, depth: usize) -> 
     Ok(m.leaf((), |vm, ()| { let undefined = vm.intern("undefined"); vm.reads.result == undefined }))
 }
 
-/// `command-remapping' of the command in `Reads::result`, at point: the
+/// `command-remapping` of the command in `Reads::result`, at point: the
 /// remapping, or nil, in `Reads::result`. The maps taken at point are
 /// used again while no Lisp ran since (they would be the same).
 fn remap<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, depth: usize) -> Done<()> {
@@ -805,7 +782,10 @@ pub(super) fn walk<'b, A: crate::brand::Plain>(m: &mut M<'_, 'b>, mut gc: Gc<'_,
 /// filter, the walk kept (`Reads::walks`) and the filter's call returned.
 fn walked_to(vm: &mut Vm, walked: crate::Result<(KeyWalk, Walked)>) -> Done<Option<RootFrame>> {
     match walked {
-        Err(error) => Err(escape(vm, error)),
+        Err(error) => {
+            escape(vm, error);
+            Err(())
+        }
         Ok((_, Walked::Done(binding))) => {
             vm.reads.result = binding;
             Ok(None)

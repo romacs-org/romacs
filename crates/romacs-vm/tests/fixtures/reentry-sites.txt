@@ -131,6 +131,7 @@ threaded.rs unbind_now unbind_one 1 clean  # only with no watchers at all: it ru
 threaded.rs unwind_lent unwind 1 suspended  # `lend::unwind', which takes the permission
 threaded_lend.rs bind_from bind_variable 1 rooted  # the value is the frame's, read just before; the requester holds no Value
 threaded_lend.rs call_frame reader_call 1 rooted  # the function and arguments are the frame's, read just before; the requester holds no Value
+threaded_lend.rs call_frame_keeping_escape call_lisp_at_write 1 rooted  # the function and arguments are the frame's, read just before; the pending escape is rooted across the call by call_lisp_at_write; the requester holds no Value
 threaded_lend.rs call_source call_prepared_source_propagating 1 rooted  # the arguments are the frame's, read just before; the requester holds no Value
 threaded_lend.rs callback reader_call 1 suspended  # FUNCTION and OBJECT stay in the caller's frame; the reader boundary forwards the registers
 threaded_lend.rs collect collect_until_key 1 collector  # the facade's collection: the code is suspended, its roots traced
