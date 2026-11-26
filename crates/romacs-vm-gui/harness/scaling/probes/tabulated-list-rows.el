@@ -1,8 +1,8 @@
 ;;; tabulated-list-rows.el --- scaling probe  -*- lexical-binding: t -*-
 
-;; A tabulated list of N entries, drawn as a list (romacs-list.el), printed
-;; again updating with point on an entry past its middle: each shown
-;; entry's line is kept by id from one table, so the print is linear.
+;; A tabulated list of N entries, each line a row of a list (romacs-list.el),
+;; printed again updating with point on an entry past its middle: GNU's
+;; walk keeps each unchanged line in place, so the print is linear.
 (scaling-probe tabulated-list-rows :n 2500
   :setup (let ((buffer (generate-new-buffer " *scaling-tabulated*")))
            (with-current-buffer buffer

@@ -1,9 +1,8 @@
-;;; romacs-list-tabulated-tests.el --- Tabulated lists drawn as lists -*- lexical-binding: t; -*-
+;;; romacs-list-tabulated-tests.el --- Tabulated lists as Romacs lists -*- lexical-binding: t; -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
 (require 'tabulated-list)
-(require 'romacs-banner)
 (defvar hl-line-mode)
 (defvar hl-line-overlay)
 
@@ -20,70 +19,59 @@
   `(with-temp-buffer
      (romacs-list-tabulated-tests-mode)
      (setq tabulated-list-entries ,entries)
-     (unwind-protect (progn (tabulated-list-print) ,@body)
-       (romacs-list--stop))))
+     (tabulated-list-print)
+     ,@body))
 
-(defconst romacs-list-tabulated-tests--fruit
-  '((apple ["apple" "red"]) (lime ["lime" "green"]) (fig ["fig" "purple"])))
+(defun romacs-list-tabulated-tests--fruit ()
+  (list (list 'apple (vector "apple" "red")) (list 'lime (vector "lime" "green")) (list 'fig (vector "fig" "purple"))))
 
-(ert-deftest romacs-list-tabulated-a-list-is-a-romacs-list-with-gnu-s-text ()
-  (romacs-list-tabulated-tests--with (copy-sequence romacs-list-tabulated-tests--fruit)
+(defun romacs-list-tabulated-tests--ids ()
+  (mapcar (lambda (row) (plist-get row :id)) (romacs-list-shown-rows)))
+
+(ert-deftest romacs-list-tabulated-an-entry-s-line-is-a-row ()
+  (romacs-list-tabulated-tests--with (romacs-list-tabulated-tests--fruit)
     (should (derived-mode-p 'romacs-list-mode))
     (should (equal (buffer-substring-no-properties (point-min) (point-max))
                    "  apple    red\n  fig      purple\n  lime     green\n"))
-    (should (= (point) (point-min)))
-    (should (eq (tabulated-list-get-id) 'apple))
+    (should (equal (romacs-list-tabulated-tests--ids) '(apple fig lime)))
     (should (eq (plist-get (romacs-list-row) :id) 'apple))
+    (romacs-list-next 2)
+    (should (eq (tabulated-list-get-id) 'lime))
+    ;; Highlighted where a print leaves point, with no command run.
     (should hl-line-mode)
-    ;; Highlighted where point went, with no command run.
-    (should (= (overlay-start hl-line-overlay) (point)))
-    ;; Kept: the row and the column point was at.
-    (forward-line 2)
     (move-to-column 5)
     (tabulated-list-print t)
-    (should (eq (tabulated-list-get-id) 'lime))
     (should (= (current-column) 5))
-    (should (= (overlay-start hl-line-overlay) (line-beginning-position)))
-    ;; Not kept: the start.
-    (tabulated-list-print)
-    (should (= (point) (point-min)))))
+    (should (= (overlay-start hl-line-overlay) (line-beginning-position)))))
 
-(ert-deftest romacs-list-tabulated-updating-keeps-each-shown-entry-s-tag ()
-  (romacs-list-tabulated-tests--with (copy-sequence romacs-list-tabulated-tests--fruit)
+(ert-deftest romacs-list-tabulated-a-tagged-row-is-still-a-row ()
+  (romacs-list-tabulated-tests--with (romacs-list-tabulated-tests--fruit)
+    (tabulated-list-put-tag "D")
+    (should (eq (plist-get (romacs-list-row) :id) 'apple))
+    (tabulated-list-set-col 0 "APPLE")
+    (should (eq (plist-get (romacs-list-row) :id) 'apple))
+    (should (equal (romacs-list-tabulated-tests--ids) '(apple fig lime)))))
+
+(ert-deftest romacs-list-tabulated-updating-prints-as-gnu-does ()
+  (romacs-list-tabulated-tests--with (romacs-list-tabulated-tests--fruit)
     (forward-line 1)
     (tabulated-list-put-tag "D")
-    (setq tabulated-list-entries (cons '(kiwi ["kiwi" "brown"]) (assq-delete-all 'apple tabulated-list-entries)))
-    (tabulated-list-print t t)
-    (should (equal (buffer-substring-no-properties (point-min) (point-max))
-                   "D fig      purple\n  kiwi     brown\n  lime     green\n"))
-    (should (eq (tabulated-list-get-id) 'fig))
-    ;; Printed anew: the tag goes.
-    (tabulated-list-print t)
-    (should (string-prefix-p "  fig" (buffer-substring-no-properties (point-min) (point-max))))))
+    (let ((marker (copy-marker (+ (point) 4))))
+      (setq tabulated-list-entries
+            (cons (list 'kiwi (vector "kiwi" "brown")) (assq-delete-all 'apple tabulated-list-entries)))
+      (tabulated-list-print t t)
+      ;; The unchanged entry keeps its line, its tag and a marker in it.
+      (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                     "D fig      purple\n  kiwi     brown\n  lime     green\n"))
+      (should (= marker (+ (point-min) 4)))
+      (should (equal (romacs-list-tabulated-tests--ids) '(fig kiwi lime))))))
 
-(ert-deftest romacs-list-tabulated-a-list-shows-a-banner-when-asked ()
-  (let ((romacs-list-banners '((romacs-list-tabulated-tests-mode . wave))))
-    (romacs-list-tabulated-tests--with (copy-sequence romacs-list-tabulated-tests--fruit)
-      (let ((lines (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n")))
-        (should (= (length (car lines)) (romacs-list-columns (current-buffer))))
-        (should (equal (cdr lines) '("  apple    red" "  fig      purple" "  lime     green" ""))))
-      ;; Drawn anew: on its first row, past the banner.
-      (should (eq (tabulated-list-get-id) 'apple))
-      (tabulated-list-put-tag "D" t)
-      (should (eq (tabulated-list-get-id) 'fig)))))
-
-(ert-deftest romacs-list-tabulated-what-romacs-list-cannot-draw-prints-as-gnu ()
-  ;; Groups, a fake header, a printer of its own: GNU's loop.
+(ert-deftest romacs-list-tabulated-a-printer-of-its-own-prints-no-rows ()
   (romacs-list-tabulated-tests--with nil
-    (setq tabulated-list-groups '(("Red" (apple ["apple" "red"])) ("Green" (lime ["lime" "green"]))))
-    (tabulated-list-print)
-    (should (equal (buffer-substring-no-properties (point-min) (point-max))
-                   "Red\n  apple    red\nGreen\n  lime     green\n"))
-    (should-not (romacs-list-shown-rows))
-    (setq tabulated-list-groups nil
-          tabulated-list-entries (copy-sequence romacs-list-tabulated-tests--fruit)
+    (setq tabulated-list-entries (romacs-list-tabulated-tests--fruit)
           tabulated-list-printer (lambda (id cols) (insert (format "%s:%s\n" id (aref cols 1)))))
     (tabulated-list-print)
-    (should (equal (buffer-substring-no-properties (point-min) (point-max)) "apple:red\nfig:purple\nlime:green\n"))))
+    (should (equal (buffer-substring-no-properties (point-min) (point-max)) "apple:red\nfig:purple\nlime:green\n"))
+    (should-not (romacs-list-shown-rows))))
 
 ;;; romacs-list-tabulated-tests.el ends here

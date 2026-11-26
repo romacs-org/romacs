@@ -29,9 +29,6 @@
 ;;   `romacs-list-fresh-function'   a live row as it is now, for its cells
 ;;   `romacs-list-level-variable'   where its level is kept (drill-down)
 ;;
-;;   `romacs-list-insert-function'  inserts a row's line and its newline
-;;                                  at point, when its mode prints in place
-;;
 ;; It draws once per batch: a mode calls its redraw after a batch of
 ;; changes, never per row.
 ;;
@@ -79,12 +76,8 @@ first.  Nil: no groups.")
 
 (defvar-local romacs-list-rule-face 'romacs-list-rule "The face of the rule before a group.")
 
-(defvar-local romacs-list-empty-function #'ignore
-  "The text shown when there is no row, or nil for none.")
-
-(defvar-local romacs-list-insert-function #'romacs-list--insert-line
-  "Insert a row's line and its newline at point: called with the row and
-the width in columns.  By default, `romacs-list-line-function''s line.")
+(defvar-local romacs-list-empty-function (lambda () "")
+  "The text shown when there is no row.")
 
 (defvar-local romacs-list-hint-function nil
   "The list's last line, a function of its width giving it, or nil for none.")
@@ -129,8 +122,12 @@ board's is `thread')."
 ;;; Rows in the buffer
 
 (defun romacs-list-row ()
-  "The row on point's line, or nil."
-  (get-text-property (line-beginning-position) 'romacs-list-row))
+  "The row on point's line, or nil: anywhere on it, as a mark put over
+its first columns (`tabulated-list-put-tag') carries none."
+  (let ((start (line-beginning-position)) (end (line-end-position)))
+    (or (get-text-property start 'romacs-list-row)
+        (let ((at (next-single-property-change start 'romacs-list-row nil end)))
+          (and (< at end) (get-text-property at 'romacs-list-row))))))
 
 (defun romacs-list--find (id)
   "Where the row named ID starts, or nil."
@@ -146,11 +143,13 @@ board's is `thread')."
   (when-let* ((at (romacs-list--find id))) (goto-char at)))
 
 (defun romacs-list-shown-rows ()
-  "The rows the list shows, in order."
-  (let ((rows nil) (at (point-min)))
-    (while at
-      (when-let* ((row (get-text-property at 'romacs-list-row))) (push row rows))
-      (setq at (next-single-property-change at 'romacs-list-row)))
+  "The rows the list shows, in order: one a line."
+  (let ((rows nil))
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (when-let* ((row (romacs-list-row))) (push row rows))
+        (forward-line 1)))
     (nreverse rows)))
 
 (defun romacs-list--spot (position)
@@ -243,10 +242,6 @@ for its mode, else the mode's own; `random', one of them."
   "The list's level."
   (symbol-value romacs-list-level-variable))
 
-(defun romacs-list--insert-line (row width)
-  "Insert ROW's line, WIDTH wide, and its newline."
-  (insert (funcall romacs-list-line-function row width) "\n"))
-
 (defun romacs-list--insert-rows (rows width)
   "Insert ROWS as lines WIDTH wide, a rule before each group but the first."
   (let ((first t))
@@ -254,9 +249,7 @@ for its mode, else the mode's own; `random', one of them."
       (when (and romacs-list-group-kind (eq (plist-get row :kind) romacs-list-group-kind) (not first))
         (insert (propertize (make-string width ?─) 'face romacs-list-rule-face) "\n"))
       (setq first nil)
-      (let ((start (point)))
-        (funcall romacs-list-insert-function row width)
-        (put-text-property start (1- (point)) 'romacs-list-row row)))))
+      (insert (propertize (funcall romacs-list-line-function row width) 'romacs-list-row row) "\n"))))
 
 (defun romacs-list--stop-banner ()
   "Show the list's banner no more: there is none unless one was shown."
@@ -275,7 +268,7 @@ row, in a level past its heading."
     (when pattern (insert (romacs-list--banner pattern rows width) "\n"))
     (if rows
         (romacs-list--insert-rows rows width)
-      (when-let* ((empty (funcall romacs-list-empty-function))) (insert empty "\n")))
+      (insert (funcall romacs-list-empty-function) "\n"))
     (when romacs-list-hint-function (insert (funcall romacs-list-hint-function width)))
     (if pattern
         (romacs-banner-show (romacs-list--banner-id) (current-buffer) (point-min) pattern width 1

@@ -37,8 +37,8 @@
 ;;; Code:
 
 (eval-when-compile (require 'cl-lib))
-;; Romacs: a tabulated list is a list (romacs-list.el), drawn through it
-;; when it fits (`tabulated-list--romacs-p'); ledger/divergences/LISP-TABULATED-LIST.md.
+;; Romacs: a tabulated list is a list (romacs-list.el), each entry's line
+;; a row; ledger/divergences/LISP-TABULATED-LIST.md.
 (require 'romacs-list)
 
 (defgroup tabulated-list nil
@@ -460,14 +460,15 @@ last print.  The only difference in outcome is that tags will not
 be removed from entries that haven't changed (see
 `tabulated-list-put-tag').  Don't use this immediately after
 changing `tabulated-list-sort-key'."
-  (let ((groups (if (functionp tabulated-list-groups)
+  (let ((inhibit-read-only t)
+        (groups (if (functionp tabulated-list-groups)
 		    (funcall tabulated-list-groups)
 		  tabulated-list-groups))
 	(entries (if (functionp tabulated-list-entries)
 		     (funcall tabulated-list-entries)
 		   tabulated-list-entries))
         (sorter (tabulated-list--get-sorter))
-        entry-id saved-col)
+        entry-id saved-pt saved-col)
     (and remember-pos
 	 (setq entry-id (tabulated-list-get-id))
 	 (setq saved-col (current-column)))
@@ -486,17 +487,6 @@ changing `tabulated-list-sort-key'."
     ;; Without a sorter, we have no way to just update.
     (when (and update (not sorter))
       (setq update nil))
-    (if (tabulated-list--romacs-p groups)
-        (tabulated-list--draw entries update entry-id saved-col)
-      (tabulated-list--print-gnu groups entries sorter update entry-id saved-col))
-    ;; No command follows a print that none made: the row it left point on.
-    (romacs-list-highlight)))
-
-(defun tabulated-list--print-gnu (groups entries sorter update entry-id saved-col)
-  "Print GROUPS or ENTRIES with `tabulated-list-printer' in place, as GNU
-does: the lists `romacs-list' does not draw (`tabulated-list--romacs-p').
-SORTER, UPDATE, ENTRY-ID and SAVED-COL are `tabulated-list-print''s."
-  (let ((inhibit-read-only t) saved-pt)
     (if update (goto-char (point-min))
       ;; Redo the buffer, unless we're just updating.
       (erase-buffer)
@@ -518,58 +508,9 @@ SORTER, UPDATE, ENTRY-ID and SAVED-COL are `tabulated-list-print''s."
     (if saved-pt
 	(progn (goto-char saved-pt)
 	       (move-to-column saved-col))
-      (goto-char (point-min)))))
-
-(defun tabulated-list--romacs-p (groups)
-  "Whether `romacs-list' draws the list: printed by
-`tabulated-list-print-entry', with no GROUPS, its header in the header
-line."
-  (and (eq tabulated-list-printer #'tabulated-list-print-entry)
-       (null groups)
-       tabulated-list-use-header-line))
-
-(defvar tabulated-list--kept nil
-  "While a list is drawn updating, the line of each entry it showed, by id.")
-
-(defun tabulated-list--draw (entries update entry-id col)
-  "Draw ENTRIES through `romacs-list-draw', a row each.  UPDATE keeps the
-line of each entry shown already, its tag with it, as GNU's update does;
-point goes to ENTRY-ID's row at column COL, else to the first row."
-  (let ((tabulated-list--kept (and update (tabulated-list--lines)))
-        (rows nil) (before nil))
-    (while entries
-      (let ((elt (car entries)))
-        (push (list :id (car elt) :kind 'entry :entry elt
-                    :near (list (or before (cadr elt)) (cadr elt) (or (cadr (cadr entries)) (cadr elt))))
-              rows)
-        (setq before (cadr elt) entries (cdr entries))))
-    (romacs-list-draw (nreverse rows) (romacs-list-columns (current-buffer)))
-    (set-buffer-modified-p nil)
-    (if-let* ((at (and entry-id (romacs-list--find entry-id))))
-        (progn (goto-char at) (move-to-column col))
-      (goto-char (point-min))
-      ;; Past a banner the list was asked for.
-      (unless (tabulated-list-get-id) (romacs-list-next 1)))))
-
-(defun tabulated-list--lines ()
-  "The line of each entry the buffer shows, by its id."
-  (let ((lines (make-hash-table :test #'equal)))
-    (save-excursion
-      (goto-char (point-min))
-      (while (not (eobp))
-        (when-let* ((id (tabulated-list-get-id)))
-          (puthash id (buffer-substring (point) (min (point-max) (1+ (line-end-position)))) lines))
-        (forward-line 1)))
-    lines))
-
-(defun tabulated-list--insert-row (row _width)
-  "Insert ROW, an entry, as `tabulated-list-printer' prints it, or the line
-it had when the list is drawn updating (`tabulated-list--kept')."
-  (let ((elt (plist-get row :entry)))
-    (if-let* ((line (and tabulated-list--kept (gethash (car elt) tabulated-list--kept))))
-        (insert line)
-      (let ((tabulated-list--near-rows (plist-get row :near)))
-        (apply tabulated-list-printer elt)))))
+      (goto-char (point-min)))
+    ;; No command follows a print that none made: the row it left point on.
+    (romacs-list-highlight)))
 
 (defun tabulated-list-print-entries (entries sorter update entry-id)
   (let (saved-pt)
@@ -633,7 +574,8 @@ of column descriptors."
     ;; Ever so slightly faster than calling `put-text-property' twice.
     (add-text-properties
      beg (point)
-     `(tabulated-list-id ,id tabulated-list-entry ,cols))))
+     `(tabulated-list-id ,id tabulated-list-entry ,cols
+       romacs-list-row (:id ,id :kind entry)))))
 
 (defun tabulated-list--available-space (width n)
   (let* ((next-col-format (aref tabulated-list-format (1+ n)))
@@ -932,7 +874,6 @@ data in an ewoc may instead specify a printer function (e.g., one
 that calls `ewoc-enter-last'), with `tabulated-list-print-entry'
 as the ewoc pretty-printer."
   (setq-local truncate-lines t)
-  (setq-local romacs-list-insert-function #'tabulated-list--insert-row)
   (setq-local buffer-undo-list t)
   (setq-local revert-buffer-function #'tabulated-list-revert)
   (setq-local glyphless-char-display
