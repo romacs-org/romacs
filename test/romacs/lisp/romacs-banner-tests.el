@@ -54,9 +54,11 @@
           ;; The thread pattern hands over to romacs-working.
           (romacs-banner-show 'banner-test (current-buffer) (point-min) 'thread 10 1 '(romacs-working-running) t)
           (should-not (romacs-banner--element 'banner-test))
+          (should-not romacs-banner--banners)
           (should (romacs-working--element 'banner-test)))
       (romacs-banner-stop 'banner-test))
     (should-not (romacs-animate--get 'banner-test))
+    (should-not romacs-banner--banners)
     (should-not (romacs-working--element 'banner-test))))
 
 (ert-deftest romacs-banner-stops-with-its-buffer ()
@@ -71,6 +73,8 @@
       (insert (romacs-banner-still 'wave 6 1 '(success)) "\n")
       (romacs-banner-show 'banner-kill (current-buffer) 1 'wave 6 1 '(success) t)
       (should (eq (romacs-animate-buffer 'banner-kill) (current-buffer)))
-      (romacs-banner-stop 'banner-kill))))
+      (should (romacs-banner--element 'banner-kill))
+      (romacs-banner-stop 'banner-kill)
+      (should-not romacs-banner--banners))))
 
 ;;; romacs-banner-tests.el ends here

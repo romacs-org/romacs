@@ -207,6 +207,7 @@ class Select(unittest.TestCase):
         self.assertIn('live_update', self.select('crates/romacs-vm-gui/harness/live_update_live.py')['harnesses'])
         self.assertIn('banner', self.select('crates/romacs-logo/src/banner.rs')['harnesses'])
         self.assertIn('banner', self.select('lisp/ui/romacs-banner.el')['harnesses'])
+        self.assertIn('banner', self.select('crates/romacs-vm/src/display.rs')['harnesses'])
 
     def test_documentation_reaches_only_the_structural_rules(self):
         found = self.select('doc/x.org', 'AGENTS.md', 'tools/tests/test_x.py')

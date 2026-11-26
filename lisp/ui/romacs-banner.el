@@ -42,9 +42,10 @@
 
 (defconst romacs-banner-fps 30 "Frames a second of a moving banner.")
 
-(defvar romacs-banner--banners (make-hash-table :test #'equal)
-  "Each banner moving, by its id: a plist of :start, :pattern, :cols,
-:rows, :faces and :epoch, what the display is told of it.")
+(defvar-local romacs-banner--banners nil
+  "Each banner moving in this buffer, an alist by its id of plists of
+:start, :pattern, :cols, :rows, :faces and :epoch, what the display is
+told of it; it goes with the buffer.")
 
 (defun romacs-banner-random-epoch ()
   "A fresh epoch: the seed of what is random in a banner."
@@ -66,8 +67,8 @@ seeded by EPOCH; for the thread, one row whose look says whether it is MOVING."
                             (romacs-banner--foregrounds faces) epoch))))
 
 (defun romacs-banner--element (id)
-  "What the display draws of banner ID."
-  (when-let* ((banner (gethash id romacs-banner--banners)))
+  "What the display draws of banner ID, in the current buffer."
+  (when-let* ((banner (alist-get id romacs-banner--banners nil nil #'equal)))
     (list :start (plist-get banner :start) :cols (plist-get banner :cols) :rows (plist-get banner :rows)
           :kind (list 'banner (plist-get banner :pattern) (plist-get banner :epoch) (plist-get banner :faces)))))
 
@@ -85,18 +86,23 @@ its motion going on across a list's redraws."
         ((not moving) (romacs-banner-stop id))
         (t
          (romacs-working-stop id)
-         (puthash id (list :start start :pattern pattern :cols (min cols romacs-banner--max-cols)
-                           :rows (min rows romacs-banner--max-rows) :faces faces :epoch (or epoch 0))
-                  romacs-banner--banners)
-         (if (eq (romacs-animate-buffer id) buffer)
-             (romacs-animate-refresh id)
-           (romacs-animate-start id buffer romacs-banner-fps #'ignore
-                                 (lambda (_window) (romacs-banner--element id))))))
+         (let ((here (eq (romacs-animate-buffer id) buffer)))
+           (unless here (romacs-banner-stop id))
+           (with-current-buffer buffer
+             (setf (alist-get id romacs-banner--banners nil nil #'equal)
+                   (list :start start :pattern pattern :cols (min cols romacs-banner--max-cols)
+                         :rows (min rows romacs-banner--max-rows) :faces faces :epoch (or epoch 0))))
+           (if here
+               (romacs-animate-refresh id)
+             (romacs-animate-start id buffer romacs-banner-fps #'ignore
+                                   (lambda (_window) (romacs-banner--element id)))))))
   id)
 
 (defun romacs-banner-stop (id)
   "Show banner ID no more."
-  (remhash id romacs-banner--banners)
+  (when-let* ((buffer (romacs-animate-buffer id)) ((buffer-live-p buffer)))
+    (with-current-buffer buffer
+      (setf (alist-get id romacs-banner--banners nil 'remove #'equal) nil)))
   (romacs-working-stop id)
   (romacs-animate-stop id))
 

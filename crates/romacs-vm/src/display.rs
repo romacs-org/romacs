@@ -722,9 +722,6 @@ impl Vm {
         let list = self.variable_value(slot).unwrap_or(Value::NIL);
         if list == Value::NIL || list == Value::UNBOUND { return Ok(vec![]); }
         let natural = |v: Value| v.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or("natural number required");
-        let logo = self.intern("logo");
-        let working = self.intern("working");
-        let banner = self.intern("banner");
         let still = self.intern("still");
         let mut animations = vec![];
         for entry in self.list_values(list)? {
@@ -746,53 +743,7 @@ impl Vm {
                 }
             };
             let (top, in_view) = self.text_animation_row(window, start, rows)?;
-            let kind = match self.list_values(kind)?[..] {
-                [head, cell_aspect, epoch] if head == logo => {
-                    let cell_aspect = match (cell_aspect.integer_value(), self.object_if(cell_aspect)) {
-                        (Some(n), _) => n as f64,
-                        (None, Some(Object::Float(f))) => *f,
-                        _ => return Err("number required".into()),
-                    };
-                    // Its colours are faces, so the landing follows the theme.
-                    let colours = romacs_display_protocol::text_animation::LogoColours {
-                        mark: self.display_face("romacs-landing-mark")?.foreground,
-                        word: self.display_face("romacs-landing-word")?.foreground,
-                    };
-                    TextAnimationKind::Logo { cell_aspect, epoch: natural(epoch)?, colours }
-                }
-                // (working WORK EPOCH FACE BEATS): lisp/ui/romacs-working.el's
-                // thread, in FACE's foreground.
-                [head, work, epoch, face, beats] if head == working => {
-                    use romacs_logo::working::Work;
-                    let work = match self.symbol_name_of(work).as_deref() {
-                        Some("running") => Work::Running,
-                        Some("waiting") => Work::Waiting,
-                        Some("failed") => Work::Failed,
-                        _ => Work::Idle,
-                    };
-                    let face = self.symbol_name_of(face).ok_or("face symbol required")?;
-                    TextAnimationKind::Working { work, beats: natural(beats)?, epoch: natural(epoch)?,
-                                                 colour: self.display_face(&face)?.foreground,
-                                                 bead: self.display_face("default")?.foreground }
-                }
-                // (banner PATTERN EPOCH FACES): lisp/ui/romacs-banner.el's,
-                // its colour stops FACES' foregrounds, read as each frame
-                // freezes so a theme switch recolours it.
-                [head, pattern, epoch, faces] if head == banner => {
-                    let pattern = self.symbol_name_of(pattern).as_deref().and_then(romacs_logo::banner::Pattern::named)
-                        .ok_or("banner pattern required")?;
-                    let mut colours = vec![];
-                    for face in self.list_values(faces)? {
-                        let face = self.symbol_name_of(face).ok_or("face symbol required")?;
-                        colours.push(self.display_face(&face)?.foreground);
-                    }
-                    if !(1..=romacs_logo::banner::MAX_STOPS).contains(&colours.len()) {
-                        return Err("1 to 4 banner faces required".into());
-                    }
-                    TextAnimationKind::Banner { pattern, epoch: natural(epoch)?, colours }
-                }
-                _ => return Err("bad text animation kind".into()),
-            };
+            let kind = self.text_animation_kind(kind)?;
             // Keyed by animation and window: each window showing one has its
             // own motion.
             let window = self.window(window)?.id;
@@ -815,6 +766,63 @@ impl Vm {
             }));
         }
         Ok(animations)
+    }
+    /// The kind of a text animation entry, KIND: (logo CELL-ASPECT EPOCH),
+    /// (working WORK EPOCH FACE BEATS) or (banner PATTERN EPOCH FACES), its
+    /// faces read as this frame freezes, so a theme switch recolours it.
+    fn text_animation_kind(&mut self, kind: Value) -> Result<romacs_display_protocol::text_animation::TextAnimationKind> {
+        use romacs_display_protocol::text_animation::TextAnimationKind;
+        let natural = |v: Value| v.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or("natural number required");
+        let logo = self.intern("logo");
+        let working = self.intern("working");
+        let banner = self.intern("banner");
+        Ok(match self.list_values(kind)?[..] {
+            [head, cell_aspect, epoch] if head == logo => {
+                let cell_aspect = match (cell_aspect.integer_value(), self.object_if(cell_aspect)) {
+                    (Some(n), _) => n as f64,
+                    (None, Some(Object::Float(f))) => *f,
+                    _ => return Err("number required".into()),
+                };
+                // Its colours are faces, so the landing follows the theme.
+                let colours = romacs_display_protocol::text_animation::LogoColours {
+                    mark: self.display_face("romacs-landing-mark")?.foreground,
+                    word: self.display_face("romacs-landing-word")?.foreground,
+                };
+                TextAnimationKind::Logo { cell_aspect, epoch: natural(epoch)?, colours }
+            }
+            // (working WORK EPOCH FACE BEATS): lisp/ui/romacs-working.el's
+            // thread, in FACE's foreground.
+            [head, work, epoch, face, beats] if head == working => {
+                use romacs_logo::working::Work;
+                let work = match self.symbol_name_of(work).as_deref() {
+                    Some("running") => Work::Running,
+                    Some("waiting") => Work::Waiting,
+                    Some("failed") => Work::Failed,
+                    _ => Work::Idle,
+                };
+                let face = self.symbol_name_of(face).ok_or("face symbol required")?;
+                TextAnimationKind::Working { work, beats: natural(beats)?, epoch: natural(epoch)?,
+                                             colour: self.display_face(&face)?.foreground,
+                                             bead: self.display_face("default")?.foreground }
+            }
+            // (banner PATTERN EPOCH FACES): lisp/ui/romacs-banner.el's,
+            // its colour stops FACES' foregrounds, read as each frame
+            // freezes so a theme switch recolours it.
+            [head, pattern, epoch, faces] if head == banner => {
+                let pattern = self.symbol_name_of(pattern).as_deref().and_then(romacs_logo::banner::Pattern::named)
+                    .ok_or("banner pattern required")?;
+                let mut colours = vec![];
+                for face in self.list_values(faces)? {
+                    let face = self.symbol_name_of(face).ok_or("face symbol required")?;
+                    colours.push(self.display_face(&face)?.foreground);
+                }
+                if !(1..=romacs_logo::banner::MAX_STOPS).contains(&colours.len()) {
+                    return Err("1 to 4 banner faces required".into());
+                }
+                TextAnimationKind::Banner { pattern, epoch: natural(epoch)?, colours }
+            }
+            _ => return Err("bad text animation kind".into()),
+        })
     }
     /// The visual row of WINDOW where a block of ROWS lines starting at
     /// buffer position START begins, counted in lines from the window's

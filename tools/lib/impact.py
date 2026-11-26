@@ -132,7 +132,7 @@ HARNESS_RULES = (
                 r'|crates/romacs-vm-gui/harness/working_live\.py)'), 'working'),
     # Banners: every pattern drawn by the render thread while the main VM is busy.
     (re.compile(r'^(?:lisp/ui/romacs-(?:banner|animate)\.el|crates/romacs-logo/src/banner\.rs'
-                r'|crates/romacs-vm/src/prims/logo\.rs'
+                r'|crates/romacs-vm/src/(?:prims/logo|display)\.rs'
                 r'|crates/romacs-display-protocol/src/text_animation\.rs'
                 r'|crates/romacs-display-runtime/src/render_thread/text_animations(?:\.rs|/)'
                 r'|crates/romacs-vm-gui/harness/banner_live\.py)'), 'banner'),

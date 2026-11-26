@@ -316,7 +316,7 @@ pub fn located(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<Te
     let mut rows: Vec<u32> = vec![];
     let mut owned = std::collections::HashSet::new();
     for glyph in &frame.glyphs {
-        if let FrameGlyph::Char { slot_id, char, y, row_role: GlyphRowRole::Text, .. } = glyph
+        if let FrameGlyph::Char { slot_id, char, y, row_role: GlyphRowRole::Text, composed: None, .. } = glyph
             && slot_id.window_id.get() as u64 == animation.window
         {
             if *y > top - 0.5 && *y < top + height.max(1.0) { rows.push(slot_id.row); }
