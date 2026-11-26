@@ -3812,11 +3812,22 @@ again, after it was at its limit: what waits for its reset goes on.")
 instance's (`romacs-agent-note-room')."
   (romacs-agent-note-room (romacs-agent-provider session) event))
 
+(defun romacs-agent--overage-refused-p (event)
+  "Whether EVENT, a `rate-limit' report, refuses only its account's
+overage: no instance's limit, the models that need usage credits alone
+are refused."
+  (and (eq (plist-get event :status) 'rejected)
+       (string-match-p "overage" (format "%s" (plist-get event :window)))))
+
+(defun romacs-agent-refuses-account-p (event)
+  "Whether EVENT, a `rate-limit' report, says its account refuses requests:
+at its usage limit, not its overage's alone."
+  (and (eq (plist-get event :status) 'rejected) (not (romacs-agent--overage-refused-p event))))
+
 (defun romacs-agent--room-report (known event time)
   "Compute the next usage report from KNOWN and EVENT at TIME, or nil."
   (unless (or (and known (> (plist-get known :time) time))
-              (and (eq (plist-get event :status) 'rejected)
-                   (string-match-p "overage" (format "%s" (plist-get event :window)))))
+              (romacs-agent--overage-refused-p event))
     (let* ((reported (or (plist-get event :windows)
                          (and (plist-get event :window)
                               (list (list :name (romacs-agent--room-window-name (plist-get event :window))

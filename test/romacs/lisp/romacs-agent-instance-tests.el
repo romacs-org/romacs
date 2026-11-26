@@ -149,6 +149,33 @@ conversation is in `one'; `told' collects what a task is told."
       ;; Still one wake, read back whole.
       (should (romacs-agent-tools--wake-parse wake)))))
 
+(ert-deftest romacs-agent-instance-a-failed-compaction-ends-at-the-limit ()
+  ;; A /compact refused at the limit: Claude Code's turn end says no API
+  ;; error, only its account's report did.  An overage refused alone is no
+  ;; instance's limit.
+  (romacs-agent-instance-tests--with
+    (cl-flet ((turn (session window)
+                (dolist (line (list (romacs-mcp--object "type" "rate_limit_event"
+                                                        "rate_limit_info" (romacs-mcp--object "status" "rejected" "rateLimitType" window
+                                                                                              "resetsAt" 4102444800 "utilization" 1))
+                                    (romacs-mcp--object "type" "system" "subtype" "status" "status" :null
+                                                        "compact_result" "failed" "compact_error" "You've hit your weekly limit")))
+                  (dolist (event (romacs-agent--claude-events session line))
+                    (romacs-agent--raise session event)))
+                (car (last (romacs-agent--claude-events
+                            session (romacs-mcp--object "type" "result" "is_error" :false
+                                                        "result" "Error during compaction: You've hit your weekly limit"))))))
+      (let ((done (turn session "seven_day")))
+        (should (eq (plist-get done :type) 'done))
+        (should (eq (plist-get done :limit) t)))
+      ;; Its refusal ends with its turn.
+      (dolist (event (romacs-agent--claude-events
+                      session (romacs-mcp--object "type" "result" "is_error" :false "result" "")))
+        (romacs-agent--raise session event))
+      (should-not (plist-get (car (last (romacs-agent--claude-events
+                                         session (romacs-mcp--object "type" "result" "is_error" :false "result" "")))) :limit))
+      (should-not (plist-get (turn session "seven_day_overage_included") :limit)))))
+
 (ert-deftest romacs-agent-instance-a-model-limit ()
   ;; A model that needs usage credits the account has spent: its overage
   ;; window is refused, the instance still runs its other models.
