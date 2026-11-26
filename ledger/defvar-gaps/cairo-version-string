@@ -1,0 +1,1 @@
+Cairo builds only; version.el reads it under (featurep 'cairo), which Romacs does not provide

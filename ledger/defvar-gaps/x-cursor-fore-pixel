@@ -1,0 +1,1 @@
+androidfns.c, haikufns.c, pgtkfns.c, w32fns.c, xfns.c; no shipped Lisp reads or sets it
