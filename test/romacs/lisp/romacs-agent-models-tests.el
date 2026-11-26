@@ -132,55 +132,89 @@ executable there running the shell SCRIPT; BINDINGS, of `let*', see them."
       (romacs-agent--keep-models instance nil)
       (should-not (romacs-agent--models instance)))))
 
-(ert-deftest romacs-agent-models-asked-again-once-old ()
-  (let ((asked (make-hash-table :test #'equal))
-        (instances (list (list :name "codex") (list :name "claude"))))
-    ;; Never asked in this run: due.
-    (should (equal (romacs-agent--models-due instances asked 1000 30) instances))
-    ;; Answered 10 minutes ago: not yet; 30 or more: again.
-    (puthash "codex" (- 1000 600) asked)
-    (should (equal (romacs-agent--models-due instances asked 1000 30) (list (list :name "claude"))))
-    (should (equal (romacs-agent--models-due instances asked (+ 1000 1200) 30) instances))
-    ;; With no interval, once a run.
-    (should (equal (romacs-agent--models-due instances asked (+ 1000 99999) nil) (list (list :name "claude"))))
-    ;; One being asked is not asked twice.
-    (puthash "claude" (make-pipe-process :name "romacs-models-test" :noquery t) asked)
-    (unwind-protect
-        (should (equal (romacs-agent--models-due (cdr instances) asked (+ 1000 99999) 30) nil))
-      (delete-process (gethash "claude" asked)))))
+;; Asked when nothing is kept for its program, once a run: sessions report
+;; the rest, and `romacs-agent-refresh' asks again on demand.
+(ert-deftest romacs-agent-models-asked-once-unless-kept ()
+  (romacs-agent-models-tests--with "exit 0\n" ((romacs-agent-providers `(("codex" :program ,program))))
+    (let* ((instance (romacs-agent--configured "codex")) (instances (list instance))
+           (asked (make-hash-table :test #'equal)))
+      ;; Nothing kept, not asked in this run: due.
+      (should (equal (romacs-agent--models-due instances asked) instances))
+      ;; Asked in this run, answered or not: not again.
+      (puthash "codex" 1000 asked)
+      (should-not (romacs-agent--models-due instances asked))
+      ;; Kept for its program: not asked, in a new run either.
+      (clrhash asked)
+      (romacs-agent--keep-models instance '(("a" :label "A")))
+      (clrhash asked)
+      (should-not (romacs-agent--models-due instances asked))
+      ;; Its program updated: asked again.
+      (let ((updated (plist-put (copy-sequence instance) :program (expand-file-name "other-codex" root))))
+        (copy-file program (plist-get updated :program))
+        (should (equal (romacs-agent--models-due (list updated) asked) (list updated)))))))
 
-(ert-deftest romacs-agent-models-ticks-ask-once-idle ()
-  ;; Ticks while Romacs is busy ask once; an interval turned off meanwhile
-  ;; asks none.
-  (let ((romacs-agent--models-timer nil) (romacs-agent--models-idle nil)
-        (romacs-agent-models-refresh-interval 5))
+(ert-deftest romacs-agent-models-no-timer-asks ()
+  ;; Loading asks nothing on a schedule: a probe can renew a sign-in.
+  (should-not (cl-find-if (lambda (timer)
+                            (string-prefix-p "romacs-agent--models" (format "%s" (timer--function timer))))
+                          timer-list)))
+
+(defun romacs-agent-models-tests--claude-home (expires)
+  "A Claude configuration directory whose sign-in EXPIRES then (seconds)."
+  (let ((home (make-temp-file "claude-home" t)))
+    (with-temp-file (expand-file-name ".credentials.json" home)
+      (insert (format "{\"claudeAiOauth\":{\"accessToken\":\"t\",\"expiresAt\":%d}}"
+                      (round (* 1000 expires)))))
+    home))
+
+(ert-deftest romacs-agent-models-claude-probe-renews-no-sign-in ()
+  ;; A sign-in due to renew: not asked, as the probe would renew it under
+  ;; its sessions; a fresh one, or none, is.
+  (let ((due (romacs-agent-models-tests--claude-home (+ (float-time) 60)))
+        (fresh (romacs-agent-models-tests--claude-home (+ (float-time) 3600)))
+        (none (make-temp-file "claude-home" t)))
     (unwind-protect
         (progn
-          (romacs-agent--models-tick)
-          (let ((idle romacs-agent--models-idle))
-            (should (memq idle timer-idle-list))
-            (romacs-agent--models-tick)
-            (should (eq romacs-agent--models-idle idle))
-            (let ((romacs-agent-models-refresh-interval nil))
-              (romacs-agent--models-schedule))
-            (should-not (memq idle timer-idle-list))
-            (should-not romacs-agent--models-idle)))
-      (dolist (timer (list romacs-agent--models-timer romacs-agent--models-idle))
-        (when (timerp timer) (cancel-timer timer))))))
+          (should (stringp (romacs-agent--claude-models-probe (list :program "claude" :config-dir due))))
+          (should (consp (romacs-agent--claude-models-probe (list :program "claude" :config-dir fresh))))
+          (should (consp (romacs-agent--claude-models-probe (list :program "claude" :config-dir none)))))
+      (mapc (lambda (d) (delete-directory d t)) (list due fresh none)))))
 
-(ert-deftest romacs-agent-models-asked-every-interval ()
-  (let ((romacs-agent--models-timer nil))
+(ert-deftest romacs-agent-models-a-declined-probe-stays-due ()
+  ;; The driver says why not now: told, nothing run, asked again later.
+  (romacs-agent-models-tests--with "exit 0\n" ((romacs-agent-providers `(("codex" :program ,program))))
+    (let ((instance (romacs-agent--configured "codex")) (outcome nil))
+      (cl-letf (((plist-get (romacs-agent--driver-of 'codex) :models-probe) (lambda (_) "not now")))
+        (should-not (romacs-agent--probe-models instance (lambda (o) (setq outcome o)))))
+      (should (equal outcome '(:error "not now")))
+      (should (equal (romacs-agent--models-due (list instance) romacs-agent--models-probes) (list instance))))))
+
+(ert-deftest romacs-agent-models-refresh-asks-every-account ()
+  ;; Each enabled account: its usage by its harness's :usage, its models
+  ;; by its probe; one answer list once every answer is in.
+  (romacs-agent-models-tests--with
+      (format "read a; read b; read c\necho '{\"id\":\"initialize:1\",\"result\":{}}'\necho '%s'\nexec sleep 60\n"
+              romacs-agent-models-tests--listed)
+      ((home (romacs-agent-models-tests--claude-home (+ (float-time) 60)))
+       (romacs-agent-providers `(("codex" :program ,program) ("claude" :program ,program :config-dir ,home)))
+       (noted nil) (results nil) (said nil))
+    (cl-letf (((symbol-function 'romacs-agent-note-room) (lambda (name report) (push (cons name report) noted)))
+              ((symbol-function 'message) (lambda (&rest args) (push (apply #'format-message args) said))))
+      (romacs-agent-refresh (lambda (r) (setq results r)))
+      (with-timeout (10 (error "No answer"))
+        (while (not results) (accept-process-output nil 0.05)))
+      (romacs-agent--refresh-say results))
     (unwind-protect
-        (progn
-          (let ((romacs-agent-models-refresh-interval 5))
-            (romacs-agent--models-schedule)
-            (should (timerp romacs-agent--models-timer))
-            (should (= (timer--repeat-delay romacs-agent--models-timer) 300)))
-          (let ((romacs-agent-models-refresh-interval nil) (old romacs-agent--models-timer))
-            (romacs-agent--models-schedule)
-            (should-not romacs-agent--models-timer)
-            (should-not (memq old timer-list))))
-      (when (timerp romacs-agent--models-timer) (cancel-timer romacs-agent--models-timer)))))
+        (let ((codex (cdr (assoc "codex" results))) (claude (cdr (assoc "claude" results))))
+          ;; Codex: no usage to ask; its models reported and kept.
+          (should-not (plist-get codex :usage))
+          (should (eq (car (plist-get codex :models)) :models))
+          ;; Claude, its sign-in due to renew: neither asked, both say why.
+          (should (equal (plist-get claude :usage) (list :error (romacs-agent--claude-renew-due home))))
+          (should (equal (plist-get claude :models) (list :error (romacs-agent--claude-renew-due home))))
+          (should-not noted)
+          (should (string-match-p "codex: no usage to ask; 2 models" (car said))))
+      (delete-directory home t))))
 
 (ert-deftest romacs-agent-models-an-open-picker-shows-what-is-reported ()
   ;; The menu opened before Codex answered: its answer shows in the rows

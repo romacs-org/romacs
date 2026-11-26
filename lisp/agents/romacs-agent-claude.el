@@ -590,6 +590,22 @@ seconds since the epoch, or nil."
               ((stringp token)))
     (cons token (/ (or (gethash "expiresAt" oauth) 0) 1000.0))))
 
+;; Only Claude Code's own sessions renew a sign-in.  A renewal rotates the
+;; refresh token, and a session holding the old one then loses the account's
+;; sign-in when it renews in turn: so Romacs reads the sign-in, and runs no
+;; Claude Code that would renew it (a models probe, `claude auth status').
+
+(defconst romacs-agent--claude-renew-margin 600
+  "Seconds before its expiry by which Claude Code may renew a sign-in: it
+renews minutes ahead, so one with less left is not touched.")
+
+(defun romacs-agent--claude-renew-due (home)
+  "Why the sign-in kept at HOME is not to be touched now, its renewal due
+\(`romacs-agent--claude-renew-margin'), or nil: none, or a fresh one."
+  (when-let* ((sign-in (romacs-agent--claude-token home))
+              ((< (cdr sign-in) (+ (float-time) romacs-agent--claude-renew-margin))))
+    "its sign-in is due to renew: its next session renews it"))
+
 (defun romacs-agent--claude-credentials-stamp (home)
   "The stamp of the sign-in kept at HOME (`:credentials-stamp' of
 `romacs-agent-define-harness'), its credentials file's
@@ -636,9 +652,9 @@ its exit status once it ends.  The process is returned."
                      (funcall then text (process-exit-status process))))))))
 
 (defun romacs-agent--claude-fetch-usage (token callback)
-  "Ask the usage endpoint by TOKEN; CALLBACK with its report or nil, as of
-when it was asked: a turn's report made meanwhile is newer.  The token
-goes to curl on its stdin, never on a command line."
+  "Ask the usage endpoint by TOKEN; CALLBACK with its report, or with nil
+and why not, as of when it was asked: a turn's report made meanwhile is
+newer.  The token goes to curl on its stdin, never on a command line."
   (let* ((asked (float-time))
          (process
          (romacs-agent--claude-run
@@ -648,40 +664,34 @@ goes to curl on its stdin, never on a command line."
                 romacs-agent--claude-usage-url)
           process-environment
           (lambda (text status)
-            (funcall callback
-                     (when-let* (((eql status 0))
-                                 (end (string-search "\n" text (max 0 (- (length text) 5))))
-                                 ((equal (substring text (1+ end)) "200"))
-                                 (object (ignore-errors (json-parse-string (substring text 0 end)
-                                                                           :object-type 'hash-table
-                                                                           :null-object nil :false-object nil))))
-                       (and (hash-table-p object) (romacs-agent--claude-usage-report object asked))))))))
+            (let* ((end (and (eql status 0) (string-search "\n" text (max 0 (- (length text) 5)))))
+                   (code (and end (substring text (1+ end))))
+                   (object (and (equal code "200")
+                                (ignore-errors (json-parse-string (substring text 0 end)
+                                                                  :object-type 'hash-table
+                                                                  :null-object nil :false-object nil))))
+                   (report (and (hash-table-p object) (romacs-agent--claude-usage-report object asked))))
+              (funcall callback report
+                       (unless report
+                         (pcase code
+                           ('nil "no answer")
+                           ("401" "its sign-in was refused")
+                           ("429" "asked too often: ask later")
+                           ("200" "no limit reported")
+                           (_ (format "answered %s" code))))))))))
     (process-send-string process (format "Authorization: Bearer %s\n" token))
     (process-send-eof process)))
 
 (defun romacs-agent--claude-usage (home callback)
   "Ask the usage of the account signed in at HOME (`:usage' of
-`romacs-agent-define-harness'); CALLBACK with its report, or nil when not
-known: no sign-in, no answer.  A token expired is renewed by Claude Code
-itself, in place (`claude auth status'): renewing it here would rotate the
-account's tokens under its sessions."
-  (let ((fresh (lambda (sign-in) (and sign-in (> (cdr sign-in) (+ (float-time) 60))))))
-    (if-let* ((sign-in (romacs-agent--claude-token home)) ((funcall fresh sign-in)))
-        (romacs-agent--claude-fetch-usage (car sign-in) callback)
-      (if (null (romacs-agent--claude-token home))
-          (funcall callback nil)
-        (romacs-agent--claude-run
-         "romacs-agent-sign-in" (list romacs-agent-claude-program "auth" "status" "--json")
-         ;; Its default directory is its variable unset, as a session's.
-         (let ((environment (romacs-agent--harness-environment)))
-           (if (equal home (romacs-agent--home 'claude nil)) environment
-             (cons (concat "CLAUDE_CONFIG_DIR=" home) environment)))
-         (lambda (_text _status)
-           (let ((sign-in (romacs-agent--claude-token home)))
-             (if (not (funcall fresh sign-in))
-                 (funcall callback nil)
-               (condition-case nil (romacs-agent--claude-fetch-usage (car sign-in) callback)
-                 (error (funcall callback nil)))))))))))
+`romacs-agent-define-harness'); CALLBACK with its report, or with nil and
+why not: no sign-in, one due to renew (`romacs-agent--claude-renew-due'),
+no answer."
+  (if-let* ((sign-in (romacs-agent--claude-token home)))
+      (if-let* ((due (romacs-agent--claude-renew-due home)))
+          (funcall callback nil due)
+        (romacs-agent--claude-fetch-usage (car sign-in) callback))
+    (funcall callback nil "not signed in")))
 
 (defun romacs-agent--claude-limit-status (status)
   (pcase status ("rejected" 'rejected) ("allowed_warning" 'warning) (_ 'allowed)))
@@ -736,16 +746,21 @@ alias is no model."
 the user's settings, so its models are a session's, but running none of
 their hooks, nor the instance's own arguments, which may name more.  Nil
 for an instance whose arguments name settings of their own: its sessions
-alone say what it offers."
-  (unless (seq-some (lambda (word) (string-match-p "\\`--setting\\(?:s\\|-sources\\)\\(?:=\\|\\'\\)" word))
-                    (plist-get instance :arguments))
+alone say what it offers.  Not while its sign-in is due to renew
+\(`romacs-agent--claude-renew-due'): the probe would renew it."
+  (cond
+   ((seq-some (lambda (word) (string-match-p "\\`--setting\\(?:s\\|-sources\\)\\(?:=\\|\\'\\)" word))
+              (plist-get instance :arguments))
+    nil)
+   ((romacs-agent--claude-renew-due (romacs-agent--home 'claude (plist-get instance :config-dir))))
+   (t
     (list :argv (list (plist-get instance :program) "-p" "--output-format" "stream-json"
                       "--input-format" "stream-json" "--verbose" "--no-session-persistence"
                       "--strict-mcp-config" "--settings" "{\"disableAllHooks\":true}")
           :input (concat (json-serialize (romacs-mcp--object "type" "control_request" "request_id" "romacs-models"
                                                              "request" (romacs-mcp--object "subtype" "initialize")))
                          "\n")
-          :read #'romacs-agent--claude-probed-models)))
+          :read #'romacs-agent--claude-probed-models))))
 
 (defun romacs-agent--claude-probed-models (line)
   "What LINE says to the models probe's `initialize', or nil."
