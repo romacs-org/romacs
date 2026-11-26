@@ -293,7 +293,7 @@ impl Vm {
         let mut frames = self.frames();
         frames.insert(0, frame);
         self.set_frames(&frames);
-        self.display_state.version += 1;
+        self.display_state.invalidate();
         Ok(frame)
     }
     /// keyboard.c internal_last_event_frame: the frame the last input
@@ -407,7 +407,7 @@ impl Vm {
         (f.root, f.selected) = (Value::NIL, Value::NIL);
         let frames: Vec<Value> = self.frames().into_iter().filter(|&f| f != frame).collect();
         self.set_frames(&frames);
-        self.display_state.version += 1;
+        self.display_state.invalidate();
         Ok(())
     }
     /// frame.c candidate_frame: whether `next-frame' with MINIBUF accepts
@@ -487,7 +487,7 @@ impl Vm {
             }
             (window.x, window.y, window.width, window.height) = (x, y, w, h);
         }
-        self.display_state.version += 1;
+        self.display_state.invalidate();
         Ok(())
     }
     /// FRAME's fringe widths, none on a frame without a window system.
@@ -534,7 +534,7 @@ impl Vm {
         f.selected = Value::NIL;
         let frames: Vec<Value> = self.frames().into_iter().filter(|&f| f != frame).collect();
         self.set_frames(&frames);
-        self.display_state.version += 1;
+        self.display_state.invalidate();
         Ok(())
     }
     /// Select FRAME and its selected window (frame.c do_switch_frame).
@@ -569,11 +569,19 @@ impl Vm {
     /// raised or lowered. GNU leaves stacking to the window manager;
     /// `z-group' is not read.
     pub(crate) fn child_frames_bottom_up(&self, root: Value) -> Vec<Value> {
-        let mut out: Vec<Value> = self.frames().into_iter()
-            .filter(|&f| f != root && self.frame(f).is_ok_and(|f| f.live) && self.top_frame(f) == root).collect();
-        let key = |vm: &Self, f: Value| (vm.frame_ancestors(f).len(), vm.frame(f).map_or(0, |f| f.z));
-        out.sort_by_key(|&f| key(self, f));
-        out
+        self.stacked(self.frames().into_iter()
+            .filter(|&f| f != root && self.frame(f).is_ok_and(|f| f.live) && self.top_frame(f) == root).collect())
+    }
+    /// Those of `child_frames_bottom_up' that show (`frame_shown'), in
+    /// that order: what a frame snapshot of ROOT paints over its windows.
+    pub(crate) fn shown_child_frames(&self, root: Value) -> Vec<Value> {
+        self.stacked(self.frames().into_iter()
+            .filter(|&f| f != root && self.frame_shown(f) && self.top_frame(f) == root).collect())
+    }
+    /// FRAMES, child frames, lowest first.
+    fn stacked(&self, mut frames: Vec<Value>) -> Vec<Value> {
+        frames.sort_by_cached_key(|&f| (self.frame_ancestors(f).len(), self.frame(f).map_or(0, |f| f.z)));
+        frames
     }
     /// The live child frame of top-level frame ROOT hosting its
     /// minibuffer window.
@@ -594,7 +602,7 @@ impl Vm {
             self.set_child_geometry(frame, geometry)?;
         }
         self.relayout_top_frame(root)?;
-        self.display_state.version += 1;
+        self.display_state.invalidate();
         Ok(())
     }
     /// Keep a hosting FRAME's top in place as the minibuffer window's lines
@@ -613,7 +621,7 @@ impl Vm {
         self.window_state.next_frame += 1;
         let z = self.window_state.next_frame as i64;
         self.frame_mut(frame)?.z = if raise { z } else { -z };
-        self.display_state.version += 1;
+        self.display_state.invalidate();
         Ok(())
     }
 }
@@ -694,7 +702,7 @@ impl crate::window::Windows<'_> {
         let iconified = iconified && !visible;
         if (f.visible, f.iconified) != (visible, iconified) {
             (f.visible, f.iconified) = (visible, iconified);
-            self.vm.display_state.version += 1;
+            self.vm.display_state.invalidate();
         }
         Ok(())
     }
@@ -799,7 +807,7 @@ impl crate::window::Windows<'_> {
             let f = self.vm.frame_mut(frame).map_err(internal)?;
             if f.visible != visible {
                 f.visible = visible;
-                self.vm.display_state.version += 1;
+                self.vm.display_state.invalidate();
             }
         }
         Ok(())

@@ -14,7 +14,8 @@ every step and after the last one's redisplay, all before it serializes
 anything, so a step's figures are differences of two readings:
 
   step_instructions     what Romacs ran for the step: its change, the
-                        timers it set off and its redisplays, each once,
+                        timers it set off, its redisplays and the
+                        redisplay trigger's checks, each once,
                         not the loop's own polls nor the host's wait for a
                         frame to render (`display-stages--work'), nor the
                         host's passes for process output and the echo
@@ -22,7 +23,11 @@ anything, so a step's figures are differences of two readings:
                         step that waits inside its change makes no
                         measurement
   cycles                redisplays the step ran: its own, and any after a
-                        timer it set off (jit-lock's `jit-lock-force-redisplay')
+                        timer it set off (jit-lock's `jit-lock-force-redisplay');
+                        none for a step that changed nothing shown, which
+                        the redisplay trigger finds current
+  trigger_instructions  what the redisplay trigger's checks ran
+                        (`Vm::display_stale'): whether the frame went stale
   display_instructions  the part inside redisplays (the frame frozen and
                         compared, and laid out and submitted if it changed)
   display_conses        conses made inside redisplay
@@ -44,7 +49,7 @@ anything, so a step's figures are differences of two readings:
 A scenario's figure is the median over its steps (the upper of two middle
 ones); redisplay's instructions have their 90th percentile as well
 (`display_instructions_p90': the streamed deltas that add a row).  A step is
-odd when it broke its scenario's rule: as many redisplays as its steps
+odd when it broke its scenario's rule: no more redisplays than its steps
 usually run (their median), with a frame submitted in every step of a
 scenario that changes what the frame shows, and in none of one that does
 not.  The host redisplays for reasons of its
@@ -96,7 +101,8 @@ BARS = HERE / 'display_stages_bars.json'
 # A figure and the count of a reading it is the difference of.
 COUNTS = {'step_instructions': 'step-instructions', 'cycles': 'cycles', 'display_instructions': 'instructions', 'display_conses': 'conses',
           'windows_rebuilt': 'windows-rebuilt', 'band_expansions': 'band-expansions', 'layouts': 'layouts',
-          'frames_submitted': 'frames-submitted', 'lines_laid': 'lines-laid', 'rows_wrapped': 'rows-wrapped'}
+          'frames_submitted': 'frames-submitted', 'lines_laid': 'lines-laid', 'rows_wrapped': 'rows-wrapped',
+          'trigger_instructions': 'trigger-instructions'}
 # Figures only the scenarios that count them have.
 OPTIONAL = {'chars_fontified': 'fontified-chars', 'above_instructions': 'above-instructions'}
 # A bar that holds nothing: the figure is reported beside the others.
@@ -136,11 +142,14 @@ def figures(deltas, every=None):
 
 
 def odd_steps(scenario, deltas):
-    """The steps that broke SCENARIO's rule: as many redisplays as its steps
-    usually run, with a frame submitted in every step of one that paints,
-    and in none of one that does not."""
+    """The steps that broke SCENARIO's rule: no more redisplays than its
+    steps usually run, with a frame submitted in every step of one that
+    paints, and in none of one that does not.  A step that needed fewer is
+    no host's extra: a timer the step set off that left the frame as it
+    was runs no redisplay (the redisplay trigger), so where jit-lock's
+    forced redisplay finds nothing to redraw a step runs one fewer."""
     usual = quantile([d['cycles'] for d in deltas], .5)
-    return [i for i, d in enumerate(deltas) if d['cycles'] != usual or (d['frames-submitted'] == 0) == scenario['paints']]
+    return [i for i, d in enumerate(deltas) if d['cycles'] > usual or (d['frames-submitted'] == 0) == scenario['paints']]
 
 
 def refusal(scenario, result, wanted):
@@ -159,7 +168,7 @@ def refusal(scenario, result, wanted):
         return 'a step ran no full collection of its own'
     odd = odd_steps(scenario, steps(readings))
     if len(odd) > ODD * wanted:
-        return (f"steps {odd} did not run as many redisplays as the others, with "
+        return (f"steps {odd} ran more redisplays than the others, or did not run them with "
                 f"{'a frame submitted, as a step that changes the frame does' if scenario['paints'] else 'no frame submitted, as a step that changes nothing shown does'}")
     return None
 

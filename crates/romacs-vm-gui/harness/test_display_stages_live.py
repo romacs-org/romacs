@@ -4,7 +4,7 @@ import unittest
 import display_stages_live as d
 
 NAMES = ('step-instructions', 'collections', 'cycles', 'instructions', 'conses', 'windows-rebuilt', 'band-expansions', 'layouts',
-         'frames-submitted', 'lines-laid', 'rows-wrapped')
+         'frames-submitted', 'lines-laid', 'rows-wrapped', 'trigger-instructions')
 IDLE = {'name': 'idle', 'paints': False}
 PAINTS = {'name': 'typed', 'paints': True}
 
@@ -73,9 +73,9 @@ class Refusals(unittest.TestCase):
         blind[1]['instructions'] = None
         self.assertIn('no instruction counter', d.refusal(PAINTS, {'readings': blind}, 1))
 
-    def test_a_step_without_a_redisplay_is_refused(self):
-        self.assertIn('steps [1] did not run as many redisplays as the others',
-                      d.refusal(IDLE, {'readings': readings(QUIET, (300, 0, 0, 0, 0, 0, 0, 0, 0))}, 2))
+    def test_a_step_the_trigger_found_current_is_no_odd_step(self):
+        # Its timer left the frame as it was: the trigger ran no redisplay.
+        self.assertIsNone(d.refusal(IDLE, {'readings': readings(QUIET, (300, 0, 0, 0, 0, 0, 0, 0, 0))}, 2))
 
     def test_a_step_of_two_redisplays_is_odd(self):
         twice = (600, 0, 2, 200, 0, 0, 4, 0, 0)
@@ -85,13 +85,16 @@ class Refusals(unittest.TestCase):
         # Each step's own and the one after a timer it set off (jit-lock's).
         twice = (1500, 0, 2, 900, 9, 2, 2, 5, 1)
         self.assertEqual(d.odd_steps(PAINTS, d.steps(readings(twice, twice, twice))), [])
-        self.assertEqual(d.odd_steps(PAINTS, d.steps(readings(twice, STEP, twice))), [1])
+        thrice = (1500, 0, 3, 900, 9, 2, 2, 5, 1)
+        self.assertEqual(d.odd_steps(PAINTS, d.steps(readings(twice, thrice, twice))), [1])
+        # One fewer is no host's extra: the forced redisplay found the frame current.
+        self.assertEqual(d.odd_steps(PAINTS, d.steps(readings(twice, STEP, twice))), [])
         self.assertEqual(d.figures(d.steps(readings(twice, twice)))['cycles'], 2)
 
     def test_a_scenario_paints_every_step_or_none(self):
-        self.assertIn('steps [1] did not run as many redisplays as the others, with a frame submitted',
+        self.assertIn('steps [1] ran more redisplays than the others, or did not run them with a frame submitted',
                       d.refusal(PAINTS, {'readings': readings(STEP, QUIET)}, 2))
-        self.assertIn('steps [1] did not run as many redisplays as the others, with no frame submitted',
+        self.assertIn('steps [1] ran more redisplays than the others, or did not run them with no frame submitted',
                       d.refusal(IDLE, {'readings': readings(QUIET, STEP)}, 2))
 
     def test_a_tenth_of_the_steps_may_be_odd(self):

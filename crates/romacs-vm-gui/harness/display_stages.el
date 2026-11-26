@@ -273,9 +273,11 @@ line's end; return it."
 ;; The window has laid none of it out to fontify ahead from, so it lays the
 ;; window out for point's visibility, then again once jit-lock has
 ;; fontified what that showed.  The chunk jit-lock fontifies after each
-;; folded body reaches back into it, so a second redisplay follows
-;; (`jit-lock-force-redisplay', as in GNU), laying it out once: two
-;; redisplays and three layouts a step.
+;; folded body reaches back into it, so a second redisplay may follow
+;; (`jit-lock-force-redisplay', as in GNU), laying it out once: up to two
+;; redisplays and three layouts a step.  Its property change makes the frame
+;; stale whether or not it redraws anything, so whether it runs depends on
+;; what jit-lock fontified before: the cycles are reported, not held.
 (display-stages-scenario fontify-open-org-folded :paints t
   :setup (display-stages--counting-fontified)
   :body (switch-to-buffer (display-stages--org (format "stages-%d.org" i) 15)))
@@ -288,7 +290,7 @@ line's end; return it."
 ;; A folded heading's parts are shown, from the last heading up, so that
 ;; the window keeps its start and the step is the unfold, not a scroll.
 ;; As in opening one, jit-lock's chunks reach back into the folds: a second
-;; redisplay follows each step's own.
+;; redisplay may follow a step's own.
 (display-stages-scenario fontify-unfold-org :paints t
   :setup (prog1 (display-stages--show (display-stages--org "stages.org" 30))
            (display-stages--counting-fontified))
@@ -301,6 +303,108 @@ line's end; return it."
            (goto-char (/ (point-max) 2)) (end-of-line)
            (display-stages--counting-fontified))
   :body (let ((last-command-event ?a)) (self-insert-command 1)))
+
+;; The redisplay trigger (romacs-vm display_trigger.rs): Lisp between
+;; keys that leaves the frame as it was runs no redisplay; Lisp that changes
+;; what it shows still paints.  `plain-idle' above is a timer that only
+;; keeps its own books.
+
+(defvar display-stages--dir (file-name-directory (or load-file-name buffer-file-name))
+  "This harness's directory, where its fixtures are.")
+
+(defvar display-stages--bytes 0
+  "Bytes the quiet filter consumed.")
+
+(defvar display-stages--label "one"
+  "What the bands of the band scenarios show.")
+
+;; show-paren's idle timer where point is at no paren: no overlay shown.
+(display-stages-scenario show-paren-plain
+  :setup (prog1 (display-stages--show (display-stages--elisp "stages.el" 200))
+           (re-search-forward "(defun ")
+           (show-paren-mode 1))
+  :body (show-paren-function))
+;; A process filter that consumes its output, showing none of it.
+(display-stages-scenario filter-quiet
+  :setup (prog1 (display-stages--show (scaling--lines-buffer "stages" 2000))
+           (make-process :name "stages-ticks" :noquery t :connection-type 'pipe
+                         :command '("sh" "-c" "while :; do echo tick; sleep 0.01; done")
+                         :filter (lambda (_ text) (setq display-stages--bytes (+ display-stages--bytes (length text))))))
+  :body nil)
+;; An overlay with a face comes and goes on a shown line.
+(display-stages-scenario overlay-toggle :paints t
+  :setup (display-stages--show (scaling--lines-buffer "stages" 2000))
+  :body (if (cl-evenp i)
+            (overlay-put (make-overlay 1 20 nil) 'face 'bold)
+          (mapc #'delete-overlay (overlays-in 1 20))))
+;; A shown line's `face' property changes.
+(display-stages-scenario property-toggle :paints t
+  :setup (display-stages--show (scaling--lines-buffer "stages" 2000))
+  :body (put-text-property 1 20 'face (and (cl-evenp i) 'bold)))
+;; The same through an indirect buffer no window shows, which shares the
+;; shown buffer's text.
+(display-stages-scenario indirect-property-toggle :paints t
+  :setup (prog1 (display-stages--show (scaling--lines-buffer "stages" 2000))
+           (make-indirect-buffer "stages" "stages-sibling"))
+  :body (with-current-buffer "stages-sibling" (put-text-property 1 20 'face (and (cl-evenp i) 'bold))))
+;; A face the shown text names changes colour.
+(display-stages-scenario face-toggle :paints t
+  :setup (prog1 (display-stages--show (scaling--lines-buffer "stages" 2000))
+           (defface display-stages-face '((t :foreground "#ff0000")) "A face the stages toggle.")
+           (put-text-property 1 20 'face 'display-stages-face))
+  :body (set-face-attribute 'display-stages-face nil :foreground (if (cl-evenp i) "#00ff00" "#ff0000")))
+;; A header line's `:eval' reads a variable a timer sets: no
+;; `force-mode-line-update'.
+(display-stages-scenario header-eval :paints t
+  :setup (with-current-buffer (display-stages--show (scaling--lines-buffer "stages" 2000))
+           (setq-local header-line-format '(:eval display-stages--label))
+           (current-buffer))
+  :body (setq display-stages--label (format "step %d" i)))
+;; The same in a window's own mode line, on a frame without the status bar
+;; (which owns every window's mode line, and like GNU's mode line expands
+;; again only when what it depends on moved: `force-mode-line-update').
+(display-stages-scenario mode-line-eval :paints t
+  :setup (with-current-buffer (display-stages--show (scaling--lines-buffer "stages" 2000))
+           (modify-frame-parameters nil '((romacs-status-bar-lines . 0)))
+           (setq-local mode-line-format '(:eval display-stages--label))
+           (current-buffer))
+  :body (setq display-stages--label (format "step %d" i)))
+;; A window's mode line hidden and shown again by its `mode-line-format'
+;; parameter, without the status bar: the band the frame painted goes.
+(display-stages-scenario mode-line-hidden :paints t
+  :setup (with-current-buffer (display-stages--show (scaling--lines-buffer "stages" 2000))
+           (modify-frame-parameters nil '((romacs-status-bar-lines . 0)))
+           (setq-local mode-line-format "KEPT MODE LINE")
+           (current-buffer))
+  :body (set-window-parameter nil 'mode-line-format (and (cl-evenp i) 'none)))
+;; A header whose `:eval' returns a new label once each step: the check
+;; that runs its Lisp hands the label to the cycle, which paints it.
+(defvar display-stages--pulse nil)
+(display-stages-scenario header-pulse :paints t
+  :setup (with-current-buffer (display-stages--show (scaling--lines-buffer "stages" 2000))
+           (setq-local header-line-format
+                       '(:eval (prog1 (if display-stages--pulse (format "pulse %d" display-stages--pulse) "header")
+                                 (setq display-stages--pulse nil))))
+           (current-buffer))
+  :body (setq display-stages--pulse i))
+;; An animated image's timer shows its next frame: its plist changes in
+;; place and `force-window-update' asks for the window (image.el).
+(display-stages-scenario image-frame :paints t
+  :setup (with-current-buffer (display-stages--show (get-buffer-create "stages"))
+           (erase-buffer)
+           (insert "Before the image\n")
+           (let ((image (create-image (expand-file-name "fixtures/images/anim.gif" display-stages--dir))))
+             (plist-put (cdr image) :animate-buffer (current-buffer))
+             (insert-image image)
+             (insert "\nAfter the image\n")
+             (goto-char (point-min))
+             image))
+  :body (image-show-frame it (% (1+ i) 2) t))
+;; A window grows and shrinks by a line.
+(display-stages-scenario window-resize :paints t
+  :setup (prog1 (display-stages--show (scaling--lines-buffer "stages" 2000))
+           (split-window))
+  :body (enlarge-window (if (cl-evenp i) 1 -1)))
 
 (defun display-stages-list ()
   "Print each scenario's name and whether its steps paint, one SCALING line each."
@@ -342,12 +446,18 @@ and the timers they set off, the loop's own polls not.")
   "Why the steps are no measurement: a change or timer that waited.")
 
 (defvar display-stages--owed nil
-  "Redisplay cycles run when the last timer other than the step loop's ran,
-until a cycle after it has run: then nil.")
+  "Display passes run when the last timer other than the step loop's ran,
+until a pass after it has run: then nil.")
 
 (defun display-stages--cycles ()
   "Redisplay cycles run so far."
   (alist-get 'cycles (romacs--display-stats)))
+
+(defun display-stages--passes ()
+  "Display passes run so far: redisplay cycles, and the redisplay trigger's
+checks, each of which either found the frame current or set off a cycle."
+  (let ((stats (romacs--display-stats)))
+    (+ (alist-get 'cycles stats) (alist-get 'trigger-checks stats 0))))
 
 (defun display-stages--work (run &rest args)
   "Call RUN with ARGS, counting the instructions it ran as a step's work.
@@ -372,19 +482,20 @@ loop's own, what it runs is the step's work, and a redisplay is owed
 after it."
   (if (eq (timer--function timer) display-stages--poll)
       (funcall run timer)
-    (setq display-stages--owed (display-stages--cycles))
+    (setq display-stages--owed (display-stages--passes))
     (display-stages--work run timer)))
 
 (defun display-stages--settled-p ()
-  "Whether the step marked last has settled: its redisplay ran, no timer is
-ripe, idle timers included, and a redisplay ran after the last timer
-other than the loop's own."
+  "Whether the step marked last has settled: its redisplay ran (or the
+redisplay trigger found the frame current), no timer is ripe, idle timers
+included, and a display pass ran after the last timer other than the
+loop's own."
   (and (romacs--redisplay-since-mark)
        ;; No timer ripe, ordinary or (while idle) idle, as the host's
        ;; own pass chooses them (`romacs--timer-next').
        (not (eql (romacs--timer-delay) 0))
        (or (null display-stages--owed)
-           (and (> (display-stages--cycles) display-stages--owed)
+           (and (> (display-stages--passes) display-stages--owed)
                 (progn (setq display-stages--owed nil) t)))))
 
 (defvar display-stages--baseline nil
@@ -434,10 +545,12 @@ run that loaded more says which."
                                              load-history))))))
 
 (defun display-stages--reading ()
-  "What Romacs ran for the steps so far (`step-instructions': their work
-and redisplays), collections so far, and redisplay's counts."
-  (let* ((stats (romacs--display-stats)) (shown (alist-get 'instructions stats)))
-    `((step-instructions . ,(and shown (romacs-instructions) (+ display-stages--work shown)))
+  "What Romacs ran for the steps so far (`step-instructions': their work,
+their redisplays and the redisplay trigger's checks), collections so far,
+and redisplay's counts."
+  (let* ((stats (romacs--display-stats)) (shown (alist-get 'instructions stats))
+         (checked (alist-get 'trigger-instructions stats 0)))
+    `((step-instructions . ,(and shown (romacs-instructions) (+ display-stages--work shown checked)))
       (collections . ,gcs-done) (collected . ,display-stages--collected) ,@stats
       ,@(and display-stages--fontified `((fontified-chars . ,display-stages--fontified)))
       ,@(and display-stages--above `((above-instructions . ,display-stages--above))))))

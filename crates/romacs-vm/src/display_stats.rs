@@ -26,11 +26,15 @@ use crate::{Result, Value, Vm};
 /// The counts `romacs--display-stats` reports, in order: the VM's own,
 /// then from HOST on the host calls its thread keeps.
 const NAMES: [&str; COUNTS] = ["cycles", "instructions", "conses", "windows-visited", "windows-reused", "windows-rebuilt",
-    "band-expansions", "band-evals", "check-mismatches", "layouts", "measures", "frames-submitted",
+    "band-expansions", "band-evals", "check-mismatches",
+    "trigger-checks", "trigger-stale", "trigger-instructions", "trigger-empty-instructions", "trigger-misses",
+    "layouts", "measures", "frames-submitted",
     "lines-laid", "lines-served", "rows-wrapped", "rows-reused"];
-const COUNTS: usize = 16;
+const COUNTS: usize = 21;
 const INSTRUCTIONS: usize = 1;
-const HOST: usize = 9;
+/// The trigger's instruction counts: host results, as INSTRUCTIONS is.
+const TRIGGER_INSTRUCTIONS: [usize; 2] = [11, 12];
+const HOST: usize = 14;
 const HOST_CALLS: [&str; COUNTS - HOST] = ["layout.lay_out", "layout.measure", "sender.submit_scene",
     "layout.lines-laid", "layout.lines-served", "layout.rows-wrapped", "layout.rows-reused"];
 
@@ -59,6 +63,18 @@ pub(crate) struct DisplayStats {
     pub(crate) bands: u64,
     /// Reused windows the reuse check found different (`Vm::check_reuse`).
     pub(crate) mismatches: u64,
+    /// The redisplay trigger's checks (`Vm::display_stale`), and how many
+    /// found the published frame stale.
+    trigger_checks: u64,
+    trigger_stale: u64,
+    /// The instructions the checks took, and what an empty bracket of the
+    /// same two counter reads took beside each: the counting's own cost.
+    /// Zero where the thread has no instruction counter.
+    trigger_instructions: u64,
+    trigger_empty: u64,
+    /// Checks found current whose frame, built anyway under
+    /// `romacs-display-check`, still changed (`Vm::trigger_missed`).
+    pub(crate) trigger_misses: u64,
     /// The thread's instruction counter and the conses made, at the begin
     /// of the cycle under way.
     open: Option<(Option<u64>, u64)>,
@@ -80,7 +96,42 @@ impl DisplayStats {
     }
 }
 
+/// The instruction counter at a trigger decision's start, with the cost
+/// of an empty bracket read just before it (`Vm::trigger_close`).
+pub struct TriggerBracket { start: Option<u64>, empty: Option<u64> }
+
+impl TriggerBracket {
+    /// An empty bracket, then the decision's opening read.
+    fn open() -> Self {
+        let first = crate::host::instruction_count();
+        let start = crate::host::instruction_count();
+        Self { start, empty: first.zip(start).map(|(a, b)| b.saturating_sub(a)) }
+    }
+}
+
+impl DisplayStats {
+    /// A trigger check opened by BRACKET ended, finding the frame STALE.
+    pub(crate) fn trigger_end(&mut self, bracket: TriggerBracket, stale: bool) {
+        self.trigger_checks += 1;
+        self.trigger_stale += u64::from(stale);
+        if let (Some(from), Some(to), Some(empty)) = (bracket.start, crate::host::instruction_count(), bracket.empty) {
+            self.trigger_instructions += to.saturating_sub(from);
+            self.trigger_empty += empty;
+        }
+    }
+}
+
 impl Vm {
+    /// The host begins a redisplay trigger decision: the check
+    /// (`Vm::display_stale`) and what the host does around it, counted in
+    /// `romacs--display-stats` once `trigger_close` ends it.
+    pub fn trigger_open(&mut self) -> TriggerBracket {
+        TriggerBracket::open()
+    }
+    /// The decision BRACKET began ended, finding the frame STALE or not.
+    pub fn trigger_close(&mut self, bracket: TriggerBracket, stale: bool) {
+        self.display_state.stats.trigger_end(bracket, stale);
+    }
     /// A redisplay cycle begins on the evaluator; `redisplay_done` ends it.
     pub fn redisplay_begin(&mut self) {
         let conses = self.allocation.consed.conses;
@@ -94,7 +145,8 @@ impl Vm {
     fn display_counts(&self) -> [u64; COUNTS] {
         let stats = &self.display_state.stats;
         let own: [u64; HOST] = [stats.cycles, stats.instructions, stats.conses, stats.reused + stats.rebuilt, stats.reused, stats.rebuilt,
-                                stats.bands, self.display_state.mode_line_evals, stats.mismatches];
+                                stats.bands, self.display_state.mode_line_evals, stats.mismatches,
+                                stats.trigger_checks, stats.trigger_stale, stats.trigger_instructions, stats.trigger_empty, stats.trigger_misses];
         std::array::from_fn(|i| if i < HOST { own[i] } else { romacs_display_protocol::call_count::of(HOST_CALLS[i - HOST]) })
     }
     /// `romacs--display-stats`: ((NAME . COUNT)...) since the last reset,
@@ -111,10 +163,15 @@ impl Vm {
         // `romacs-instructions' is: a replay hands back the recorded one.
         let spent = now[INSTRUCTIONS].saturating_sub(own[INSTRUCTIONS]);
         let spent = crate::flight::value("display-instructions", || crate::host::instruction_count().map(|_| spent));
+        let trigger = crate::flight::value("display-trigger-instructions", || TRIGGER_INSTRUCTIONS.map(|i| now[i].saturating_sub(own[i])));
         let mut list = Value::NIL;
         for i in (0..COUNTS).rev() {
             let base = if i < HOST { own[i] } else { host[i - HOST] };
-            let count = if i == INSTRUCTIONS { spent } else { Some(now[i].saturating_sub(base)) };
+            let count = match TRIGGER_INSTRUCTIONS.iter().position(|&at| at == i) {
+                _ if i == INSTRUCTIONS => spent,
+                Some(at) => Some(trigger[at]),
+                None => Some(now[i].saturating_sub(base)),
+            };
             let count = match count {
                 Some(count) => Value::integer(i64::try_from(count).map_err(|e| e.to_string())?)?,
                 None => Value::NIL,
