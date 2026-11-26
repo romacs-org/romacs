@@ -394,6 +394,10 @@ up, on the row of the level it came from."
   "Draw the list again, its data read anew: its `revert-buffer-function'."
   (funcall romacs-list-redraw-function t))
 
+(defun romacs-list--highlight ()
+  "Highlight the row at point, in the face the mode chose."
+  (hl-line-mode 1))
+
 (defvar-keymap romacs-list-mode-map
   :doc "Keys of a list, besides `special-mode''s."
   :suppress t
@@ -411,7 +415,8 @@ up, on the row of the level it came from."
   (setq-local truncate-lines t cursor-type nil
               revert-buffer-function #'romacs-list--revert
               hl-line-face 'romacs-list-row)
-  (hl-line-mode)
+  ;; After every mode's body: a derived mode's `hl-line-face' is the overlay's.
+  (add-hook 'after-change-major-mode-hook #'romacs-list--highlight nil t)
   (add-hook 'window-buffer-change-functions #'romacs-list--shown-in nil t)
   (add-hook 'window-size-change-functions #'romacs-list--resized nil t)
   (add-hook 'kill-buffer-hook #'romacs-list--stop nil t)

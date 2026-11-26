@@ -454,6 +454,13 @@ Record each chat shown in `shown' as (SESSION ACTION)."
             (romacs-list--tick (current-buffer)))
           (should-not romacs-list--ticker))))))
 
+(ert-deftest romacs-agent-board-highlights-its-row-in-its-own-face ()
+  (romacs-agent-board-tests--with
+    (mk "a" "a" 'idle 10)
+    (romacs-agent-board-tests--board "/p/one"
+      (hl-line-highlight)
+      (should (eq (overlay-get hl-line-overlay 'face) 'romacs-agent-board-row)))))
+
 (ert-deftest romacs-agent-board-starts-with-a-banner ()
   (romacs-agent-board-tests--with
     (let ((session (mk "a" "a" 'idle 10)))
