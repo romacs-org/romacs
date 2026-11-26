@@ -47,8 +47,8 @@ def publish(bars: Path, draft: Path, kind: str) -> bool:
     return True
 
 
-def measure(kind: str, bars: Path, target: Path, work: Path, env: dict[str, str]) -> None:
-    """Build the GUI and write the harness draft in WORK."""
+def measure(kind: str, bars: Path, target: Path, work: Path, env: dict[str, str]) -> Path:
+    """Build the GUI and return the draft from a passing harness run."""
     env = dict(env, CARGO_TARGET_DIR=str(target), ROMACS_RUNTIME_ROOT=str(ROOT), PYTHONDONTWRITEBYTECODE='1')
     paths = (env['ROMACS_TOOLCHAIN_BIN'], env.get('ROMACS_DISPLAY_TOOLS'),
              os.path.dirname(env['ROMACS_TEST_LABWC']), env.get('PATH', os.defpath))
@@ -58,9 +58,22 @@ def measure(kind: str, bars: Path, target: Path, work: Path, env: dict[str, str]
     build = ['cargo', 'build', '--profile', 'gate', '--locked', '--offline', '-p', 'romacs-vm-gui',
              '--bin', 'romacs-vm-gui']
     record = [sys.executable, '-B', str(STAGES / f'{kind}_stages_live.py'), '--binary', str(target / 'gate/romacs-vm-gui'),
-              '--output', str(work / 'report'), '--bars', str(bars), '--write-bars', str(work / 'draft.json')]
-    for command in (build, record):
+              '--bars', str(bars)]
+    subprocess.run(build, cwd=ROOT, env=env, check=True, stdin=subprocess.DEVNULL)
+
+    def attempt(name: str) -> Path:
+        draft = work / f'{name}.json'
+        command = [*record, '--output', str(work / name), '--write-bars', str(draft)]
         subprocess.run(command, cwd=ROOT, env=env, check=True, stdin=subprocess.DEVNULL)
+        return draft
+
+    try:
+        return attempt('first')
+    except subprocess.CalledProcessError as error:
+        if error.returncode != 1:
+            raise
+        print(f'record-stage-bars: {kind} harness failed, retrying once', file=sys.stderr, flush=True)
+    return attempt('retry')
 
 
 def main() -> int:
@@ -80,8 +93,8 @@ def main() -> int:
     bars = STAGES / f'{kind}_stages_bars.json'
     try:
         with tempfile.TemporaryDirectory(prefix=f'romacs-{kind}-bars-') as work:
-            measure(kind, bars, target, Path(work), dict(os.environ))
-            changed = publish(bars, Path(work) / 'draft.json', kind)
+            draft = measure(kind, bars, target, Path(work), dict(os.environ))
+            changed = publish(bars, draft, kind)
     except subprocess.CalledProcessError as error:
         return error.returncode if error.returncode > 0 else 1
     except (OSError, ValueError) as error:
