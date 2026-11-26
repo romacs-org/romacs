@@ -3,8 +3,9 @@
 //! (`crate::command_loop::Streams`), which the key reader fills.
 // The stream's readers cannot fail, but a leaf primitive's body returns `Out`.
 #![expect(clippy::unnecessary_wraps, reason = "a leaf primitive's body returns Out; reading the input stream cannot fail")]
-use super::*;
 use super::keyboard::{CHAR_META, event_array};
+use crate::Value;
+use crate::prim::{Fault, Leaf};
 
 /// This command's keys, `this_command_keys[0 .. this_command_key_count]`.
 fn command_keys(cx: &Leaf<'_>) -> Vec<Value> {
