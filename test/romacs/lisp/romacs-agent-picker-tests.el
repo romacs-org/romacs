@@ -400,7 +400,7 @@ affixation it saw pushed on the list in cell ASKED."
               ((symbol-function 'romacs-agent-start)
                (lambda (&rest _) (interactive) (setq started (called-interactively-p 'any)))))
       (with-temp-buffer
-        (insert (propertize "row\n" 'romacs-agent-board-row (list :kind 'project :cwd (directory-file-name sub))))
+        (insert (propertize "row\n" 'romacs-list-row (list :kind 'project :cwd (directory-file-name sub))))
         (goto-char (point-min))
         (romacs-agent-board-new)
         (should (equal offered sub))

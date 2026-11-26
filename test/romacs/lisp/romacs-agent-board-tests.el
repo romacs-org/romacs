@@ -211,12 +211,12 @@ Record each chat shown in `shown' as (SESSION ACTION)."
        (romacs-agent-board-mode)
        (setq romacs-agent-board--project ,project)
        (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session &optional action _source) (push (list session action) shown)))
-                 ((symbol-function 'romacs-agent-board--columns) (lambda (_) 100)))
+                 ((symbol-function 'romacs-list-columns) (lambda (_) 100)))
          (romacs-agent-board--redraw)
          ,@body))))
 
 (defun romacs-agent-board-tests--at ()
-  (plist-get (romacs-agent-board--row) :id))
+  (plist-get (romacs-list-row) :id))
 
 (ert-deftest romacs-agent-board-keys-move-and-settle ()
   (romacs-agent-board-tests--with
@@ -231,19 +231,19 @@ Record each chat shown in `shown' as (SESSION ACTION)."
               ;; Shown anew, on the first thread; n and p skip the lines
               ;; that are no row.
               (should (equal (romacs-agent-board-tests--at) "a"))
-              (romacs-agent-board-previous 3)
+              (romacs-list-previous 3)
               (should (equal (romacs-agent-board-tests--at) "/p/one"))
-              (romacs-agent-board-next 1)
-              (romacs-agent-board-next 5)
+              (romacs-list-next 1)
+              (romacs-list-next 5)
               (should (equal (romacs-agent-board-tests--at) "b"))
-              (romacs-agent-board-previous 1)
+              (romacs-list-previous 1)
               ;; s settles: it leaves the board.
               (romacs-agent-board-settle)
               (should (romacs-agent-settled-p (romacs-agent-get "a")))
-              (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "b")))
+              (should (equal (romacs-agent-board-tests--ids (romacs-list-shown-rows)) '("/p/one" "b")))
               ;; M-RET: the Settled section, where s brings it back.
               (romacs-agent-board-toggle-settled)
-              (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a")))
+              (should (equal (romacs-agent-board-tests--ids (romacs-list-shown-rows)) '("/p/one" "a")))
               (should (equal (romacs-agent-board-tests--at) "a"))
               (romacs-agent-board-settle)
               (should-not (romacs-agent-settled-p (romacs-agent-get "a")))
@@ -303,14 +303,14 @@ Record each chat shown in `shown' as (SESSION ACTION)."
     (let ((lead (mk "lead" "lead" 'idle 10)))
       (mk "w" "w" 'idle 20 :done-seq 2 :options '(:parent "lead"))
       (romacs-agent-board-tests--board "/p/one"
-        (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "lead")))
+        (should (equal (romacs-agent-board-tests--ids (romacs-list-shown-rows)) '("/p/one" "lead")))
         (romacs-agent-board-fold)
-        (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "lead" "w")))
+        (should (equal (romacs-agent-board-tests--ids (romacs-list-shown-rows)) '("/p/one" "lead" "w")))
         (should (equal (romacs-agent-board-tests--at) "lead"))
         ;; b on a delegated thread folds its parent's.
-        (romacs-agent-board-next 1)
+        (romacs-list-next 1)
         (romacs-agent-board-close-fold)
-        (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "lead")))
+        (should (equal (romacs-agent-board-tests--ids (romacs-list-shown-rows)) '("/p/one" "lead")))
         (should (equal (romacs-agent-board-tests--at) "lead"))
         ;; RET opens its chat in the board's window.
         (romacs-agent-board-open)
@@ -322,15 +322,15 @@ Record each chat shown in `shown' as (SESSION ACTION)."
       (romacs-agent-board-tests--board "/p/one"
         ;; A project opens its first thread.
         (goto-char (point-min))
-        (romacs-agent-board-next 1)
+        (romacs-list-next 1)
         (romacs-agent-board-open)
         (should (= (length shown) 1))
         ;; A thread no longer known: the board is drawn again.
         (remhash "a" romacs-agent--sessions)
-        (romacs-agent-board-next 1)
-        (should (equal (plist-get (romacs-agent-board--row) :id) (romacs-agent-id a)))
+        (romacs-list-next 1)
+        (should (equal (plist-get (romacs-list-row) :id) (romacs-agent-id a)))
         (should-error (romacs-agent-board-open) :type 'user-error)
-        (should-not (romacs-agent-board--shown-rows))
+        (should-not (romacs-list-shown-rows))
         (should (= (length shown) 1))))))
 
 (ert-deftest romacs-agent-board-keys-approve ()
@@ -345,7 +345,7 @@ Record each chat shown in `shown' as (SESSION ACTION)."
           (romacs-agent-board-approve)
           (should (equal answered '(("tool" "r1" t))))
           ;; A question is answered in its chat.
-          (romacs-agent-board-next 1)
+          (romacs-list-next 1)
           (romacs-agent-board-approve)
           (should (= (length answered) 1))
           (should (= (length shown) 1)))))))
@@ -359,7 +359,7 @@ Record each chat shown in `shown' as (SESSION ACTION)."
     (romacs-agent-board-tests--board "/p/one"
       (cl-letf (((symbol-function 'read-from-minibuffer) (lambda (&rest _) "theme")))
         (romacs-agent-board-filter))
-      (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows))
+      (should (equal (romacs-agent-board-tests--ids (romacs-list-shown-rows))
                      '("/p/one" "b" "/p/two" "c")))
       ;; C-g puts the filter back as it was.
       (cl-letf (((symbol-function 'read-from-minibuffer) (lambda (&rest _) (signal 'quit nil))))
@@ -402,9 +402,9 @@ Record each chat shown in `shown' as (SESSION ACTION)."
     (mk "a" "a" 'running 5 :activity "Read" :turn-start (- now 5))
     (let ((line (romacs-agent-board--line (cadr (rows :project "/p/one")) 40)))
       (should (= (string-width line) 40))
-      (should-not (text-property-not-all 0 (length line) 'romacs-agent-board-live nil line)))
+      (should-not (text-property-not-all 0 (length line) 'romacs-list-live nil line)))
     (let ((line (romacs-agent-board--line (cadr (rows :project "/p/one")) 120)))
-      (should (text-property-not-all 0 (length line) 'romacs-agent-board-live nil line)))))
+      (should (text-property-not-all 0 (length line) 'romacs-list-live nil line)))))
 
 (ert-deftest romacs-agent-board-doing-and-time ()
   (romacs-agent-board-tests--with
@@ -436,22 +436,30 @@ Record each chat shown in `shown' as (SESSION ACTION)."
     (let ((session (mk "a" "a" 'running 5 :activity "Read" :turn-start (- now 5))))
       (mk "b" "b" 'idle 50)
       (romacs-agent-board-tests--board "/p/one"
-        (let ((before (buffer-string)) (romacs-agent-board--ticker (run-at-time 3600 nil #'ignore)))
+        (let ((before (buffer-string)))
+          (setq romacs-list--ticker (run-at-time 3600 nil #'ignore))
           (romacs-agent--raise session '(:type tool :state started :name "Bash"))
-          (cl-letf (((symbol-function 'romacs-agent-board--shown) (lambda () (current-buffer))))
-            (romacs-agent-board--tick))
+          (cl-letf (((symbol-function 'romacs-list-windows) (lambda (_) (list (selected-window)))))
+            (romacs-list--tick (current-buffer)))
           (should (string-search "Bash" (buffer-string)))
           (should-not (string-search "Read" (buffer-string)))
           ;; Only the cells at work changed, each its own width.
           (should (= (length before) (length (buffer-string))))
-          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "b")))
+          (should (equal (romacs-agent-board-tests--ids (romacs-list-shown-rows)) '("/p/one" "a" "b")))
           ;; Nothing at work: the clock stops.
           (setf (romacs-agent-state session) 'idle)
           (romacs-agent--changed session)
           (romacs-agent-board--redraw t)
-          (cl-letf (((symbol-function 'romacs-agent-board--shown) (lambda () (current-buffer))))
-            (romacs-agent-board--tick))
-          (should-not romacs-agent-board--ticker))))))
+          (cl-letf (((symbol-function 'romacs-list-windows) (lambda (_) (list (selected-window)))))
+            (romacs-list--tick (current-buffer)))
+          (should-not romacs-list--ticker))))))
+
+(ert-deftest romacs-agent-board-highlights-its-row-in-its-own-face ()
+  (romacs-agent-board-tests--with
+    (mk "a" "a" 'idle 10)
+    (romacs-agent-board-tests--board "/p/one"
+      (hl-line-highlight)
+      (should (eq (overlay-get hl-line-overlay 'face) 'romacs-agent-board-row)))))
 
 (ert-deftest romacs-agent-board-starts-with-a-banner ()
   (romacs-agent-board-tests--with
@@ -462,7 +470,7 @@ Record each chat shown in `shown' as (SESSION ACTION)."
           (romacs-agent--changed session)
           (romacs-agent-board--redraw t)
           (goto-char (point-min))
-          (should-not (romacs-agent-board--row))
+          (should-not (romacs-list-row))
           (should (equal-including-properties
                    (buffer-substring (point) (line-end-position))
                    (romacs-working-still 100 state))))
@@ -486,18 +494,18 @@ Record each chat shown in `shown' as (SESSION ACTION)."
               (romacs-agents)
               (should (eq (window-buffer) (get-buffer "*romacs-agents*")))
               (should (derived-mode-p 'romacs-agent-board-mode))
-              (should (= romacs-agent-board--width (- (window-body-width) 3)))
+              (should (= romacs-list--width (- (window-body-width) 3)))
               (romacs-agent-board-open)
-              (romacs-agent-board-next 30)
+              (romacs-list-next 30)
               (set-window-start nil (save-excursion (forward-line -10) (point)))
-              (let ((at (plist-get (romacs-agent-board--row) :id))
-                    (start (save-excursion (goto-char (window-start)) (plist-get (romacs-agent-board--row) :id))))
+              (let ((at (plist-get (romacs-list-row) :id))
+                    (start (save-excursion (goto-char (window-start)) (plist-get (romacs-list-row) :id))))
                 ;; A newer thread lands above both.
                 (mk "new" "new" 'idle 1)
                 (romacs-agent-board--refresh)
-                (should (romacs-agent-board--find "new"))
-                (should (equal (plist-get (romacs-agent-board--row) :id) at))
-                (should (equal (save-excursion (goto-char (window-start)) (plist-get (romacs-agent-board--row) :id))
+                (should (romacs-list--find "new"))
+                (should (equal (plist-get (romacs-list-row) :id) at))
+                (should (equal (save-excursion (goto-char (window-start)) (plist-get (romacs-list-row) :id))
                                start))))
           (kill-buffer "*romacs-agents*"))))))
 
@@ -511,8 +519,8 @@ Record each chat shown in `shown' as (SESSION ACTION)."
         (insert "the user's text")
         (let ((other (current-buffer)))
           (set-window-buffer (selected-window) other)
-          (romacs-agent-board--shown-in (selected-window))
-          (romacs-agent-board--resized (selected-window))
+          (romacs-list--shown-in (selected-window))
+          (romacs-list--resized (selected-window))
           (should (equal (with-current-buffer other (buffer-string)) "the user's text")))))))
 
 (ert-deftest romacs-agent-board-filter-reuses-the-project-listing ()
@@ -537,8 +545,8 @@ Record each chat shown in `shown' as (SESSION ACTION)."
           (dolist (word '("a" "al" "alpha"))
             (setq romacs-agent-board--words (list word))
             (romacs-agent-board--redraw))
-          (should (romacs-agent-board--find "one"))
-          (should-not (romacs-agent-board--find "two"))
+          (should (romacs-list--find "one"))
+          (should-not (romacs-list--find "two"))
           (should (= listings archives 1)))))))
 
 (ert-deftest romacs-agent-board-lists-projects-with-threads-or-transcripts ()
@@ -592,22 +600,22 @@ Record each chat shown in `shown' as (SESSION ACTION)."
     (mk "a" "a" 'idle 10)
     (mk "b" "b" 'idle 20 :cwd "/p/two/")
     (romacs-agent-board-tests--board nil
-      (romacs-agent-board-next 1)
+      (romacs-list-next 1)
       (should (equal (romacs-agent-board-tests--at) "/p/two"))
       (dolist (keys '(("RET" "^") ("TAB" "TAB") ("RET" "DEL")
                       ("RET" "<backtab>") ("RET" "S-<tab>")))
         (call-interactively (key-binding (kbd (car keys))))
         (should (equal romacs-agent-board--project "/p/two"))
-        (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows))
+        (should (equal (romacs-agent-board-tests--ids (romacs-list-shown-rows))
                        '("/p/two" "b")))
         (should (equal (romacs-agent-board-tests--at) "/p/two"))
         (should-not shown)
         (unless (equal (cadr keys) "TAB")
-          (romacs-agent-board-next 1)
+          (romacs-list-next 1)
           (should (equal (romacs-agent-board-tests--at) "b")))
         (call-interactively (key-binding (kbd (cadr keys))))
         (should-not romacs-agent-board--project)
-        (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows))
+        (should (equal (romacs-agent-board-tests--ids (romacs-list-shown-rows))
                        '("/p/one" "/p/two")))
         (should (equal (romacs-agent-board-tests--at) "/p/two"))))))
 
@@ -619,7 +627,7 @@ Record each chat shown in `shown' as (SESSION ACTION)."
       (should (equal (romacs-agent-board-tests--at) "/p/one"))
       (save-excursion
         (forward-line 1)
-        (should-not (romacs-agent-board--row))
+        (should-not (romacs-list-row))
         (should (equal-including-properties
                  (buffer-substring (point) (line-end-position))
                  (propertize (make-string 100 ?─) 'face 'romacs-agent-rule)))

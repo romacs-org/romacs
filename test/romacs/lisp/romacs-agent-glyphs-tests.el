@@ -88,7 +88,7 @@
 
 (ert-deftest romacs-agent-glyphs-a-cut-cell-fits-its-column ()
   (dolist (text '("❤️🤔x" "🤔🤔🤔🤔🤔" "abcdefgh"))
-    (should (= (string-width (romacs-agent-board--cell text 4)) 4))))
+    (should (= (string-width (romacs-list-cell text 4)) 4))))
 
 (provide 'romacs-agent-glyphs-tests)
 ;;; romacs-agent-glyphs-tests.el ends here
