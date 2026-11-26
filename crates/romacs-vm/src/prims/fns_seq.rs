@@ -60,8 +60,8 @@ fn nconc_list(cx, lists: Value) {
     nconc_values(cx, &lists)
 }}
 
-/// `nconc` of LISTS: each non-final list checked, a circular one refused,
-/// quit polled (`for_each_tail_step`); the key reader splices with it too.
+/// `nconc` of LISTS: each non-final list checked, a circular one refused
+/// (`for_each_tail_step`); the key reader splices with it too.
 pub(crate) fn nconc_values(cx: &mut Leaf<'_>, lists: &[Value]) -> Out {
     let mut lists = lists.to_vec();
     let mut value = Value::NIL;

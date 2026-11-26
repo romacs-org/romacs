@@ -44,6 +44,9 @@ impl Taken {
 const QUEUED: u8 = 0;
 const HOST: u8 = 1;
 const BATCH: u8 = 2;
+/// An `unread-command-events` entry, rooted as it was queued, decoded once
+/// its pop's watcher ran (`unread_entry`).
+const UNREAD: u8 = 3;
 
 /// `read_char` for the activation AT: the next event in its result (nil
 /// when SECONDS passed), recorded as input; whether it was the quit
@@ -67,7 +70,7 @@ fn read<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, own: &RootFrame, m
     let mut quit = false;
     let taken = loop {
         let (source, packed) = step(m, gc.by_ref(), at, (at, own), take_queued)?;
-        let mut taken = Taken::unpack(packed);
+        let mut taken = Taken::unpack(if source == UNREAD { m.leaf(own, unread_entry) } else { packed });
         if source == HOST {
             call(m, gc.by_ref(), at, args.seconds, |vm, seconds| Ok(vec![vm.intern("romacs--read-host-input"), seconds_value(vm, seconds)]))?;
             let keyboard_quit;
@@ -111,26 +114,8 @@ fn take_queued(vm: &mut Vm, (at, own): (usize, &RootFrame)) -> Done<(u8, [bool; 
         (taken.reread, taken.recorded, taken.post) = (true, true, true);
         unwrap_menu_event(vm, event)
     } else if let Some(event) = pop(vm, at, "unread-command-events")? {
-        // (t . EVENT) is read as new input; (no-record . EVENT) was recorded.
-        let cx = Leaf::new(vm);
-        let (head, tail) = cx.pair(event).unwrap_or((Value::NIL, Value::NIL));
-        let mut cx = Leaf::new(vm);
-        let event = if cx.pair(event).is_some() && head == Value::TRUE {
-            tail
-        } else {
-            taken.reread = true;
-            if cx.pair(event).is_some() && head == cx.intern("no-record") {
-                taken.recorded = true;
-                tail
-            } else {
-                event
-            }
-        };
-        let cx = Leaf::new(vm);
-        match cx.pair(event) {
-            Some((head, tail)) if tail == Leaf::new(vm).intern("disabled") && symbol_or_integer(vm, head) => head,
-            _ => event,
-        }
+        vm.set_rooted(own, 0, event);
+        return Ok((UNREAD, taken.pack()));
     } else if let Some(event) = pop(vm, at, "unread-input-method-events")? {
         taken.reread = true;
         unwrap_menu_event(vm, event)
@@ -146,6 +131,33 @@ fn take_queued(vm: &mut Vm, (at, own): (usize, &RootFrame)) -> Done<(u8, [bool; 
     };
     vm.set_rooted(own, 0, event);
     Ok((QUEUED, taken.pack()))
+}
+
+/// The `unread-command-events` entry rooted in OWN, decoded as its pop's
+/// watcher left it: (t . EVENT) is read as new input, (no-record . EVENT)
+/// was recorded, and (EVENT . disabled) is EVENT.
+fn unread_entry(vm: &mut Vm, own: &RootFrame) -> [bool; 4] {
+    let mut taken = Taken::default();
+    let entry = vm.rooted(own, 0);
+    let mut cx = Leaf::new(vm);
+    let (no_record, disabled) = (cx.intern("no-record"), cx.intern("disabled"));
+    let event = match cx.pair(entry) {
+        Some((head, event)) if head == Value::TRUE => event,
+        Some((head, event)) if head == no_record => {
+            (taken.reread, taken.recorded) = (true, true);
+            event
+        }
+        _ => {
+            taken.reread = true;
+            entry
+        }
+    };
+    let event = match Leaf::new(vm).pair(event) {
+        Some((head, tail)) if tail == disabled && symbol_or_integer(vm, head) => head,
+        _ => event,
+    };
+    vm.set_rooted(own, 0, event);
+    taken.pack()
 }
 
 /// The head of the list in the variable NAME, which keeps the rest; None
@@ -367,8 +379,7 @@ fn method_call<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, own: &RootF
 /// The method's events: the first is the event now, and the rest go before
 /// `unread-post-input-method-events` as the Lisp port put them, with `nconc`
 /// itself (`fns_seq::nconc_values`): the method's own list extended, a
-/// non-list tail or a circular one refused, quit polled. Whether it gave an
-/// event.
+/// non-list tail or a circular one refused. Whether it gave an event.
 fn queue_rest(vm: &mut Vm, at: usize, own: &RootFrame) -> Done<bool> {
     let events = vm.reads.act(at).result;
     let cx = Leaf::new(vm);
