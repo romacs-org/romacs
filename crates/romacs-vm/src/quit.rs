@@ -182,6 +182,18 @@ impl Vm {
         pressed || (busy && self.slots[self.quit_slots[0]].value != Value::NIL && self.slots[self.quit_slots[0]].value != Value::UNBOUND)
     }
 
+    /// Whether a native loop's entry should stop before it starts, as
+    /// GNU's maybe_quit: `quit_due`, or a user signal still queued that
+    /// `debug-on-event' may name, then the full [`Self::native_stop_due`].
+    /// The queue, not the arrival flag: a safepoint that looked while
+    /// `debug-on-event' named another event cleared the flag and left the
+    /// signal counted. A few loads where nothing is pending: every short
+    /// scan asks.
+    #[inline(always)]
+    pub(crate) fn entry_stop_due(&self) -> bool {
+        (self.quit_due() || crate::host::user_signal_waiting(u8::MAX)) && self.native_stop_due()
+    }
+
     /// The engine's periodic safepoint also polls inside `while-no-input',
     /// whose input arrives as ordinary events (keyboard.c
     /// kbd_buffer_store_event sets `quit-flag' to `throw-on-input').

@@ -252,6 +252,8 @@ struct SearchSlots {
     scan: Places<{ SCAN_VARIABLES.len() }>,
     /// `forward-comment-function`, which replaces `forward-comment`.
     forward_comment: Places<1>,
+    /// `romacs-inhibit-syntax-summaries` and `romacs-syntax-summaries-check`.
+    summaries: Places<2>,
 }
 /// The variables a syntax scan obeys, in the order [`Vm::scan_variables`]
 /// gives their values: six flags, then how far `syntax-propertize` has
@@ -898,6 +900,7 @@ impl Vm {
                 lookup_properties: Places::new([self.slot("parse-sexp-lookup-properties")]),
                 scan: Places::new(SCAN_VARIABLES.map(|name| self.slot(name))),
                 forward_comment: Places::new([self.slot("forward-comment-function")]),
+                summaries: Places::new([self.slot("romacs-inhibit-syntax-summaries"), self.slot("romacs-syntax-summaries-check")]),
             });
         }
         self.mutator_rest.regexp_cache.slots.as_mut().expect("found above")
@@ -920,6 +923,13 @@ impl Vm {
     /// `forward-comment-function` in the current buffer.
     pub(crate) fn forward_comment_function(&mut self) -> Result<Value> {
         self.search_values(|slots| &mut slots.forward_comment).map(|[function]| function)
+    }
+    /// Whether the current buffer's syntax scans leave the summaries
+    /// alone (`romacs-inhibit-syntax-summaries`), and whether they check
+    /// them against the scanner (`romacs-syntax-summaries-check`).
+    pub(crate) fn summary_variables(&mut self) -> Result<[bool; 2]> {
+        let set = |value: Value| value != Value::NIL && value != Value::UNBOUND;
+        self.search_values(|slots| &mut slots.summaries).map(|values| values.map(set))
     }
     /// The symbol `syntax-table`.
     pub(crate) fn syntax_table_symbol(&mut self) -> Value {
