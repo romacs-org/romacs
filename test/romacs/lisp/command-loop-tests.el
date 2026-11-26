@@ -1269,7 +1269,9 @@ echo area is cleared for it, and puts them back after."
   (skip-unless (fboundp 'romacs--take-user-signal))
   (command-loop-tests--with-input (list (cons t ?a))
     (set--this-command-keys "x")
-    (let ((seen nil)
+    ;; Batch keeps no message in the echo area: an interactive one does.
+    (let ((noninteractive nil)
+          (seen nil)
           (input-method-function (lambda (c) (list c))))
       (message "shown")
       (cl-letf* ((clear (symbol-function 'romacs--clear-echo))

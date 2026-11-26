@@ -256,7 +256,7 @@ fn a_closure_binding_runs_as_the_command() {
 #[test]
 fn a_command_event_is_its_own_key_with_a_local_last_command_event() {
     let mut vm = Vm::new();
-    vm.eval_source("(progn (setq-default last-command-event 'default) (set (make-local-variable 'last-command-event) 'local) \
+    vm.eval_source("(progn (set-default 'last-command-event 'default) (set (make-local-variable 'last-command-event) 'local) \
                     (defvar probe nil) (global-set-key [f7] (lambda () (interactive) (setq probe (this-command-keys-vector)))))")
         .unwrap();
     vm.command_event(CommandEvent::Named("f7".into())).unwrap();
