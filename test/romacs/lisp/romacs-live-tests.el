@@ -30,6 +30,8 @@
 (defvar romacs-server-build-watch)
 (defvar warm-restart-directory)
 
+(declare-function romacs-runtime-epoch "crates/romacs-vm/src/prims/sysname.rs" ())
+
 (defun romacs-live-tests--git (dir &rest args)
   "Git ARGS in DIR; its output."
   (with-temp-buffer
@@ -54,7 +56,9 @@ and a build of that commit: a plist `:top', `:src', `:build', `:commit'."
   (let* ((top (file-name-as-directory (make-temp-file "romacs-live-" t)))
          (src (expand-file-name "src/" top))
          (build (expand-file-name "build/" top)))
-    (romacs-live-tests--write (expand-file-name "etc/romacs-runtime-epoch" src) "5\n")
+    (dolist (root (list src build))
+      (romacs-live-tests--write (expand-file-name "etc/romacs-runtime-epoch.d/2026-11-26-test-base" root)
+                                "Fixture contract\n"))
     (pcase-dolist (`(,path . ,text) files)
       (romacs-live-tests--write (expand-file-name path src) text)
       (romacs-live-tests--write (expand-file-name path build) text))
@@ -75,7 +79,8 @@ and a build of that commit: a plist `:top', `:src', `:build', `:commit'."
           (romacs-live-mode-line nil) (global-mode-string nil)
           (romacs-live-directory (expand-file-name "store" (plist-get ,fixture :top)))
           (romacs-live-keymap-defaults-function nil))
-     (cl-letf (((symbol-function 'romacs-live--runtime-root) (lambda () (directory-file-name (plist-get ,fixture :build)))))
+     (cl-letf (((symbol-function 'romacs-live--runtime-root) (lambda () (directory-file-name (plist-get ,fixture :build))))
+               ((symbol-function 'romacs-runtime-epoch) (lambda () (romacs-live--tree-epoch (plist-get ,fixture :build)))))
        (unwind-protect (progn ,@body)
          (delete-directory (plist-get ,fixture :top) t)))))
 
@@ -272,13 +277,36 @@ and a build of that commit: a plist `:top', `:src', `:build', `:commit'."
   (romacs-live-tests--with fx
       `(("lisp/rlt-ep.el" . ,(romacs-live-tests--file "rlt-ep" "(defun rlt-ep-f () 1)")))
     (require 'rlt-ep)
-    (romacs-live-tests--edit fx "etc/romacs-runtime-epoch" "6\n")
+    (romacs-live-tests--edit fx "etc/romacs-runtime-epoch.d/2026-11-26-test-contract" "New contract\n")
     (romacs-live-tests--edit fx "lisp/vm/prelude.el" "(progn)\n")
     (romacs-live-tests--edit fx "lisp/rlt-ep.el" (romacs-live-tests--file "rlt-ep" "(defun rlt-ep-f () 2)"))
     (let ((reasons (plist-get (romacs-live-tests--update fx) :refusals)))
       (should (cl-some (lambda (r) (string-match-p "runtime epoch" r)) reasons))
       (should (cl-some (lambda (r) (string-match-p "lisp/vm/prelude.el" r)) reasons))
       (should (= (funcall 'rlt-ep-f) 1)))))
+
+(ert-deftest romacs-live-epoch-compares-names-in-each-source-kind ()
+  (romacs-live-tests--with fx
+      `(("lisp/rlt-ep.el" . ,(romacs-live-tests--file "rlt-ep" "(defun rlt-ep-f () 1)")))
+    (let* ((src (plist-get fx :src))
+           (file (expand-file-name "lisp/rlt-ep.el" src))
+           (commit (plist-get fx :commit))
+           (build (romacs-live-build))
+           (worktree (list :kind 'worktree :directory src)))
+      (romacs-live-tests--edit fx "etc/romacs-runtime-epoch.d/2026-11-26-test-base" "Reworded reason\n")
+      (should-not (plist-get (romacs-live-survey (list :source worktree :build build)) :refusals))
+      (romacs-live-tests--edit fx "etc/romacs-runtime-epoch.d/2026-11-26-other-contract" "Another contract\n")
+      (romacs-live-tests--git src "add" "etc")
+      (romacs-live-tests--git src "commit" "-q" "-m" "new contract")
+      (dolist (source (list worktree
+                            (list :kind 'rev :repository src :rev "HEAD")
+                            (list :kind 'files :files (list file))))
+        (let ((reason (car (plist-get (romacs-live-survey (list :source source :build build)) :refusals))))
+          (should (string-match-p (romacs-live--tree-epoch src) reason))
+          (should (string-match-p (plist-get build :epoch) reason))))
+      (should-not (plist-get (romacs-live-survey
+                              (list :source (list :kind 'rev :repository src :rev commit) :build build))
+                             :refusals)))))
 
 (ert-deftest romacs-live-a-session-without-a-build-takes-files-only ()
   (romacs-live-tests--with fx

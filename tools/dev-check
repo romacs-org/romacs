@@ -17,16 +17,7 @@
   lint        tools/romacs-lint on the runtime Lisp files the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
-  epoch       etc/romacs-runtime-epoch holds one whole number, spelled with no
-              leading zero and at most one newline, and a change with a raise of
-              its own (a commit or its tree above every parent's; a revert
-              clears none) ends above the trunk tip's: two changes raised to one
-              number would merge without a conflict and ship two contracts as
-              one generation. A change of lisp/vm/ beside
-              romacs-vm's Rust may be one contract between them: unless it
-              raises the epoch, it is named, to raise it if the Lisp needs the
-              Rust (lisp/vm/AGENTS.md). Which it is the stage cannot tell, so
-              that finding fails nothing.
+  epoch       etc/romacs-runtime-epoch.d holds well-formed fragment names.
   loaddefs    lisp/'s loaddefs files are what tools/lisp-loaddefs makes of the tree,
               when the change touches a .el under lisp/ or etc/themes. It runs the
               pinned GNU binary; without one the stage cannot run.
@@ -183,81 +174,24 @@ def generated(root):
 
 # The runtime tree's generation.
 
-EPOCH = 'etc/romacs-runtime-epoch'
-# The one spelling of a generation: the runtime compares the file's trimmed text, so
-# 3 and 03 would be two generations of one number.
-SPELLING = r'(0|[1-9][0-9]*)\n?'
-TREE = 'the uncommitted tree'
+EPOCH = 'etc/romacs-runtime-epoch.d'
+FRAGMENT_NAME = re.compile(r'[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*')
 
 
-def generation(text):
-    """The whole number TEXT, an epoch file's contents, holds however it is spelled, or None."""
-    return int(text) if text is not None and re.fullmatch(r'\s*[0-9]+\s*', text) else None
-
-
-def rank(found):
-    """A generation FOUND, to compare: none is below every one."""
-    return -1 if found is None else found
-
-
-def own_raises(lines, value):
-    """The branch's own raises of the generation: the commits of LINES, `git rev-list
-    --parents` lines split, whose generation in VALUE is above every parent's (a merge
-    that takes a side's number raises nothing). Each counts for good: a later lowering
-    clears none, since the number cannot show which change it takes back, and a spare
-    number costs nothing where a missed one ships two contracts as one generation."""
-    return [commit for commit, *parents in lines if all(rank(value[commit]) > rank(value[parent]) for parent in parents)]
-
-
-def epoch_history(root, trunk):
-    """(RAISES, OURS, TIP): ROOT's own raises of the epoch since TRUNK, its uncommitted
-    tree counted as a commit on its HEAD, and the epoch file's text in ROOT's tree and at
-    TRUNK's tip (None where there is none; a commit whose path is no file holds none). On a merged tree the changed paths cannot
-    show a raise: the trunk's equal one hides it."""
-    head = git(root, 'rev-parse', 'HEAD').stdout.strip()
-    lines = [line.split() for line in git(root, 'rev-list', '--parents', f'{trunk}..HEAD').stdout.splitlines()]
-    commits = sorted({head} | {commit for line in lines for commit in line})
-    asked = subprocess.run(['git', '-C', str(root), 'cat-file', '--batch-check=%(objectname) %(objecttype)'],
-                           capture_output=True, text=True, check=True,
-                           input=''.join(f'{commit}:{EPOCH}\n' for commit in commits))
-    blob = {commit: found.split()[0] if found.endswith(' blob') else None
-            for commit, found in zip(commits, asked.stdout.splitlines())}
-    text = {found: git(root, 'cat-file', 'blob', found).stdout for found in set(blob.values()) if found}
-    value = {commit: generation(text.get(found)) for commit, found in blob.items()}
-    file = root / EPOCH
-    # Its bytes as they are: read_text would turn a CR LF into the one spelling.
-    ours = file.read_bytes().decode('utf-8', 'replace') if file.is_file() else None
-    lines, value = [[TREE, head], *lines], {**value, TREE: generation(ours)}
-    tip = git(root, 'show', f'{trunk}:{EPOCH}', check=False)
-    return (sorted(raised if raised == TREE else raised[:12] for raised in own_raises(lines, value)), ours,
-            tip.stdout if tip.returncode == 0 else None)
-
-
-def epoch(names, raised, ours, tip):
-    """(STATUS, SUMMARY, FINDINGS) of the runtime tree's generation. NAMES are the
-    change's paths; RAISED, the commits that raise the epoch; OURS and TIP, the epoch
-    file's text in its tree and at the trunk's tip, None where there is none. The tree
-    has the file, holding one whole number in its one spelling, and a change with a
-    raise ends above TIP's. A change of lisp/vm/ beside romacs-vm's Rust that leaves the epoch alone may
-    be one contract, and is named."""
-    if ours is None:
-        return 'FAIL', f'{EPOCH} is missing', [f'{EPOCH}: the build includes it (crates/romacs-vm/src/host.rs); fix: restore it']
-    if not re.fullmatch(SPELLING, ours):
-        return 'FAIL', f'{EPOCH} does not hold one whole number in its one spelling', [
-            f'{EPOCH}: {ours!r}; fix: write the generation as digits with no leading zero, then at most one newline']
-    here, top = generation(ours), generation(tip)
-    if raised and top is not None and rank(here) <= top:
-        return 'FAIL', f"{EPOCH} is raised to {here}, not above the trunk's {top}", [
-            f'{EPOCH}: raised by {", ".join(raised)}, and the trunk holds generation {top} already: a merge of two '
-            f'equal raises shows no conflict; fix: merge the trunk in and raise it to {top + 1}']
-    if raised:
-        return 'ok', f"{EPOCH} is raised to {here}" + (f", above the trunk's {top}" if top is not None else ''), []
-    lisp = sorted(n for n in names if n.startswith('lisp/vm/') and n.endswith('.el'))
-    rust = [n for n in names if n.startswith('crates/romacs-vm/src/') and n.endswith('.rs')]
-    if not (lisp and rust):
-        return 'ok', "no lisp/vm/ change beside romacs-vm's Rust", []
-    return 'ok', f"lisp/vm/ and romacs-vm change together, {EPOCH} unchanged", [
-        f'{", ".join(lisp)}: if it needs the Rust beside it, raise {EPOCH} (lisp/vm/AGENTS.md)']
+def epoch(root):
+    """(STATUS, SUMMARY, FINDINGS) of the runtime contract fragments."""
+    directory = root / EPOCH
+    if not directory.is_dir() or directory.is_symlink():
+        return 'FAIL', f'{EPOCH} is missing', [f'{EPOCH}: fix: restore the fragment directory']
+    fragments = sorted(directory.iterdir())
+    if not fragments:
+        return 'FAIL', f'{EPOCH} is empty', [f'{EPOCH}: fix: restore the runtime contract fragments']
+    bad = [f'{EPOCH}/{entry.name}: fix: use a regular file named YYYY-MM-DD-change-name'
+           for entry in fragments
+           if entry.is_symlink() or not entry.is_file() or not FRAGMENT_NAME.fullmatch(entry.name)]
+    if bad:
+        return 'FAIL', f'{len(bad)} invalid epoch fragment(s)', bad
+    return 'ok', f'{len(fragments)} runtime contract fragment(s)', []
 
 
 # The AGENTS.md files.
@@ -580,7 +514,7 @@ def main():
     trunk = gate.trunk(ROOT, args.trunk)
     names = gate.changed_names(ROOT, trunk)
     stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT)), ('agents', *agents(ROOT)),
-              ('functions', *functions(ROOT, trunk)), ('epoch', *epoch(names, *epoch_history(ROOT, trunk))),
+              ('functions', *functions(ROOT, trunk)), ('epoch', *epoch(ROOT)),
               ('lint', *lint(ROOT, names, trunk, args.binary)), ('loaddefs', *loaddefs(ROOT, names))]
     if not args.no_tests:
         stages.append(('tests', *tests(ROOT, names, args.threads)))

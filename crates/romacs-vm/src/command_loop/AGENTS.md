@@ -26,8 +26,8 @@ GNU keyboard.c's key reader (`read_key_sequence`, `read_char`,
 - Follow maps are taken at GNU's three points only. `test_undefined` and the
   final remap reuse them only while no Lisp ran since and the first event
   had no position.
-- A change to the Lisp helpers the reader calls by name raises
-  `etc/romacs-runtime-epoch`.
+- When the contract of a Lisp helper the reader calls by name changes,
+  add a fragment to `etc/romacs-runtime-epoch.d`.
 
 ## Tests
 - `cargo test --profile gate --locked --offline -p romacs-vm --lib command_loop::`
