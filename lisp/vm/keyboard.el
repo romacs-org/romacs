@@ -58,11 +58,6 @@ commands and autoloads)."
 
 ;;;; read_char
 
-(defun romacs--at-end-of-macro-p ()
-  "macros.c at_end_of_macro_p, while `executing-kbd-macro' is non-nil."
-  (or (eq executing-kbd-macro t)
-      (>= executing-kbd-macro-index (length executing-kbd-macro))))
-
 (defvar romacs--reading-command-keys nil
   "Non-nil while the command loop reads a command's key sequence, between
 commands: completed background commands may run their callbacks then.")

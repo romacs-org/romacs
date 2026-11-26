@@ -59,7 +59,7 @@ fn nested_reads_survive_moving_collections() {
                                       (reverse log) ends))");
     vm.set_gc_stress(0);
     assert_eq!(got, "([(f5 1)] [(f5 1)] [f9] [f9] ([(f6 2)] [(f8 4)]) 4)");
-    assert_eq!(vm.reads.depth(super::MAIN), 0, "every read's frame popped");
+    assert!(vm.reads.idle(), "every read's activation popped");
 }
 
 /// A throw and a signal out of a nested read leave no frame behind, and
@@ -91,8 +91,7 @@ fn escapes_pop_every_frame() {
                                       (catch 'out (read-key-sequence-vector nil))
                                       ends))");
     assert_eq!(got, "(thrown \"bad\" [f7] [f8] thrown 7)");
-    assert_eq!(vm.reads.depth(super::MAIN), 0, "every read's frame popped");
-    assert!(vm.reads.walks.is_empty(), "no walk left at a filter");
+    assert!(vm.reads.idle(), "every read's activation popped");
 }
 
 /// GNU's third point: when the current buffer changes while `read_char`
@@ -146,6 +145,7 @@ fn a_prefix_help_checkpoint_survives_moving_collections() {
        (use-local-map (make-sparse-keymap)) (define-key (current-local-map) [24 97] 'done)
        (setq romacs--prefix-help-functions (list (lambda (_p _e) (garbage-collect) t)))
        (fset 'romacs--read-host-char (lambda (&rest _) (prog1 (car queue) (setq queue (cdr queue)))))
+       (clear-this-command-keys t)
        (prog1 (list (romacs--read-key-sequence nil t nil) romacs--key-sequence-command (this-command-keys-vector))
          (setq romacs--host-input nil romacs--prefix-help-functions nil)))");
     vm.set_gc_stress(0);
@@ -174,4 +174,17 @@ fn an_input_method_reading_keys_survives_moving_collections() {
                                 (list (read-event nil t) (read-event nil t)))");
     vm.set_gc_stress(0);
     assert_eq!(got, "(97 (f9 1))");
+}
+
+/// A panic inside a key read leaves no activation behind for the session
+/// (`Vm::catching`'s restore).
+#[test]
+fn a_panic_inside_a_read_leaves_no_activation() {
+    let mut vm = Vm::new();
+    let caught = vm.catching(|vm| {
+        vm.reads.push(super::stream::Act::new(None));
+        std::panic::panic_any("inside a read");
+    });
+    assert!(caught.is_err());
+    assert!(vm.reads.idle());
 }

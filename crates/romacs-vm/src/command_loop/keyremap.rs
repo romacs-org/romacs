@@ -91,7 +91,7 @@ pub(super) fn translate<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize)
 /// Otherwise None: a prefix of a longer translation keeps the start, and
 /// anything else moves it on by one event.
 fn remap_step<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, which: usize, doit: bool) -> Done<Option<isize>> {
-    keyseq::walk(m, gc.by_ref(), (depth, which), |vm, (depth, which)| {
+    keyseq::walk(m, gc.by_ref(), depth, (depth, which), |vm, (depth, which)| {
         let scan = frame(vm, depth).scans[which];
         if !keymapp(vm, scan.parent) {
             // No map to scan: the walk of nothing.
@@ -99,8 +99,8 @@ fn remap_step<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, which: us
         }
         Ok((keyseq::followable(vm, scan.map), [keyseq::lookup_event_at(vm, depth, scan.end), Value::NIL], 1, true))
     })?;
-    let function = step(m, gc.by_ref(), (depth, which, doit), |vm, (depth, which, doit)| {
-        let mut next = vm.reads.result;
+    let function = step(m, gc.by_ref(), depth, (depth, which, doit), |vm, (depth, which, doit)| {
+        let mut next = vm.reads.act(depth).result;
         let f = frame(vm, depth);
         f.scans[which].end += 1;
         // `access_keymap_keyremap`: a symbol whose function is an array or keymap.
@@ -109,7 +109,7 @@ fn remap_step<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, which: us
             let function = cx.symbol_function(next).unwrap_or(Value::NIL);
             if matches!(cx.kind(function), Kind::Vector | Kind::String | Kind::Bytes) || keymapp(vm, function) { next = function; }
         }
-        vm.reads.result = next;
+        vm.reads.act(depth).result = next;
         let mut cx = Leaf::new(vm);
         Ok(doit && crate::prim::prims::vars::function_p(&mut cx, next).unwrap_or(false))
     })?;
@@ -122,16 +122,16 @@ fn remap_step<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, which: us
             let events = f.keybuf.get(scan.start..scan.end).map(<[Value]>::to_vec).unwrap_or_default();
             Ok(vec![Leaf::new(vm).vector(&events)])
         };
-        let args = |vm: &mut Vm, _: (usize, usize)| Ok(vec![vm.reads.result, Value::NIL]);
+        let args = |vm: &mut Vm, (depth, _): (usize, usize)| Ok(vec![vm.reads.act(depth).result, Value::NIL]);
         // The function is rooted in the call's frame, its value in `result`.
-        call_bound(m, gc.by_ref(), names, (depth, which), bind, args)?;
-        let valid = m.leaf((), |vm, ()| {
-            let next = vm.reads.result;
+        call_bound(m, gc.by_ref(), depth, names, (depth, which), bind, args)?;
+        let valid = m.leaf(depth, |vm, depth| {
+            let next = vm.reads.act(depth).result;
             next == Value::NIL || matches!(Leaf::new(vm).kind(next), Kind::Vector | Kind::String | Kind::Bytes)
         });
         if !valid {
-            super::call(m, gc.by_ref(), (), |vm, ()| {
-                let next = vm.reads.result;
+            super::call(m, gc.by_ref(), depth, depth, |vm, depth| {
+                let next = vm.reads.act(depth).result;
                 let mut cx = Leaf::new(vm);
                 Ok(vec![cx.intern("error"), cx.string("Function %s returns invalid key sequence"), next])
             })?;
@@ -141,9 +141,9 @@ fn remap_step<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, depth: usize, which: us
     m.leaf((depth, which, doit), |vm, (depth, which, doit)| apply(vm, depth, which, doit))
 }
 
-/// The scan's outcome once its lookup's answer is in `Reads::result`.
+/// The scan's outcome once its lookup's answer is in the activation's result.
 fn apply(vm: &mut Vm, depth: usize, which: usize, doit: bool) -> Done<Option<isize>> {
-    let next = vm.reads.result;
+    let next = vm.reads.act(depth).result;
     let cx = Leaf::new(vm);
     let replacement = match cx.kind(next) {
         Kind::Vector if doit => Some(cx.vector_values(next).map_err(|fault| signal(vm, fault))?),

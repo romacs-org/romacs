@@ -45,46 +45,45 @@ const QUEUED: u8 = 0;
 const HOST: u8 = 1;
 const BATCH: u8 = 2;
 
-/// `read_char`: the next event in `Reads::result` (nil when SECONDS passed),
-/// recorded as input; whether it was the quit character typed on the host
-/// keyboard (keyboard.c `handle_interrupt`'s C-g).
-pub(super) fn read_char<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, args: CharArgs) -> Done<bool> {
+/// `read_char` for the activation AT: the next event in its result (nil
+/// when SECONDS passed), recorded as input; whether it was the quit
+/// character typed on the host keyboard (keyboard.c `handle_interrupt`'s C-g).
+pub(super) fn read_char<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, args: CharArgs) -> Done<bool> {
     // The event and the message before it, rooted across the read's Lisp.
     let own = m.leaf((), |vm, ()| vm.root_frame(&[Value::NIL, Value::NIL]));
-    let outcome = read(m, gc.by_ref(), &own, args);
-    m.leaf((own, outcome), |vm, (own, outcome)| {
+    let outcome = read(m, gc.by_ref(), at, &own, args);
+    m.leaf((at, own, outcome), |vm, (at, own, outcome)| {
         let [event, _] = vm.release_frame(own);
-        if outcome.is_ok() { vm.reads.result = event; }
+        if outcome.is_ok() { vm.reads.act(at).result = event; }
         outcome
     })
 }
 
-fn read<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, own: &RootFrame, mut args: CharArgs) -> Done<bool> {
+fn read<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, own: &RootFrame, mut args: CharArgs) -> Done<bool> {
     // Clamped as the host wait clamps it (`host_input.rs`): a huge or
     // infinite SECONDS bounds nothing it could reach.
     let end = args.seconds.and_then(|seconds| std::time::Duration::try_from_secs_f64(seconds.clamp(0.0, 1e9)).ok())
         .map(|wait| crate::host::monotonic() + wait);
     let mut quit = false;
     let taken = loop {
-        let (source, packed) = step(m, gc.by_ref(), own, take_queued)?;
+        let (source, packed) = step(m, gc.by_ref(), at, (at, own), take_queued)?;
         let mut taken = Taken::unpack(packed);
         if source == HOST {
-            call(m, gc.by_ref(), args.seconds, |vm, seconds| Ok(vec![vm.intern("romacs--read-host-input"), seconds_value(vm, seconds)]))?;
-            let (packed, keyboard_quit, clear, macro_store) = step(m, gc.by_ref(), own, host_event)?;
-            (taken, quit) = (Taken::unpack(packed), keyboard_quit);
-            if macro_store { store_macro_char(m, gc.by_ref(), own)?; }
-            if clear { call(m, gc.by_ref(), (), |vm, ()| Ok(vec![vm.intern("romacs--clear-echo")]))?; }
+            call(m, gc.by_ref(), at, args.seconds, |vm, seconds| Ok(vec![vm.intern("romacs--read-host-input"), seconds_value(vm, seconds)]))?;
+            let keyboard_quit;
+            (taken, keyboard_quit) = host_event(m, gc.by_ref(), at, own)?;
+            quit = keyboard_quit;
         } else if source == BATCH {
-            call(m, gc.by_ref(), args.seconds, |vm, seconds| Ok(vec![vm.intern("romacs--read-batch-input"), seconds_value(vm, seconds)]))?;
-            taken.again = m.leaf(own, |vm, own| {
-                let event = vm.reads.result;
+            call(m, gc.by_ref(), at, args.seconds, |vm, seconds| Ok(vec![vm.intern("romacs--read-batch-input"), seconds_value(vm, seconds)]))?;
+            taken.again = m.leaf((at, own), |vm, (at, own)| {
+                let event = vm.reads.act(at).result;
                 let again = event == Value::TRUE;
                 vm.set_rooted(own, 0, if again { Value::NIL } else { event });
                 again
             });
         }
         if !taken.again && m.leaf((own, taken.post, args.method), method_due) {
-            let (called, gave) = method(m, gc.by_ref(), own, args.keymap_read)?;
+            let (called, gave) = method(m, gc.by_ref(), at, own, args.keymap_read)?;
             // A C-g the method read was the method's key.
             quit &= !called;
             if !gave {
@@ -95,9 +94,7 @@ fn read<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, own: &RootFrame, mut args: Ch
         }
         if !taken.again { break taken; }
     };
-    if step(m, gc.by_ref(), (own, taken.pack(), args.seconds.is_none()), finish)? {
-        store_macro_char(m, gc, own)?;
-    }
+    finish(m, gc, at, own, taken, args.seconds.is_none())?;
     Ok(quit)
 }
 
@@ -108,12 +105,12 @@ fn seconds_value(vm: &mut Vm, seconds: Option<f64>) -> Value {
 
 /// The requeued and macro sources, in `read_char`'s order: an event taken
 /// from one of them, or the source to wait on.
-fn take_queued(vm: &mut Vm, own: &RootFrame) -> Done<(u8, [bool; 4])> {
+fn take_queued(vm: &mut Vm, (at, own): (usize, &RootFrame)) -> Done<(u8, [bool; 4])> {
     let mut taken = Taken::default();
-    let event = if let Some(event) = pop(vm, "unread-post-input-method-events")? {
+    let event = if let Some(event) = pop(vm, at, "unread-post-input-method-events")? {
         (taken.reread, taken.recorded, taken.post) = (true, true, true);
         unwrap_menu_event(vm, event)
-    } else if let Some(event) = pop(vm, "unread-command-events")? {
+    } else if let Some(event) = pop(vm, at, "unread-command-events")? {
         // (t . EVENT) is read as new input; (no-record . EVENT) was recorded.
         let cx = Leaf::new(vm);
         let (head, tail) = cx.pair(event).unwrap_or((Value::NIL, Value::NIL));
@@ -134,11 +131,11 @@ fn take_queued(vm: &mut Vm, own: &RootFrame) -> Done<(u8, [bool; 4])> {
             Some((head, tail)) if tail == Leaf::new(vm).intern("disabled") && symbol_or_integer(vm, head) => head,
             _ => event,
         }
-    } else if let Some(event) = pop(vm, "unread-input-method-events")? {
+    } else if let Some(event) = pop(vm, at, "unread-input-method-events")? {
         taken.reread = true;
         unwrap_menu_event(vm, event)
     } else if var(vm, "executing-kbd-macro") != Value::NIL && !at_end_of_macro(vm) {
-        macro_event(vm)?
+        macro_event(vm, at)?
     } else {
         let event = vm.take_unread_switch_frame();
         if event == Value::NIL {
@@ -152,11 +149,12 @@ fn take_queued(vm: &mut Vm, own: &RootFrame) -> Done<(u8, [bool; 4])> {
 }
 
 /// The head of the list in the variable NAME, which keeps the rest; None
-/// when it is empty.
-fn pop(vm: &mut Vm, name: &str) -> Done<Option<Value>> {
+/// when it is empty. The write is the leaf's one: what follows it is the
+/// leaf's own state.
+fn pop(vm: &mut Vm, at: usize, name: &str) -> Done<Option<Value>> {
     let list = var(vm, name);
     let Some((event, rest)) = Leaf::new(vm).pair(list) else { return Ok(None) };
-    store(vm, name, rest)?;
+    store(vm, at, name, rest)?;
     Ok(Some(event))
 }
 
@@ -189,19 +187,19 @@ fn macro_length(vm: &mut Vm, macro_: Value) -> usize {
 }
 
 /// The executing macro's next event; a string's 0x80 bit is meta.
-fn macro_event(vm: &mut Vm) -> Done<Value> {
+fn macro_event(vm: &mut Vm, at: usize) -> Done<Value> {
     let macro_ = var(vm, "executing-kbd-macro");
     let index = var(vm, "executing-kbd-macro-index").integer_value().unwrap_or(0);
-    let at = usize::try_from(index).unwrap_or(0);
+    let i = usize::try_from(index).unwrap_or(0);
     let cx = Leaf::new(vm);
     let event = if matches!(cx.kind(macro_), Kind::String | Kind::Bytes) {
-        let c = super::byte_char(i64::from(cx.string_char(macro_, at).ok().flatten().unwrap_or(0)));
+        let c = super::byte_char(i64::from(cx.string_char(macro_, i).ok().flatten().unwrap_or(0)));
         let c = if c & 0x80 != 0 && c <= 0xff { 0x800_0000 | (c & 0x7f) } else { c };
         Value::integer(c).unwrap_or(Value::NIL)
     } else {
         cx.vector_get(macro_, Value::integer(index).unwrap_or(Value::NIL)).map_err(|fault| signal(vm, fault))?
     };
-    store(vm, "executing-kbd-macro-index", Value::integer(index + 1).unwrap_or(Value::NIL))?;
+    store(vm, at, "executing-kbd-macro-index", Value::integer(index + 1).unwrap_or(Value::NIL))?;
     Ok(event)
 }
 
@@ -213,39 +211,59 @@ pub(super) fn unread_p(vm: &mut Vm) -> bool {
         || vm.unread_switch_frame_waits()
 }
 
-/// The host wait's answer, `(EVENT RECORDED QUIT)` or nil, in
-/// `Reads::result`: the event through `keyboard-translate-table` and
-/// recorded. What it took, whether it was the quit character, whether the
-/// echo area is to be cleared for it (but for help, frame and window
-/// selection events, keyboard.c:3231), and whether the macro being defined
-/// stores it.
-fn host_event(vm: &mut Vm, own: &RootFrame) -> Done<([bool; 4], bool, bool, bool)> {
-    let answer = vm.reads.result;
-    let parts = vm.list_values(answer).unwrap_or_default();
-    let event = parts.first().copied().unwrap_or(Value::NIL);
-    let mut taken = Taken { recorded: parts.get(1).is_some_and(|&v| v != Value::NIL), ..Taken::default() };
-    let quit = parts.get(2).is_some_and(|&v| v != Value::NIL);
-    let event = if event == Value::NIL { event } else { keyboard_translate(vm, event) };
-    vm.set_rooted(own, 0, event);
-    if event == Value::NIL {
-        taken.again = unread_p(vm);
-        return Ok((taken.pack(), quit, false, false));
-    }
+/// The host wait's answer, `(EVENT RECORDED QUIT)` or nil, in the
+/// activation's result, in the Lisp port's order: the event through
+/// `keyboard-translate-table` and recorded (`record`), then what the echo
+/// area held for an input method, then the echo area cleared for it but for
+/// help, frame and window selection events (keyboard.c:3231). What it took,
+/// and whether it was the quit character.
+fn host_event<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, own: &RootFrame) -> Done<(Taken, bool)> {
+    let (packed, quit) = m.leaf((at, own), |vm, (at, own)| {
+        let answer = vm.reads.act(at).result;
+        let parts = vm.list_values(answer).unwrap_or_default();
+        let event = parts.first().copied().unwrap_or(Value::NIL);
+        let mut taken = Taken { recorded: parts.get(1).is_some_and(|&v| v != Value::NIL), ..Taken::default() };
+        let quit = parts.get(2).is_some_and(|&v| v != Value::NIL);
+        let event = if event == Value::NIL { event } else { keyboard_translate(vm, event) };
+        vm.set_rooted(own, 0, event);
+        if event == Value::NIL { taken.again = unread_p(vm); }
+        (taken.pack(), quit)
+    });
+    let mut taken = Taken::unpack(packed);
+    if m.leaf(own, |vm, own| vm.rooted(own, 0) == Value::NIL) { return Ok((taken, quit)); }
     // An input method sees what was recorded go in, not its own output.
-    let macro_store = !taken.recorded && record_char(vm, event)?;
+    if !taken.recorded { record(m, gc.by_ref(), at, own)?; }
     taken.recorded = true;
     // What the echo area held, for an input method to refer to.
-    let message = vm.current_message().unwrap_or(Value::NIL);
-    if var(vm, "input-method-function") != Value::NIL && printable(event) {
-        vm.set_rooted(own, 1, message);
-        store(vm, "input-method-previous-message", message)?;
-    }
-    Ok((taken.pack(), quit, message != Value::NIL && !echo_kept(vm, event), macro_store))
+    let clear = step(m, gc.by_ref(), at, (at, own), |vm, (at, own)| {
+        let event = vm.rooted(own, 0);
+        let message = vm.current_message().unwrap_or(Value::NIL);
+        let clear = message != Value::NIL && !echo_kept(vm, event);
+        if var(vm, "input-method-function") != Value::NIL && printable(event) {
+            vm.set_rooted(own, 1, message);
+            store(vm, at, "input-method-previous-message", message)?;
+        }
+        Ok(clear)
+    })?;
+    if clear { call(m, gc, at, (), |vm, ()| Ok(vec![vm.intern("romacs--clear-echo")]))?; }
+    Ok((taken, quit))
 }
 
-/// The macro being defined stores the event read (macros.c `store_kbd_macro_char`).
-fn store_macro_char<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, own: &RootFrame) -> Done<()> {
-    call(m, gc, own, |vm, own| Ok(vec![vm.intern("romacs--store-kbd-macro-char"), vm.rooted(own, 0)]))
+/// keyboard.c `record_char` of the event, in the Lisp port's order: lossage,
+/// the count of input events, then the macro being defined stores it
+/// (macros.c `store_kbd_macro_char`); none of it for keyboard macro input.
+fn record<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, own: &RootFrame) -> Done<()> {
+    let recorded = step(m, gc.by_ref(), at, (at, own), |vm, (at, own)| {
+        if var(vm, "executing-kbd-macro") != Value::NIL || var(vm, "inhibit--record-char") != Value::NIL { return Ok(false); }
+        vm.record_recent_value(vm.rooted(own, 0), false);
+        let count = var(vm, "num-nonmacro-input-events").integer_value().unwrap_or(0);
+        store(vm, at, "num-nonmacro-input-events", Value::integer(count + 1).unwrap_or(Value::NIL))?;
+        Ok(true)
+    })?;
+    if recorded && m.leaf((), |vm, ()| var(vm, "defining-kbd-macro") != Value::NIL) {
+        call(m, gc, at, own, |vm, own| Ok(vec![vm.intern("romacs--store-kbd-macro-char"), vm.rooted(own, 0)]))?;
+    }
+    Ok(())
 }
 
 /// A help, frame or window selection event, which keeps the echo area.
@@ -274,16 +292,6 @@ fn keyboard_translate(vm: &mut Vm, event: Value) -> Value {
     if entry == Value::NIL { event } else { entry }
 }
 
-/// keyboard.c `record_char`: lossage and the count of input events, but not
-/// for keyboard macro input. Whether the macro being defined stores it.
-fn record_char(vm: &mut Vm, event: Value) -> Done<bool> {
-    if var(vm, "executing-kbd-macro") != Value::NIL || var(vm, "inhibit--record-char") != Value::NIL { return Ok(false); }
-    vm.record_recent_value(event, false);
-    let count = var(vm, "num-nonmacro-input-events").integer_value().unwrap_or(0);
-    store(vm, "num-nonmacro-input-events", Value::integer(count + 1).unwrap_or(Value::NIL))?;
-    Ok(var(vm, "defining-kbd-macro") != Value::NIL)
-}
-
 /// A printable one-byte character, which an input method may translate.
 fn printable(event: Value) -> bool {
     event.integer_value().is_some_and(|c| (32..256).contains(&c) && c != 127)
@@ -298,15 +306,17 @@ fn method_due(vm: &mut Vm, (own, post, method): (&RootFrame, bool, bool)) -> boo
 /// gives the events it returns, the first read now and the rest next
 /// (`unread-post-input-method-events`), or none, and the message comes
 /// back and the read goes on. Its own reads make up keys of their own, so
-/// the command's are kept from them; a C-g it read was its key. Whether it
+/// the command's are saved and emptied first, before the echo area is
+/// cleared for it, and put back after; a C-g it read was its key. Whether it
 /// was called, and whether it gave an event.
-fn method<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, own: &RootFrame, keymap_read: bool) -> Done<(bool, bool)> {
-    let (list, message) = m.leaf((), |vm, ()| {
-        let list = var(vm, "input-method-function") == Leaf::new(vm).intern("list");
-        (list, vm.current_message().unwrap_or(Value::NIL) != Value::NIL)
-    });
-    if message { call(m, gc.by_ref(), (), |vm, ()| Ok(vec![vm.intern("romacs--clear-echo")]))?; }
-    if list { return Ok((false, true)); }
+fn method<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, own: &RootFrame, keymap_read: bool) -> Done<(bool, bool)> {
+    let list = m.leaf((), |vm, ()| var(vm, "input-method-function") == Leaf::new(vm).intern("list"));
+    if list {
+        if m.leaf((), |vm, ()| vm.current_message().unwrap_or(Value::NIL) != Value::NIL) {
+            call(m, gc, at, (), |vm, ()| Ok(vec![vm.intern("romacs--clear-echo")]))?;
+        }
+        return Ok((false, true));
+    }
     // The command's keys, kept across the method's own reads.
     let saved = m.leaf((), |vm, ()| {
         let keys = vm.streams().keys(MAIN).to_vec();
@@ -315,32 +325,20 @@ fn method<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, own: &RootFrame, keymap_rea
         vm.streams_mut().store(MAIN, Store::Keys(&[], 0));
         (vm.root_frame(&[keys]), start)
     });
-    let names: &'static [&'static str] = &["input-method-use-echo-area", "romacs--reading-command-keys"];
-    let called = call_bound(m, gc.by_ref(), names, (own, keymap_read), |vm, (_, keymap_read)| {
-        let echo = var(vm, "input-method-use-echo-area") != Value::NIL || !keymap_read;
-        Ok(vec![if echo { Value::TRUE } else { Value::NIL }, Value::NIL])
-    }, |vm, (own, _)| Ok(vec![var(vm, "input-method-function"), vm.rooted(own, 0)]));
-    let gave = step(m, gc.by_ref(), (saved, called.is_ok(), own), |vm, ((keys, start), ok, own)| {
+    let called = method_call(m, gc.by_ref(), at, own, keymap_read);
+    let gave = step(m, gc.by_ref(), at, (at, saved, called.is_ok(), own), |vm, (at, (keys, start), ok, own)| {
         let [keys] = vm.release_frame(keys);
         if !ok { return Err(()); }
         let keys = Leaf::new(vm).vector_values(keys).unwrap_or_default();
         vm.streams_mut().store(MAIN, Store::Keys(&keys, start));
-        let events = vm.reads.result;
-        let Some((first, rest)) = Leaf::new(vm).pair(events) else { return Ok(false) };
-        vm.set_rooted(own, 0, first);
-        let queued = var(vm, "unread-post-input-method-events");
-        let rest = vm.list_values(rest).unwrap_or_default();
-        let mut tail = queued;
-        for event in rest.into_iter().rev() { tail = Leaf::new(vm).cons(event, tail); }
-        store(vm, "unread-post-input-method-events", tail)?;
-        Ok(true)
+        queue_rest(vm, at, own)
     });
     called?;
     if !gave? {
         // No event: the message comes back.
         let previous = m.leaf(own, |vm, own| vm.rooted(own, 1) != Value::NIL);
         if previous {
-            call_bound(m, gc, &["message-log-max"], own, |_, _| Ok(vec![Value::NIL]), |vm, own| {
+            call_bound(m, gc, at, &["message-log-max"], own, |_, _| Ok(vec![Value::NIL]), |vm, own| {
                 let format = Leaf::new(vm).string("%s");
                 Ok(vec![vm.intern("message"), format, vm.rooted(own, 1)])
             })?;
@@ -350,19 +348,55 @@ fn method<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, own: &RootFrame, keymap_rea
     Ok((true, true))
 }
 
-/// After every source: recorded unless it was, a command key unless the
-/// read was timed (UNTIMED false) or a reread with keys already there, and
-/// `last-input-event`. Whether the macro being defined stores it.
-fn finish(vm: &mut Vm, (own, taken, untimed): (&RootFrame, [bool; 4], bool)) -> Done<bool> {
-    let event = vm.rooted(own, 0);
-    if event == Value::NIL { return Ok(false); }
-    let taken = Taken::unpack(taken);
-    let macro_store = !taken.recorded && record_char(vm, event)?;
-    if untimed && (!taken.reread || vm.streams().keys(MAIN).is_empty()) {
-        vm.streams_mut().store(MAIN, Store::PushKey(event));
+/// The echo area cleared for the method when a message shows, then the
+/// method called with its two variables bound: its events in the
+/// activation's result.
+fn method_call<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, own: &RootFrame, keymap_read: bool) -> Done<()> {
+    if m.leaf((), |vm, ()| vm.current_message().unwrap_or(Value::NIL) != Value::NIL) {
+        call(m, gc.by_ref(), at, (), |vm, ()| Ok(vec![vm.intern("romacs--clear-echo")]))?;
     }
-    store(vm, "last-input-event", event)?;
-    Ok(macro_store)
+    let names: &'static [&'static str] = &["input-method-use-echo-area", "romacs--reading-command-keys"];
+    call_bound(m, gc, at, names, (own, keymap_read), |vm, (_, keymap_read)| {
+        let echo = var(vm, "input-method-use-echo-area") != Value::NIL || !keymap_read;
+        Ok(vec![if echo { Value::TRUE } else { Value::NIL }, Value::NIL])
+    }, |vm, (own, _)| Ok(vec![var(vm, "input-method-function"), vm.rooted(own, 0)]))
+}
+
+/// The method's events: the first is the event now, and the rest go before
+/// `unread-post-input-method-events` as the Lisp port's `nconc` put them,
+/// the method's own list's tail extended. Whether it gave an event.
+fn queue_rest(vm: &mut Vm, at: usize, own: &RootFrame) -> Done<bool> {
+    let events = vm.reads.act(at).result;
+    let cx = Leaf::new(vm);
+    let Some((first, rest)) = cx.pair(events) else { return Ok(false) };
+    vm.set_rooted(own, 0, first);
+    let queued = var(vm, "unread-post-input-method-events");
+    let mut cx = Leaf::new(vm);
+    let mut last = rest;
+    while let Some((_, next)) = cx.pair(last).filter(|&(_, next)| cx.pair(next).is_some()) { last = next; }
+    let tail = if cx.pair(rest).is_some() {
+        cx.setcdr(last, queued).map_err(|fault| signal(vm, fault))?;
+        rest
+    } else {
+        queued
+    };
+    store(vm, at, "unread-post-input-method-events", tail)?;
+    Ok(true)
+}
+
+/// After every source, in the Lisp port's order: recorded unless it was
+/// (`record`), then a command key unless the read was timed (UNTIMED false)
+/// or a reread with keys already there, then `last-input-event`.
+fn finish<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, own: &RootFrame, taken: Taken, untimed: bool) -> Done<()> {
+    if m.leaf(own, |vm, own| vm.rooted(own, 0) == Value::NIL) { return Ok(()); }
+    if !taken.recorded { record(m, gc.by_ref(), at, own)?; }
+    step(m, gc, at, (at, own, taken.reread, untimed), |vm, (at, own, reread, untimed)| {
+        let event = vm.rooted(own, 0);
+        if untimed && (!reread || vm.streams().keys(MAIN).is_empty()) {
+            vm.streams_mut().store(MAIN, Store::PushKey(event));
+        }
+        store(vm, at, "last-input-event", event)
+    })
 }
 
 /// keyboard.c `read_filtered_event` behind `read-event` (ASCII nil),
@@ -370,22 +404,26 @@ fn finish(vm: &mut Vm, (own, taken, untimed): (&RootFrame, [bool; 4], bool)) -> 
 /// PROMPT INHERIT-INPUT-METHOD SECONDS.
 pub(crate) fn read_filtered_event(call: ReadCall<'_, '_, '_, '_>, ascii: bool, error_nonascii: bool) -> bool {
     let place = super::place(&call);
-    let ReadCall { m, mut gc, out, .. } = call;
-    let outcome = super::ensure_lisp_half(m, gc.by_ref()).and_then(|()| filtered(m, gc, place, (ascii, error_nonascii)));
-    m.leaf((out, outcome, ascii), |vm, (out, outcome, ascii)| {
-        // `Fread_char`: a character's modifier bits resolved, or nil.
-        let value = outcome.map(|()| match vm.reads.result {
-            event if !ascii => event,
-            event => event.integer_value()
-                .and_then(|c| Value::integer(crate::prim::prims::keyboard::resolve_modifier_mask(c)).ok())
-                .unwrap_or(Value::NIL),
+    let ReadCall { m, gc, out, .. } = call;
+    super::activation(m, gc, out, |m, mut gc, at| {
+        super::ensure_lisp_half(m, gc.by_ref(), at)?;
+        filtered(m, gc, at, place, (ascii, error_nonascii))?;
+        m.leaf((at, out, ascii), |vm, (at, out, ascii)| {
+            // `Fread_char`: a character's modifier bits resolved, or nil.
+            let value = match vm.reads.act(at).result {
+                event if !ascii => event,
+                event => event.integer_value()
+                    .and_then(|c| Value::integer(crate::prim::prims::keyboard::resolve_modifier_mask(c)).ok())
+                    .unwrap_or(Value::NIL),
+            };
+            vm.set_rooted(out, 0, value);
         });
-        super::landed(vm, out, value)
+        Ok(())
     })
 }
 
-fn filtered<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, place: (usize, usize), (ascii, error_nonascii): (bool, bool)) -> Done<()> {
-    let (prompt, seconds, method) = step(m, gc.by_ref(), place, |vm, place| {
+fn filtered<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, place: (usize, usize), (ascii, error_nonascii): (bool, bool)) -> Done<()> {
+    let (prompt, seconds, method) = m.leaf(place, |vm, place| {
         if var(vm, "inhibit-interaction") != Value::NIL {
             let condition = vm.intern("inhibited-interaction");
             signal(vm, crate::prim::Fault::Signal(condition, Value::NIL));
@@ -398,7 +436,7 @@ fn filtered<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, place: (usize, usize), (a
     })?;
     // `message_with_string`'s echo, which is not logged (keyboard.c:10776).
     if let Some(prompt) = prompt {
-        let shown = call_bound(m, gc.by_ref(), &["message-log-max"], &prompt, |_, _| Ok(vec![Value::NIL]), |vm, prompt| {
+        let shown = call_bound(m, gc.by_ref(), at, &["message-log-max"], &prompt, |_, _| Ok(vec![Value::NIL]), |vm, prompt| {
             let format = Leaf::new(vm).string("%s");
             Ok(vec![vm.intern("message"), format, vm.rooted(prompt, 0)])
         });
@@ -406,7 +444,7 @@ fn filtered<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, place: (usize, usize), (a
         shown?;
     }
     let delayed = m.leaf((), |vm, ()| vm.root_frame(&[Value::NIL]));
-    let outcome = filter_events(m, gc.by_ref(), &delayed, (seconds, method, ascii, error_nonascii));
+    let outcome = filter_events(m, gc.by_ref(), at, &delayed, (seconds, method, ascii, error_nonascii));
     m.leaf((delayed, outcome), |vm, (delayed, outcome)| {
         let [event] = vm.release_frame(delayed);
         if outcome.is_ok() && event != Value::NIL { vm.set_unread_switch_frame(event); }
@@ -416,38 +454,38 @@ fn filtered<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, place: (usize, usize), (a
 
 /// Events read until one passes: with ASCII, a `switch-frame` is put off
 /// (DELAYED) and a non-character either skipped or, with ERROR-NONASCII,
-/// requeued with an error. The event in `Reads::result`.
-fn filter_events<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, delayed: &RootFrame,
+/// requeued with an error. The event in the activation's result.
+fn filter_events<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, at: usize, delayed: &RootFrame,
     (seconds, method, ascii, error_nonascii): (Option<f64>, bool, bool, bool)) -> Done<()> {
     loop {
-        let quit = read_char(m, gc.by_ref(), CharArgs { seconds, method, keymap_read: false })?;
+        let quit = read_char(m, gc.by_ref(), at, CharArgs { seconds, method, keymap_read: false })?;
         // `read_char`'s quit: `maybe_quit` acts on a C-g before the event is returned.
-        let verdict = step(m, gc.by_ref(), (delayed, quit, seconds.is_some(), (ascii, error_nonascii)),
-            |vm, (delayed, quit, timed, (ascii, error_nonascii))| {
+        let verdict = step(m, gc.by_ref(), at, ((at, delayed), quit, seconds.is_some(), (ascii, error_nonascii)),
+            |vm, ((at, delayed), quit, timed, (ascii, error_nonascii))| {
             if quit && var(vm, "inhibit-quit") == Value::NIL {
                 let condition = vm.intern("quit");
                 signal(vm, crate::prim::Fault::Signal(condition, Value::NIL));
                 return Err(());
             }
-            let event = vm.reads.result;
+            let event = vm.reads.act(at).result;
             if !ascii || (timed && event == Value::NIL) { return Ok(0); }
             if switch_frame_event(vm, event) {
                 vm.set_rooted(delayed, 0, event);
                 return Ok(1);
             }
             let event = ascii_character(vm, event);
-            vm.reads.result = event;
+            vm.reads.act(at).result = event;
             if event.integer_value().is_some() { return Ok(0); }
             if !error_nonascii { return Ok(1); }
             let queued = Leaf::new(vm).cons(event, Value::NIL);
-            store(vm, "unread-command-events", queued)?;
+            store(vm, at, "unread-command-events", queued)?;
             Ok(2)
         })?;
         match verdict {
             0 => return Ok(()),
             1 => {}
             _ => {
-                call(m, gc, (), |vm, ()| {
+                call(m, gc, at, (), |vm, ()| {
                     let mut cx = Leaf::new(vm);
                     Ok(vec![cx.intern("error"), cx.string("Non-character input-event")])
                 })?;

@@ -19,17 +19,13 @@ use super::*;
 /// no key has them too, as GNU's are C.
 const LISP_HALF: [&str; 3] = ["vm/hooks.el", "vm/keyboard.el", "vm/minibuf.el"];
 
-/// What an entry point does with its helper's value: return it.
-pub(crate) const DONE: usize = 0;
-const TAILS: [Then; 1] = [done];
-
 /// Call HELPER of the Lisp half with ARGS, installing the half first.
-pub(crate) fn enter(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>, tail: usize) -> Next {
+pub(crate) fn enter(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>) -> Next {
     let f = cx.intern(helper);
     if cx.symbol_function(f)? != Value::NIL {
-        return Ok(Step::Call { f, args, then: TAILS[tail], saved: vec![] });
+        return Ok(Step::Call { f, args, then: done, saved: vec![] });
     }
-    let saved = [Value::integer(tail as i64).unwrap(), f].into_iter().chain(args).collect();
+    let saved = std::iter::once(f).chain(args).collect();
     install(cx, installed, saved)
 }
 
@@ -62,10 +58,9 @@ pub(crate) fn is_installed(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault
     Ok(cx.symbol_function(probe)? != Value::NIL)
 }
 
-/// After the one-time install, enter the helper with the saved tail.
+/// After the one-time install, enter the helper.
 fn installed(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    let tail = saved[0].integer_value().expect("saved tail") as usize;
-    Ok(Step::Call { f: saved[1], args: saved[2..].to_vec(), then: TAILS[tail], saved: vec![] })
+    Ok(Step::Call { f: saved[0], args: saved[1..].to_vec(), then: done, saved: vec![] })
 }
 
 /// character.c char_resolve_modifier_mask.
@@ -104,37 +99,37 @@ fn done(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
 
 defsubr! { name = "execute-kbd-macro", gnu = "macros.c:276", effect = Global,
 fn execute_kbd_macro(cx, macro_: Value; optional count: Value, loopfunc: Value) -> Step {
-    enter(cx, "romacs--execute-kbd-macro", vec![macro_, count, loopfunc], DONE)
+    enter(cx, "romacs--execute-kbd-macro", vec![macro_, count, loopfunc])
 }}
 
 defsubr! { name = "recursive-edit", gnu = "keyboard.c:781", effect = Global,
-fn recursive_edit(cx) -> Step { enter(cx, "romacs--recursive-edit", vec![], DONE) }}
+fn recursive_edit(cx) -> Step { enter(cx, "romacs--recursive-edit", vec![]) }}
 
 // command_loop_2 one command at a time, for an embedder's loop (the GUI):
 // `romacs--host-command' of the Lisp half, which says what ran.
 defsubr! { name = "romacs--run-host-command", gnu = "keyboard.c:1158", effect = Global,
-fn run_host_command(cx) -> Step { enter(cx, "romacs--host-command", vec![], DONE) }}
+fn run_host_command(cx) -> Step { enter(cx, "romacs--host-command", vec![]) }}
 
 // read_char's special events (focus-in, focus-out), for an embedder's loop:
 // `romacs--special-event' of the Lisp half runs the event's binding.
 defsubr! { name = "romacs--run-special-event", gnu = "keyboard.c:3113", effect = Global,
-fn run_special_event(cx, event: Value) -> Step { enter(cx, "romacs--special-event", vec![event], DONE) }}
+fn run_special_event(cx, event: Value) -> Step { enter(cx, "romacs--special-event", vec![event]) }}
 
 // cmd_error's default report: `romacs--command-error-default-function' of
 // the Lisp half.
 defsubr! { name = "command-error-default-function", gnu = "keyboard.c:1049", effect = Global,
 fn command_error_default_function(cx, data: Value, context: Value, signal: Value) -> Step {
-    enter(cx, "romacs--command-error-default-function", vec![data, context, signal], DONE)
+    enter(cx, "romacs--command-error-default-function", vec![data, context, signal])
 }}
 
 defsubr! { name = "top-level", gnu = "keyboard.c:1199", effect = Global,
-fn top_level(cx) -> Step { enter(cx, "romacs--top-level", vec![], DONE) }}
+fn top_level(cx) -> Step { enter(cx, "romacs--top-level", vec![]) }}
 
 defsubr! { name = "exit-recursive-edit", gnu = "keyboard.c:1223", effect = Global,
-fn exit_recursive_edit(cx) -> Step { enter(cx, "romacs--exit-recursive-edit", vec![Value::NIL], DONE) }}
+fn exit_recursive_edit(cx) -> Step { enter(cx, "romacs--exit-recursive-edit", vec![Value::NIL]) }}
 
 defsubr! { name = "abort-recursive-edit", gnu = "keyboard.c:1234", effect = Global,
-fn abort_recursive_edit(cx) -> Step { enter(cx, "romacs--exit-recursive-edit", vec![Value::TRUE], DONE) }}
+fn abort_recursive_edit(cx) -> Step { enter(cx, "romacs--exit-recursive-edit", vec![Value::TRUE]) }}
 
 // Fread_key_sequence: the keys read (crate::command_loop), as
 // make_event_array gives them. DISABLE-TEXT-CONVERSION has no Romacs meaning.
@@ -237,32 +232,32 @@ fn done_nil(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
 // VM2 queues no host input of its own: the Lisp half ends a macro being
 // defined and drops `unread-command-events'.
 defsubr! { name = "discard-input", gnu = "keyboard.c:12400", effect = Global,
-fn discard_input(cx) -> Step { enter(cx, "romacs--discard-input", vec![], DONE) }}
+fn discard_input(cx) -> Step { enter(cx, "romacs--discard-input", vec![]) }}
 
 // macros.c: defining a keyboard macro, whose events read_char stores
 // (lisp/vm/keyboard.el `romacs--store-kbd-macro-char').
 defsubr! { name = "start-kbd-macro", gnu = "macros.c:43", effect = Global,
 fn start_kbd_macro(cx, append: Value; optional no_exec: Value) -> Step {
-    enter(cx, "romacs--start-kbd-macro", vec![append, no_exec], DONE)
+    enter(cx, "romacs--start-kbd-macro", vec![append, no_exec])
 }}
 
 defsubr! { name = "end-kbd-macro", gnu = "macros.c:137", effect = Global,
 fn end_kbd_macro(cx; optional repeat: Value, loopfunc: Value) -> Step {
-    enter(cx, "romacs--end-kbd-macro-command", vec![repeat, loopfunc], DONE)
+    enter(cx, "romacs--end-kbd-macro-command", vec![repeat, loopfunc])
 }}
 
 defsubr! { name = "call-last-kbd-macro", gnu = "macros.c:228", effect = Global,
 fn call_last_kbd_macro(cx; optional prefix: Value, loopfunc: Value) -> Step {
-    enter(cx, "romacs--call-last-kbd-macro", vec![prefix, loopfunc], DONE)
+    enter(cx, "romacs--call-last-kbd-macro", vec![prefix, loopfunc])
 }}
 
 defsubr! { name = "store-kbd-macro-event", gnu = "macros.c:219", effect = Global,
 fn store_kbd_macro_event(cx, event: Value) -> Step {
-    enter(cx, "romacs--store-kbd-macro-char", vec![event], DONE)
+    enter(cx, "romacs--store-kbd-macro-char", vec![event])
 }}
 
 defsubr! { name = "cancel-kbd-macro-events", gnu = "macros.c:210", effect = Global,
-fn cancel_kbd_macro_events(cx) -> Step { enter(cx, "romacs--cancel-kbd-macro-events", vec![], DONE) }}
+fn cancel_kbd_macro_events(cx) -> Step { enter(cx, "romacs--cancel-kbd-macro-events", vec![]) }}
 
 defsubr! { name = "current-idle-time", gnu = "keyboard.c:4949", effect = Reads,
 fn current_idle_time(cx) {

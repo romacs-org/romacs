@@ -6,9 +6,10 @@
 //!
 //! The census of §2.1 is Rust privacy: `InputStream`'s fields are private to
 //! this file and `Streams::store` is their only writer, so a direct write
-//! elsewhere does not compile. A read's frames (`KeyseqFrame`) are scratch,
+//! elsewhere does not compile. The reads in progress (`Reads`) are scratch,
 //! not stream state: they live only while a read is suspended, so a world
-//! image keeps none (`Vm::reads` is at rest).
+//! image keeps none (`Vm::reads` is at rest, and `world_quiescent` asks it
+//! idle).
 use super::keyseq::KeyseqFrame;
 use crate::Value;
 
@@ -94,58 +95,64 @@ impl Streams {
     }
 }
 
-/// The reads in progress on each stream, innermost last: one frame per live
-/// `read_key_sequence` (DESIGN §2.4), and what the reader's orchestration
-/// keeps between its leaves. Scratch, never in an image.
-pub(crate) struct Reads {
-    frames: Vec<Vec<KeyseqFrame>>,
-    /// The value of the reader's last Lisp call or walk.
-    pub(crate) result: Value,
-    /// The reader's Lisp calls so far: a map taken at one count is current
-    /// while the count stays (no Lisp ran since).
-    pub(crate) callouts: u64,
-    /// Writes to watched variables, each made by a request after the leaf
-    /// that asked for it, so its watchers may run Lisp.
-    pub(crate) writes: Vec<(usize, Value)>,
-    /// The keymap walks stopped at a filter, innermost last (`KeyWalk::values`).
-    pub(crate) walks: Vec<Vec<Value>>,
+/// One reading activation (a `read_key_sequence`, or a `read-event`'s
+/// filtered read): what it keeps between its leaves, its own so a read
+/// nested in its Lisp neither overwrites nor drains it (DESIGN §2.4).
+pub(crate) struct Act {
+    /// The value of its last Lisp call or keymap walk.
+    pub(super) result: Value,
+    /// A write to a watched variable its last leaf made, which a request
+    /// completes before anything else happens (`super::flush`).
+    pub(super) write: Option<(usize, Value)>,
+    /// Its keymap walk while stopped at a filter (`KeyWalk::values`).
+    pub(super) walk: Vec<Value>,
+    /// Its key sequence's state, for a `read_key_sequence`.
+    pub(super) keyseq: Option<KeyseqFrame>,
 }
 
-impl Default for Reads {
-    fn default() -> Self {
-        Self { frames: Vec::new(), result: Value::NIL, callouts: 0, writes: Vec::new(), walks: Vec::new() }
+impl Act {
+    /// An activation with nothing done yet, reading a key sequence with KEYSEQ.
+    pub(super) fn new(keyseq: Option<KeyseqFrame>) -> Self {
+        Self { result: Value::NIL, write: None, walk: Vec::new(), keyseq }
     }
+}
+
+/// The reading activations in progress, innermost last, and the count of
+/// the reader's Lisp calls. Scratch, never in an image.
+#[derive(Default)]
+pub(crate) struct Reads {
+    acts: Vec<Act>,
+    /// The reader's Lisp calls so far: a map taken at one count is current
+    /// while the count stays (no Lisp ran since).
+    pub(super) callouts: u64,
 }
 
 impl Reads {
-    /// A new read on STREAM: its depth there.
-    pub(crate) fn push(&mut self, id: StreamId, frame: KeyseqFrame) -> usize {
-        if self.frames.len() <= id.0 { self.frames.resize_with(id.0 + 1, Vec::new); }
-        self.frames[id.0].push(frame);
-        self.frames[id.0].len() - 1
+    /// A new activation: its index.
+    pub(super) fn push(&mut self, act: Act) -> usize {
+        self.acts.push(act);
+        self.acts.len() - 1
     }
-    /// The read at DEPTH on STREAM ends; reads end innermost first.
-    pub(crate) fn pop(&mut self, id: StreamId, depth: usize) {
-        let frames = &mut self.frames[id.0];
-        assert_eq!(frames.len(), depth + 1, "reads end innermost first");
-        frames.pop();
+    /// The activation at AT ends; activations end innermost first.
+    pub(super) fn pop(&mut self, at: usize) -> Act {
+        assert_eq!(self.acts.len(), at + 1, "reads end innermost first");
+        self.acts.pop().unwrap_or_else(|| Act::new(None))
     }
-    /// The read at DEPTH on STREAM.
-    pub(crate) fn frame(&mut self, id: StreamId, depth: usize) -> &mut KeyseqFrame {
-        &mut self.frames[id.0][depth]
+    /// The activation at AT.
+    pub(super) fn act(&mut self, at: usize) -> &mut Act {
+        &mut self.acts[at]
     }
-    /// How many reads are in progress on STREAM.
-    #[cfg(test)]
-    pub(crate) fn depth(&self, id: StreamId) -> usize {
-        self.frames.get(id.0).map_or(0, Vec::len)
+    /// Whether no read is in progress, as a world image requires.
+    pub(crate) fn idle(&self) -> bool {
+        self.acts.is_empty()
     }
     /// Every Value the live reads hold, for the collector to mark and rewrite.
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        visit(&mut self.result);
-        for (_, value) in &mut self.writes { visit(value); }
-        self.walks.iter_mut().flatten().for_each(&mut *visit);
-        for frame in self.frames.iter_mut().flatten() {
-            frame.visit_values(visit);
+        for act in &mut self.acts {
+            visit(&mut act.result);
+            if let Some((_, value)) = &mut act.write { visit(value); }
+            act.walk.iter_mut().for_each(&mut *visit);
+            if let Some(frame) = &mut act.keyseq { frame.visit_values(visit); }
         }
     }
 }

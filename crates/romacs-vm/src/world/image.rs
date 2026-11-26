@@ -42,7 +42,7 @@ impl Vm {
     }
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 46] = [
+        let checks: [(&str, bool); 47] = [
             ("stack", self.mutator.stack.is_empty()),
             ("site_leaf", self.mutator_rest.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -54,6 +54,8 @@ impl Vm {
             ("propagated_escape", self.mutator.propagated_escape.is_none()),
             ("host_input", self.host_input.is_none()),
             ("host_wait", self.host_wait.is_none()),
+            // No key read is in progress (command_loop/stream.rs).
+            ("reads", self.reads.idle()),
             ("ui_key", self.ui_key.is_none()),
             ("display", self.display.is_none()),
             // Restored as the renderer's default, which the options in the

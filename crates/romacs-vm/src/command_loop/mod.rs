@@ -8,7 +8,10 @@
 //! wait is (`host_input.rs`): it holds the permission and never a `Value`
 //! across a Lisp call. Its state lives in traced storage, the stream's
 //! `KeyseqFrame`s and `Reads`, or a `RootFrame` its caller releases; leaves
-//! read it back after each call. An escape out of a call comes back as
+//! read it back after each call. Each reading activation keeps its own
+//! (`stream::Act`), so a read nested in its Lisp neither overwrites nor
+//! drains it. The reader uses `Leaf` (`crate::prim`) as its toolkit of
+//! Lisp-level operations on the VM. An escape out of a call comes back as
 //! `Err(())` with the escape waiting in `propagated_escape`, and the exit
 //! helper (`keyseq::read`) runs the read's cleanup before handing it on.
 use crate::brand::{Gc, Mx};
@@ -26,6 +29,7 @@ mod reader_tests;
 pub(crate) use keyseq::{read_key_sequence, read_key_sequence_vs};
 pub(crate) use read_char::read_filtered_event;
 pub(crate) use stream::{MAIN, Reads, Store, Streams};
+use stream::Act;
 
 impl Vm {
     /// The input streams.
@@ -66,13 +70,16 @@ fn var(vm: &mut Vm, name: &str) -> Value {
         _ => Value::NIL,
     }
 }
-/// Set the variable NAME as GNU's C assigns it; a watched variable is set
-/// by a request after the leaf (`flush`), so its watchers run as they did
-/// when the reader was Lisp.
-fn store(vm: &mut Vm, name: &str, value: Value) -> Done<()> {
+/// Set the variable NAME as GNU's C assigns it. A watched variable is set
+/// by a request right after the leaf (`step`, `flush`), before anything else
+/// happens, so its watchers run as they did when the reader was Lisp: a leaf
+/// makes at most one such write, as its last effect.
+fn store(vm: &mut Vm, at: usize, name: &str, value: Value) -> Done<()> {
     let slot = vm.slot(name);
     if vm.variable_trapped(vm.indirect_variable(slot)) {
-        vm.reads.writes.push((slot, value));
+        let act = vm.reads.act(at);
+        debug_assert!(act.write.is_none(), "one watched write per reader leaf");
+        act.write = Some((slot, value));
         return Ok(());
     }
     if let Err(error) = vm.assign_variable(slot, value) {
@@ -81,46 +88,43 @@ fn store(vm: &mut Vm, name: &str, value: Value) -> Done<()> {
     }
     Ok(())
 }
-/// A leaf of the reader, then the writes it left for watchers (`store`).
-fn step<'b, A: crate::brand::Plain, R: crate::brand::Plain>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, a: A,
+/// A leaf of the activation AT, then the watched write it left (`store`);
+/// one that fails leaves none behind.
+fn step<'b, A: crate::brand::Plain, R: crate::brand::Plain>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, at: usize, a: A,
     f: impl FnOnce(&mut Vm, A) -> Done<R> + Copy + 'static) -> Done<R> {
     let out = m.leaf(a, f);
     if out.is_err() {
-        m.leaf((), |vm, ()| vm.reads.writes.clear());
+        m.leaf(at, |vm, at| vm.reads.act(at).write = None);
         return out;
     }
-    flush(m, gc)?;
+    flush(m, gc, at)?;
     out
 }
-/// The writes `store` left, each a request whose watchers may run Lisp.
-fn flush<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>) -> Done<()> {
-    loop {
-        let next = m.leaf((), |vm, ()| {
-            if vm.reads.writes.is_empty() { return None; }
-            let (slot, value) = vm.reads.writes.remove(0);
-            Some((slot, vm.root_frame(&[value])))
-        });
-        let Some((slot, frame)) = next else { return Ok(()) };
-        let written = threaded::write_from(m, gc.by_ref(), slot, &frame, 0);
-        m.leaf((frame, written), |vm, (frame, written)| {
-            vm.drop_frame(frame);
-            vm.reads.callouts += 1;
-            written.map_err(|error| escape(vm, error))
-        })?;
-    }
+/// The watched write the activation AT's last leaf left, a request whose
+/// watchers may run Lisp.
+fn flush<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, at: usize) -> Done<()> {
+    let next = m.leaf(at, |vm, at| vm.reads.act(at).write.take().map(|(slot, value)| (slot, vm.root_frame(&[value]))));
+    let Some((slot, frame)) = next else { return Ok(()) };
+    let written = threaded::write_from(m, gc, slot, &frame, 0);
+    m.leaf((frame, written), |vm, (frame, written)| {
+        vm.drop_frame(frame);
+        vm.reads.callouts += 1;
+        written.map_err(|error| escape(vm, error))
+    })
 }
-/// Call the function and arguments ARGS gives: its value in `Reads::result`.
-fn call<'b, A: crate::brand::Plain>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, a: A,
+/// Call the function and arguments ARGS gives: its value in the activation
+/// AT's result.
+fn call<'b, A: crate::brand::Plain>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, at: usize, a: A,
     args: impl FnOnce(&mut Vm, A) -> Done<Vec<Value>> + Copy + 'static) -> Done<()> {
     let frame = m.leaf(a, move |vm, a| args(vm, a).map(|values| vm.root_frame(&values)))?;
-    called(m, gc, frame)
+    called(m, gc, at, frame)
 }
 /// The function rooted first in FRAME called on the rest, FRAME released:
-/// its value in `Reads::result`.
-fn called<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, frame: RootFrame) -> Done<()> {
-    let outcome = threaded::call_frame(m, gc, &frame, (), |vm, (), value| match value {
+/// its value in the activation AT's result.
+fn called<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, at: usize, frame: RootFrame) -> Done<()> {
+    let outcome = threaded::call_frame(m, gc, &frame, at, |vm, at, value| match value {
         Ok(value) => {
-            vm.reads.result = value;
+            vm.reads.act(at).result = value;
             Ok(())
         }
         Err(error) => {
@@ -136,11 +140,11 @@ fn called<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, frame: RootFrame) -> Done<()> {
 }
 /// `call` with the variables NAMES bound to the values BIND gives, as `let`
 /// binds them, around the call.
-fn call_bound<'b, A: crate::brand::Plain + Copy>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, names: &'static [&'static str], a: A,
+fn call_bound<'b, A: crate::brand::Plain + Copy>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, at: usize, names: &'static [&'static str], a: A,
     bind: impl FnOnce(&mut Vm, A) -> Done<Vec<Value>> + Copy + 'static,
     args: impl FnOnce(&mut Vm, A) -> Done<Vec<Value>> + Copy + 'static) -> Done<()> {
     let values = m.leaf(a, move |vm, a| bind(vm, a).map(|values| vm.root_frame(&values)))?;
-    bound(m, gc, names, values, |m, gc| call(m, gc, a, args))
+    bound(m, gc, names, values, |m, gc| call(m, gc, at, a, args))
 }
 /// BODY with the variables NAMES bound to VALUES, as `let` binds them:
 /// unbound after it, or unwound when it escapes. VALUES is released.
@@ -175,14 +179,10 @@ fn bound<'b>(m: &mut M<'_, 'b>, mut gc: Gc<'_, 'b>, names: &[&'static str], valu
 /// The Lisp half of the command loop (`prims/keyboard.rs`), evaluated now
 /// unless it is: the reader calls its host and batch waits, its echo and
 /// its macro recording.
-fn ensure_lisp_half<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>) -> Done<()> {
-    let installed = m.leaf((), |vm, ()| {
-        let mut cx = crate::prim::Leaf::new(vm);
-        let probe = cx.intern("romacs--read-host-input");
-        cx.symbol_function(probe).is_ok_and(|function| function != Value::NIL)
-    });
+fn ensure_lisp_half<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, at: usize) -> Done<()> {
+    let installed = m.leaf((), |vm, ()| crate::prim::prims::keyboard::is_installed(&mut crate::prim::Leaf::new(vm)).unwrap_or(false));
     if installed { return Ok(()); }
-    call(m, gc, (), |vm, ()| {
+    call(m, gc, at, (), |vm, ()| {
         let form = crate::prim::prims::keyboard::lisp_half_form(vm).map_err(|fault| signal(vm, fault))?;
         let eval = vm.intern("eval");
         Ok(vec![eval, form, Value::TRUE])
@@ -193,6 +193,19 @@ fn ensure_lisp_half<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>) -> Done<()> {
 fn byte_char(c: i64) -> i64 {
     if (0x3f_ff80..=0x3f_ffff).contains(&c) { c - 0x3f_ff00 } else { c }
 }
+/// A reading primitive's activation around BODY: pushed, then popped on
+/// every exit, BODY's value (or escape) landed in OUT.
+fn activation<'b>(m: &mut M<'_, 'b>, gc: Gc<'_, 'b>, out: &RootFrame,
+    body: impl FnOnce(&mut M<'_, 'b>, Gc<'_, 'b>, usize) -> Done<()>) -> bool {
+    let at = m.leaf((), |vm, ()| vm.reads.push(Act::new(None)));
+    let outcome = body(m, gc, at);
+    m.leaf((at, out, outcome), |vm, (at, out, outcome)| {
+        vm.reads.pop(at);
+        let value = vm.rooted(out, 0);
+        landed(vm, out, outcome.map(|()| value))
+    })
+}
+
 /// A reading primitive's end: its value, or the escape that waits, to OUT.
 fn landed(vm: &mut Vm, out: &RootFrame, outcome: Done<Value>) -> bool {
     land(vm, out, outcome.map_err(|()| Fault::Escape))

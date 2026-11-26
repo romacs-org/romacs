@@ -607,6 +607,8 @@ impl Vm {
         // A panic in a host wait drops its host, as it did when the wait
         // kept it on the native stack.
         self.host_wait = None;
+        // So does a panic inside a key read its activations (command_loop).
+        self.reads = crate::command_loop::Reads::default();
         // A collection the panic stopped may have left the generations
         // false: a minor makes the old entries it reads again young for its
         // length, and a sweep stopped part way leaves old, clean survivors

@@ -173,58 +173,58 @@ fn fixnum(v: Value) -> std::result::Result<i64, Fault> {
     v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v))
 }
 
-use super::keyboard::{enter, DONE};
+use super::keyboard::enter;
 
 defsubr! { name = "innermost-minibuffer-p", gnu = "minibuf.c:424", effect = Global,
 fn innermost_minibuffer_p(cx; optional buffer: Value) -> Step {
-    enter(cx, "romacs--innermost-minibuffer-p", vec![buffer], DONE)
+    enter(cx, "romacs--innermost-minibuffer-p", vec![buffer])
 }}
 
 defsubr! { name = "minibuffer-innermost-command-loop-p", gnu = "minibuf.c:438", effect = Global,
 fn minibuffer_innermost_command_loop_p(cx; optional buffer: Value) -> Step {
-    enter(cx, "romacs--minibuffer-innermost-command-loop-p", vec![buffer], DONE)
+    enter(cx, "romacs--minibuffer-innermost-command-loop-p", vec![buffer])
 }}
 
 defsubr! { name = "minibuffer-prompt", gnu = "minibuf.c:2248", effect = Global,
-fn minibuffer_prompt(cx) -> Step { enter(cx, "romacs--minibuffer-prompt", vec![], DONE) }}
+fn minibuffer_prompt(cx) -> Step { enter(cx, "romacs--minibuffer-prompt", vec![]) }}
 
 defsubr! { name = "minibuffer-prompt-end", gnu = "minibuf.c:505", effect = Global,
-fn minibuffer_prompt_end(cx) -> Step { enter(cx, "romacs--minibuffer-prompt-end", vec![], DONE) }}
+fn minibuffer_prompt_end(cx) -> Step { enter(cx, "romacs--minibuffer-prompt-end", vec![]) }}
 
 defsubr! { name = "minibuffer-contents", gnu = "minibuf.c:527", effect = Global,
-fn minibuffer_contents(cx) -> Step { enter(cx, "romacs--minibuffer-contents", vec![Value::TRUE], DONE) }}
+fn minibuffer_contents(cx) -> Step { enter(cx, "romacs--minibuffer-contents", vec![Value::TRUE]) }}
 
 defsubr! { name = "minibuffer-contents-no-properties", gnu = "minibuf.c:537", effect = Global,
 fn minibuffer_contents_no_properties(cx) -> Step {
-    enter(cx, "romacs--minibuffer-contents", vec![Value::NIL], DONE)
+    enter(cx, "romacs--minibuffer-contents", vec![Value::NIL])
 }}
 
 // Fread_buffer binds `completion-ignore-case' around the reader, so it is Lisp.
 defsubr! { name = "read-buffer", gnu = "minibuf.c:1522", effect = Global,
 fn read_buffer(cx, prompt: Value; optional def: Value, require_match: Value, predicate: Value) -> Step {
-    enter(cx, "romacs--read-buffer", vec![prompt, def, require_match, predicate], DONE)
+    enter(cx, "romacs--read-buffer", vec![prompt, def, require_match, predicate])
 }}
 
 // Fread_coding_system binds `completion-ignore-case' around the reader.
 defsubr! { name = "read-coding-system", gnu = "coding.c:8625", effect = Global,
 fn read_coding_system(cx, prompt: Value; optional default_coding_system: Value) -> Step {
-    enter(cx, "romacs--read-coding-system", vec![prompt, default_coding_system], DONE)
+    enter(cx, "romacs--read-coding-system", vec![prompt, default_coding_system])
 }}
 
 defsubr! { name = "read-command", gnu = "minibuf.c:1462", effect = Global,
 fn read_command(cx, prompt: Value; optional default_value: Value) -> Step {
-    enter(cx, "romacs--read-command", vec![prompt, default_value], DONE)
+    enter(cx, "romacs--read-command", vec![prompt, default_value])
 }}
 
 defsubr! { name = "read-variable", gnu = "minibuf.c:1496", effect = Global,
 fn read_variable(cx, prompt: Value; optional default_value: Value) -> Step {
-    enter(cx, "romacs--read-variable", vec![prompt, default_value], DONE)
+    enter(cx, "romacs--read-variable", vec![prompt, default_value])
 }}
 
 defsubr! { name = "internal-complete-buffer", gnu = "minibuf.c:2156", effect = Global,
 fn internal_complete_buffer(cx, string: Value, predicate: Value, flag: Value) -> Step {
-    enter(cx, "romacs--internal-complete-buffer", vec![string, predicate, flag], DONE)
+    enter(cx, "romacs--internal-complete-buffer", vec![string, predicate, flag])
 }}
 
 defsubr! { name = "yes-or-no-p", gnu = "fns.c:3612", effect = Global,
-fn yes_or_no_p(cx, prompt: Value) -> Step { enter(cx, "romacs--yes-or-no-p", vec![prompt], DONE) }}
+fn yes_or_no_p(cx, prompt: Value) -> Step { enter(cx, "romacs--yes-or-no-p", vec![prompt]) }}

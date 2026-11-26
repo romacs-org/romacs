@@ -12,9 +12,12 @@ GNU keyboard.c's key reader (`read_key_sequence`, `read_char`,
 
 ## Contracts
 - Orchestration in the `crate::brand` style: no `Value` in a Rust local
-  across a Lisp call. A read's state lives in its `KeyseqFrame` on `Reads`
-  (traced and rewritten by the collector); a call's value lands in
-  `Reads::result`.
+  across a Lisp call. Each reading primitive pushes an activation
+  (`stream::Act`) with its own result, pending write, walk and
+  `KeyseqFrame`, traced and rewritten by the collector, so a read nested in
+  its Lisp neither overwrites nor drains it.
+- A leaf makes at most one write to a watched variable, as its last effect,
+  in the Lisp port's order; `step` completes it before anything else runs.
 - `Err(())` means an escape waits in `propagated_escape`. Every read leaves
   through `keyseq::read`'s exit: the end hooks once if the sequence started
   (the escape kept unless they make their own), then its frame popped.
@@ -31,8 +34,14 @@ GNU keyboard.c's key reader (`read_key_sequence`, `read_char`,
 - `python3 tools/test-ert --file test/romacs/lisp/command-loop-tests.el`, and
   the same file on the pinned GNU.
 
+## Traps
+- `(t . E)` and `(no-record . E)` are decoded twice: by `read_char` for the
+  queues, and by `romacs--read-host-input` for an event a timer queued during
+  the host wait (beta's rows).
+
 ## Decisions
 - The reads are a field of their own, at rest (`Vm::reads`), not inside
   `InputStream`: only an image's root may hold at-rest fields.
-- Writes to watched variables are requests after the leaf that made them
-  (`store`, `flush`), so their watchers run as they did in the Lisp reader.
+- Writes to watched variables are requests right after the leaf that made
+  them (`store`, `flush`), so their watchers run where the Lisp reader's
+  `setq` ran them.
