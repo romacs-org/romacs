@@ -37,6 +37,9 @@
 ;;; Code:
 
 (eval-when-compile (require 'cl-lib))
+;; Romacs: a tabulated list is a list (romacs-list.el), each entry's line
+;; a row; ledger/divergences/LISP-TABULATED-LIST.md.
+(require 'romacs-list)
 
 (defgroup tabulated-list nil
   "Tabulated-list customization group."
@@ -502,10 +505,12 @@ changing `tabulated-list-sort-key'."
       (delete-region (point) (point-max)))
     (set-buffer-modified-p nil)
     ;; If REMEMBER-POS was specified, move to the "old" location.
-    (if saved-pt
-	(progn (goto-char saved-pt)
-	       (move-to-column saved-col))
-      (goto-char (point-min)))))
+    (prog1 (if saved-pt
+	       (progn (goto-char saved-pt)
+		      (move-to-column saved-col))
+	     (goto-char (point-min)))
+      ;; No command follows a print that none made: the row it left point on.
+      (romacs-list-highlight))))
 
 (defun tabulated-list-print-entries (entries sorter update entry-id)
   (let (saved-pt)
@@ -569,7 +574,8 @@ of column descriptors."
     ;; Ever so slightly faster than calling `put-text-property' twice.
     (add-text-properties
      beg (point)
-     `(tabulated-list-id ,id tabulated-list-entry ,cols))))
+     `(tabulated-list-id ,id tabulated-list-entry ,cols
+       romacs-list-row (:id ,id :kind entry)))))
 
 (defun tabulated-list--available-space (width n)
   (let* ((next-col-format (aref tabulated-list-format (1+ n)))
@@ -833,7 +839,7 @@ If ARG is provided, move that many columns."
 
 (defvar tabulated-list--original-order nil)
 
-(define-derived-mode tabulated-list-mode special-mode "Tabulated"
+(define-derived-mode tabulated-list-mode romacs-list-mode "Tabulated"
   "Generic major mode for browsing a list of items.
 This mode is usually not used directly; instead, other major
 modes are derived from it, using `define-derived-mode'.

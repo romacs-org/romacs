@@ -576,16 +576,18 @@ def providers(args, base):
         a.idle(first)
         a.idle(other)
         started = {'default': a.config_dirs(first), 'claude2': a.config_dirs(other)}
-        # The board names each session's harness, its account on hover.
+        # The board names each session's harness, its account on hover, in
+        # their project's threads.
         hovers = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-board)) (with-temp-buffer (romacs-agent-board-mode) '
-                                              '(romacs-agent-board--draw (romacs-agent-board-rows (romacs-agent-summary nil) '
+                                              f'(setq romacs-agent-board--project (romacs-agent-board--project {lisp(a.work)})) '
+                                              '(romacs-list-draw (romacs-agent-board-rows (romacs-agent-summary nil) '
                                               'nil (romacs-agent-board--view)) 120) '
                                               '(let ((pos (point-min)) (found nil)) '
                                               '(while (setq pos (next-single-property-change pos (quote help-echo))) '
                                               '(let ((h (get-text-property pos (quote help-echo)))) '
                                               '(when (and (stringp h) (string-prefix-p "account " h)) (push (substring h 8) found)))) '
                                               'found)))'))
-        shown = sorted(set(hovers))
+        shown = sorted(set(hovers or []))
         a.eval(f'(romacs-agent-stop {a.s(other)})')
         until(lambda: a.state(other) in ('ended', 'detached'), 15, 'session ended')
         a.client('--stop=none')
@@ -1089,6 +1091,9 @@ def tour(work, delegate_target):
         ('romacs_task_send', {'taskId': '<the same taskId>', 'message': 'say again'}, lambda t: '"taskId"' in t),
         ('romacs_task_renew', {'taskId': '<the same taskId>', 'why': 'the tour'}, lambda t: '"taskId"' in t),
         ('romacs_orchestration_issues', {'hours': 1}, issues_summary),
+        # Refused, and says why: the tour's task asked nothing.
+        ('romacs_task_answer', {'taskId': '<the same taskId>', 'requestId': 'r-none'},
+         lambda t: 'No such approval request' in t),
         ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
         # Refused, and says why: the tour's session received no message.
         ('romacs_task_reply', {'messageId': 'm-none', 'text': 'hello'},
@@ -1097,7 +1102,7 @@ def tour(work, delegate_target):
 
 
 # Tour steps whose call is refused, its refusal checked.
-REFUSED_IN_TOUR = {'romacs_task_reply'}
+REFUSED_IN_TOUR = {'romacs_task_reply', 'romacs_task_answer'}
 
 
 def issues_summary(text):
@@ -2673,12 +2678,13 @@ def mcp_tour(args, base):
                         and friend in private['buffers']
                         # Gnosis's refuse without a session or database (none here); romacs_task_watch
                         # without a running unit or a calling task; romacs_dev_check where no Romacs
-                        # tree is (the tour's project); romacs_attach, romacs_task_reply and
-                        # romacs_task_renew from a caller that is no agent session (the tour's client).
+                        # tree is (the tour's project); romacs_attach, romacs_task_reply,
+                        # romacs_task_renew and romacs_task_answer from a caller that is no agent
+                        # session (the tour's client).
                         and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
                                                                   'romacs_task_watch', 'romacs_dev_check',
                                                                   'romacs_attach', 'romacs_task_reply',
-                                                                  'romacs_task_renew')
+                                                                  'romacs_task_renew', 'romacs_task_answer')
                                 for n in errors)
                         and task is not None)
         return result
@@ -3012,25 +3018,16 @@ SUBMIT_PROBE = r"""
                  (push (list index (copy-tree answer)) s8-submit-answers)
                  (s8-submit-deliver file callback answer)))))
   (defun s8-submit-sending-face-p ()
-    (let* ((input (if (derived-mode-p 'romacs-agent-compose-mode)
-                      (point-min)
-                    romacs-agent-log--input))
-           (start (save-excursion
-                   (goto-char input)
+    (let ((start (save-excursion
+                   (goto-char romacs-agent-log--input)
                    (let ((inhibit-field-text-motion t)) (line-beginning-position)))))
-      (cl-loop for p from start to input
+      (cl-loop for p from start to romacs-agent-log--input
                thereis
                (let ((face (get-char-property p 'face))
-                     (prefix (get-char-property p 'line-prefix))
-                     ;; The mark an overlay at the start shows before it.
-                     (before (mapcar (lambda (o) (let ((s (overlay-get o 'before-string)))
-                                                   (and (stringp s) (> (length s) 0)
-                                                        (text-properties-at (1- (length s)) s))))
-                                     (overlays-in p p))))
+                     (prefix (get-char-property p 'line-prefix)))
                  (string-match-p "\\_<romacs-agent-compose-sending\\_>"
-                                 (format "%S %S %S" face (and (stringp prefix)
-                                                              (text-properties-at 0 prefix))
-                                         before))))))
+                                 (format "%S %S" face (and (stringp prefix)
+                                                           (text-properties-at 0 prefix))))))))
   (advice-add 'romacs-agent-submit :around #'s8-submit-record)
   (global-set-key [f8] (lambda () (interactive) (cl-incf s8-submit-barrier)))
   t)
@@ -3063,18 +3060,9 @@ def submit_calls(a, sid):
     return [parity_live.plist(intent) for _, intent in calls]
 
 
-def composer_buffer(chat):
-    return ("(if (fboundp 'romacs-agent-log-composer-buffer) "
-            f"(romacs-agent-log-composer-buffer {chat}) {chat})")
-
-
-COMPOSER_START = ("(if (derived-mode-p 'romacs-agent-compose-mode) (point-min) "
-                  "(marker-position romacs-agent-log--input))")
-
-
 def submit_draft(a, chat):
-    return submit_read(a, f'(with-current-buffer {composer_buffer(chat)} '
-                       f'(buffer-substring-no-properties {COMPOSER_START} (point-max)))')
+    return submit_read(a, f'(with-current-buffer {chat} '
+                       '(buffer-substring-no-properties romacs-agent-log--input (point-max)))')
 
 
 def submit_chat(a, text):
@@ -3094,20 +3082,19 @@ def submit_inputs(a, sid):
 
 def composer_submit_hold(a):
     sid, chat = submit_chat(a, SUBMIT_DRAFT)
-    buffer = composer_buffer(chat)
     release = a.root / 'submit-release'
     a.eval(f'(setq s8-submit-release {lisp(release)})')
-    a.eval(f'(with-current-buffer {buffer} (add-hook (quote romacs-agent-log-draft-replaced-hook) '
+    a.eval(f'(with-current-buffer {chat} (add-hook (quote romacs-agent-log-draft-replaced-hook) '
            '(lambda () (cl-incf s8-submit-clears)) nil t) t)')
     try:
         submit_ret(a)
         until(lambda: submit_answers(a), 10, 'submit answer held behind release file')
         draft = submit_draft(a, chat)
         assert draft == SUBMIT_DRAFT, ('draft erased before answer', draft)
-        assert submit_read(a, f'(with-current-buffer {buffer} '
+        assert submit_read(a, f'(with-current-buffer {chat} '
                            '(condition-case nil (progn (goto-char (point-max)) (insert "x") nil) '
                            '((buffer-read-only text-read-only) t)))'), 'pending draft was writable'
-        assert submit_read(a, f'(with-current-buffer {buffer} (s8-submit-sending-face-p))') is not None, 'sending face missing'
+        assert submit_read(a, f'(with-current-buffer {chat} (s8-submit-sending-face-p))') is not None, 'sending face missing'
         submit_ret(a, barrier=True)
         intents = submit_calls(a, sid)
         assert len(intents) == 1, ('second RET called submit', intents)
@@ -3219,43 +3206,19 @@ def composer(args, base, real=False):
         chat = f'(romacs-agent-log-chat {a.s(sid)})'
         a.eval(f'(progn (delete-other-windows) (romacs-agent-show {a.s(sid)}) t)')
         mark = a.eval('(with-current-buffer "*Messages*" (point-max))')
-        separate = a.eval("(fboundp 'romacs-agent-log-composer-buffer)") == 't'
-        ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
-
-        def jump():
-            a.keys(*ctrl('c'), *ctrl('j'))
 
         def look():
-            # Draft, point, draft start, point-max, name, selection, window
-            # start, invisibility, text properties and the laid-out text width.
-            draft = '(buffer-string)' if separate else '(romacs-agent-log--draft)'
+            # The composer's text, point, the end marker, point-max, the
+            # buffer's name, whether it is shown, the window's start, and
+            # whether its text shows: any invisible character, its
+            # properties, and its width as laid out in the window.
             return parity_live.read_sexp(a.eval(
-                f'(with-current-buffer {composer_buffer(chat)} '
-                f'(let ((start {COMPOSER_START}) (window (get-buffer-window (current-buffer)))) '
-                f'(list {draft} (point) start (point-max) (buffer-name) '
-                '(eq window (selected-window)) (and window (window-start window)) '
-                '(cl-loop for p from start below (point-max) thereis (invisible-p p)) '
-                '(and (< start (point-max)) (format "%S" (text-properties-at start))) '
-                '(and window (< start (point-max)) '
-                '(car (window-text-pixel-size window start (point-max)))))))'))
-
-        def clear_draft():
-            a.eval(f'(with-current-buffer {composer_buffer(chat)} '
-                   f'(delete-region {COMPOSER_START} (point-max)))')
-
-        def transcript_top():
-            if separate:
-                jump()
-                until(lambda: a.eval(f'(and (eq (window-buffer) {chat}) buffer-read-only)') == 't',
-                      10, 'read-only transcript selected')
-            a.keys('-M', 'alt', '<', '-m', 'alt')
-
-        def fitted(rows):
-            return a.eval(
-                f'(let ((w (get-buffer-window {composer_buffer(chat)})) '
-                f'(body (* {rows} (frame-char-height)))) '
-                '(and w (= (window-body-height w t) body) '
-                '(= (window-pixel-height w) (+ body (window-bottom-divider-width w)))))') == 't'
+                f'(with-current-buffer {chat} (let ((end (marker-position romacs-agent-log--input))) '
+                '(list (romacs-agent-log--draft) (point) end (point-max) (buffer-name) '
+                '(eq (window-buffer (selected-window)) (current-buffer)) (window-start (selected-window)) '
+                '(cl-loop for p from end below (point-max) thereis (invisible-p p)) '
+                '(and (< end (point-max)) (format "%S" (text-properties-at end))) '
+                '(and (< end (point-max)) (car (window-text-pixel-size (selected-window) end (point-max)))))))'))
 
         def messages():
             return parity_live.read_sexp(a.eval(f'(with-current-buffer "*Messages*" '
@@ -3273,8 +3236,7 @@ def composer(args, base, real=False):
                 pass
             state = look()
             steps[name] = {'state': state, 'expect': expect}
-            return (state[0] == expect and state[5] and not state[7]
-                    and state[8] in (None, 'nil') and (state[9] or 0) > 0)
+            return state[0] == expect and not state[7] and state[8] in (None, 'nil') and (state[9] or 0) > 0
 
         def cleared(name):
             """Kill the composer's line, as a user would: C-a C-k."""
@@ -3284,7 +3246,7 @@ def composer(args, base, real=False):
             except RuntimeError:
                 steps[name] = {'state': look(), 'expect': ''}
                 # Cleared for the steps after, whatever the keys did.
-                clear_draft()
+                a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-log--input (point-max)))')
                 return False
             return True
 
@@ -3294,8 +3256,6 @@ def composer(args, base, real=False):
             until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != done, 120, f'{name} answered')
             a.idle(sid)
 
-        if separate:
-            until(lambda: fitted(1), 10, 'empty composer fits one row plus the divider')
         good = [typed('before_first_prompt', 'say hello from Romacs')]
         turn('first')
         # A call is open while a turn runs: typing then, and after the turn
@@ -3308,8 +3268,7 @@ def composer(args, base, real=False):
         last_call = lambda: (lambda tail: '⎿' in tail and '❯' not in tail)(
             re.split(r'^  (?=\S)', transcript(), flags=re.M)[-1])
         until(lambda: a.state(sid) == 'running' and last_call(), 15, 'tool output last')
-        boundary = 'romacs-agent-log--end' if separate else 'romacs-agent-log--input'
-        steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- {boundary}))))')
+        steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- romacs-agent-log--input))))')
         good.append(typed('while_output_last', 'typed while'))
         good.append(last_call() and a.state(sid) == 'running')
         release.write_text('')
@@ -3320,12 +3279,11 @@ def composer(args, base, real=False):
         a.keys('-k', 'BackSpace', '-k', 'BackSpace')
         good.append(typed('after_del', 'x', 'say agax'))
         # The chat's keys and its actions menu, with real keys.
+        ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
         popup = lambda: a.eval('(and (boundp (quote keymap-popup--buffer)) (buffer-live-p keymap-popup--buffer) t)') == 't'
         good.append(cleared('composer cleared for keys'))
         a.keys('a'); a.keys(*ctrl('j')); a.keys('b')
         good.append(typed('newline', '', 'a\nb'))
-        if separate:
-            until(lambda: fitted(2), 10, 'composer fits two rows plus the divider')
         a.keys(*ctrl('c'), *ctrl('o'))
         try:
             until(popup, 10, 'the actions menu')
@@ -3340,7 +3298,7 @@ def composer(args, base, real=False):
         until(lambda: a.eval(f'(romacs-agent-title {a.s(sid)})') == '"menu title"', 10, 'renamed from the menu')
         steps['renamed'] = a.eval(f'(buffer-name (romacs-agent-log-chat {a.s(sid)}))')
         good.append(steps['menu_opened'] and 'menu title' in steps['renamed'])
-        clear_draft()
+        a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-log--input (point-max)))')
         # A message queued while a turn runs is sent when it ends.
         a.keys('slow 30'); a.keys('-k', 'Return')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the slow turn')
@@ -3357,7 +3315,6 @@ def composer(args, base, real=False):
         a.keys('slow 200'); a.keys('-k', 'Return')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the long turn')
         a.keys('say after interrupt'); a.keys(*ctrl('c'), *ctrl('k'))
-        until(lambda: look()[0] == '', 10, 'interrupted composer cleared')
         until(lambda: '❯ say after interrupt' in a.chat(sid), 30, 'sent after the interrupt')
         a.idle(sid)
         steps['interrupted_then_sent'] = 'after interrupt' in a.chat(sid).split('❯ say after interrupt', 1)[-1]
@@ -3367,7 +3324,7 @@ def composer(args, base, real=False):
         a.keys('-M', 'alt', '-k', 'p', '-m', 'alt')
         good.append(typed('history_previous', '', 'say after interrupt'))
         good.append(cleared('composer cleared for transcript keys'))
-        transcript_top()
+        a.keys('-M', 'alt', '<', '-m', 'alt')
         a.keys('?')
         try:
             until(popup, 10, 'the menu from the transcript')
@@ -3391,13 +3348,8 @@ def composer(args, base, real=False):
         # after a Codex turn an interrupt ended (no result).
         a.send(sid, 'slow 30')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'a turn to queue behind')
-        if separate:
-            a.eval(f'(setq s8b-killed-composer {composer_buffer(chat)})')
         a.eval(f'(progn (romacs-agent-send-later {a.s(sid)} "say queued unseen") '
                f'(let ((kill-buffer-query-functions nil)) (kill-buffer (romacs-agent-log-chat {a.s(sid)}))) t)')
-        if separate:
-            steps['composer_killed_with_chat'] = a.eval('(not (buffer-live-p s8b-killed-composer))') == 't'
-            good.append(steps['composer_killed_with_chat'])
         until(lambda: 'queued unseen' in (a.results(sid) or [''])[-1], 40, 'the queued message sent with no chat')
         a.idle(sid)
         a.eval(f'(progn (save-window-excursion (romacs-agent-show {a.s(sid)})) '
@@ -3411,9 +3363,6 @@ def composer(args, base, real=False):
         steps['queue_survives'] = True
         a.providers([('claude', '~/.claude')])
         # Non-ASCII typed with real keys, then sent: the harness gets it whole.
-        if separate:
-            until(lambda: a.eval(f'(eq (window-buffer) {chat})') == 't', 10, 'switched to chat')
-        jump()
         good.append(cleared('composer cleared for unicode'))
         good.append(typed('unicode_typed', f'say {UNICODE}'))
         turn('unicode')
@@ -3444,9 +3393,7 @@ def composer(args, base, real=False):
         yanked = parity_live.read_sexp(a.eval(f'(with-current-buffer {chat} (buffer-substring-no-properties (point-min) (+ (point-min) 5)))'))
         a.keys('-M', 'ctrl', '-k', 'y', '-m', 'ctrl')
         good.append(typed('yanked_transcript', '', yanked))
-        steps['after_change_hook_kept'] = a.eval(
-            f'(with-current-buffer {composer_buffer(chat)} '
-            '(and (memq (function romacs-agent-log--composer-plain) after-change-functions) t))')
+        steps['after_change_hook_kept'] = a.eval(f'(with-current-buffer {chat} (and (memq (function romacs-agent-log--composer-plain) after-change-functions) t))')
         good.append(steps['after_change_hook_kept'] == 't')
         good.append(cleared('composer killed'))
         # A long wrapped transcript: replies far wider than the window.
@@ -3460,16 +3407,13 @@ def composer(args, base, real=False):
         good.append(typed('after_recenter', ' fourth', 'third fourth'))
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) t)')
         good.append(typed('after_show_again', ' fifth', 'third fourth fifth'))
-        # A key typed from the top of the transcript lands in the draft.
-        transcript_top()
-        before_typing = transcript()
+        # Point in the transcript (M-<, as a scroll leaves it): a key typed
+        # there goes to the composer (SPC there scrolls); M-> from there
+        # reaches it too.
+        a.keys('-M', 'alt', '<', '-m', 'alt')
         good.append(typed('typed_in_transcript', '+sixth', 'third fourth fifth+sixth'))
-        if separate:
-            good.append(transcript() == before_typing)
-        transcript_top()
+        a.keys('-M', 'alt', '<', '-m', 'alt')
         a.keys('-M', 'alt', '>', '-m', 'alt')
-        if separate:
-            jump()
         good.append(typed('after_top_then_end', ' seventh', 'third fourth fifth+sixth seventh'))
         good.append(cleared('composer killed again'))
         # A session started from the board with c: its chat opens with no
@@ -3484,14 +3428,14 @@ def composer(args, base, real=False):
               10, 'session started')
         sid = next(iter(set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))'))) - before))
         chat = f'(romacs-agent-log-chat {a.s(sid)})'
-        until(lambda: a.eval(f'(eq (window-buffer) {composer_buffer(chat)})') == 't', 10, 'home composer selected')
+        until(lambda: a.eval(f'(eq (window-buffer (selected-window)) {chat})') == 't', 10, 'home chat shown')
         good.append(typed('home_first_prompt', 'say hello from Romacs'))
         turn('home first')
         good.append(typed('home_session', 'say from home'))
         turn('home')
         good.append(typed('home_after_turn', 'more'))
         said = messages()
-        result = {'steps': steps, 'messages': said[-1500:], 'title': look()[4], 'separate_composer': separate}
+        result = {'steps': steps, 'messages': said[-1500:], 'title': look()[4]}
         result['failed'] = [i for i, check in enumerate(good) if not check]
         result['ok'] = all(good) and not any(word in said for word in ('unsupported', 'read-only', 'error', 'Error'))
         if not real:
@@ -3567,8 +3511,12 @@ def history(args, base):
         setting = [('claude', claude_dir), ('codex', codex_home, CODEX, [])]
         a.providers(setting)
         text = lambda form: parity_live.read_sexp(a.eval(form))
-        home = text('(progn (save-window-excursion (romacs-agents)) (with-current-buffer "*romacs-agents*" '
-                    '(buffer-substring-no-properties (point-min) (point-max))))')
+        board = lambda project: text(f'(progn (save-window-excursion (romacs-agents)) (with-current-buffer "*romacs-agents*" '
+                                     f'(romacs-list-enter {project}) '
+                                     '(buffer-substring-no-properties (point-min) (point-max))))')
+        # The home board lists the project; choosing it lists its transcripts.
+        home = board('nil')
+        project = board(f'(romacs-agent-board--project {lisp(a.work)})')
         item = lambda ident: (f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(ident)})) '
                               '(romacs-agent-history-items))')
         views = {}
@@ -3653,7 +3601,7 @@ def history(args, base):
                 'partial-end': read(0, b1 + 3), 'whole': read(0, b1 + len(rows[2]))}
         order = lambda chat, first, then: first in chat and then in chat and chat.index(first) < chat.index(then)
         result = {
-            'home': home, 'views': {k: v[:400] for k, v in views.items()},
+            'home': home, 'project': project, 'views': {k: v[:400] for k, v in views.items()},
             'claude_argv': claude_run[-1]['argv'] if claude_run else None,
             'claude_config_dir': claude_run[-1].get('config_dir') if claude_run else None,
             'codex_resumed': codex_run[-1]['resumed'] if codex_run else None,
@@ -3661,8 +3609,9 @@ def history(args, base):
             'untouched': untouched, 'imported_again': imported_again, 'refused': refused, 'cuts': cuts,
             'twin_sockets': sockets, 'twin_runs': twin_runs, 'twin_failed': twin_failed}
         result['ok'] = bool(
-            '◇ list the files here' in home and '◇ count the lines of a.txt' in home and 'AGENTS.md' not in home
-            and home.index(a.work.name) < home.index('◇')
+            a.work.name in home and '◇ 2 transcripts' in home and '◇ list the files here' not in home
+            and '◇ list the files here' in project and '◇ count the lines of a.txt' in project and 'AGENTS.md' not in project
+            and project.index(a.work.name) < project.index('◇ list')
             and all(v.split('|')[1] == 't' for v in views.values())
             and views[cid].startswith('*history: list the files here*')
             and order(views[cid], '❯ list the files here', 'Two files') and '\n  $ ls' in views[cid]
@@ -4089,7 +4038,8 @@ PLAN_PROMPT = 'Plan how you would add the line "third" to notes.txt. Present the
 
 def board_keys(args, base):
     """The agent board by real keys (C-x C-a a, RET), a buffer in the
-    selected window: on a project, its first row opens in the board's
+    selected window: it lists projects, one with only transcripts too; RET
+    on one shows its rows, and RET again its first row opens in the board's
     window, the thread that wants the user most, else the newest (a
     delegated one folds under its parent) or, with no thread, its newest
     transcript; on "◇ N more", every transcript is shown and the board
@@ -4126,12 +4076,10 @@ def board_keys(args, base):
         a.keyboard_ready()
         board = '(get-buffer-window "*romacs-agents*" t)'
         shown = lambda: a.eval(f'(and {board} (frame-visible-p (window-frame {board})) t)')
-        # The session whose chat the selected window shows, or whose
-        # composer it shows below its chat, if any.
+        # The session whose chat the selected window shows, if any.
         showing = lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
-            "(with-current-buffer (if (derived-mode-p 'romacs-agent-compose-mode) romacs-agent-log--chat (current-buffer)) "
-            '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session))))'))
+            '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session)))'))
 
         def open_board():
             # Keys must reach the frame, then the board, before one is
@@ -4140,10 +4088,10 @@ def board_keys(args, base):
             a.keys('-M', 'ctrl', '-k', 'x', '-k', 'a', '-m', 'ctrl', '-k', 'a')
             until(lambda: shown() == 't', 15, 'board shown')
             def moved():
-                before = a.log().count('"native_command":"romacs-agent-board-next"')
+                before = a.log().count('"native_command":"romacs-list-next"')
                 a.keys('-k', 'n')
                 time.sleep(.3)
-                return a.log().count('"native_command":"romacs-agent-board-next"') > before
+                return a.log().count('"native_command":"romacs-list-next"') > before
             until(moved, 30, 'keys reach the board')
 
         def ret_on(regexp):
@@ -4151,6 +4099,17 @@ def board_keys(args, base):
             a.eval(f'(with-selected-window {board} (goto-char (point-min)) '
                    f'(re-search-forward {lisp_text(regexp)}) (beginning-of-line) t)')
             a.keys('-k', 'Return')
+
+        def line(name):
+            """The regexp of project NAME's line: its mark, then its name."""
+            return f'^▌ .*[ ]{name}  '
+
+        def enter(name):
+            """From the project list, RET on project NAME's line: its rows show."""
+            a.eval(f'(with-selected-window {board} (when romacs-agent-board--project (romacs-agent-board-projects)) t)')
+            ret_on(line(name))
+            until(lambda: a.eval(f'(with-selected-window {board} (and romacs-agent-board--project t))') == 't',
+                  15, f'{name} entered')
 
         def settled(read, want, seconds=15):
             """READ's value once it is WANT, or its last after SECONDS: a
@@ -4167,20 +4126,24 @@ def board_keys(args, base):
         # The transcripts are listed once their scan, aside, ends: the
         # board is drawn again then.
         until(lambda: a.eval(f'(with-selected-window {board} (save-excursion (goto-char (point-min)) '
-                             '(and (re-search-forward "^transcripts  " nil t) t)))') == 't', 30, 'transcripts listed')
-        ret_on('^transcripts  ')
+                             f'(and (re-search-forward {lisp_text(line("transcripts"))} nil t) t)))') == 't', 30, 'transcripts listed')
+        enter('transcripts')
+        a.keys('-k', 'Return')
         steps['project_without_session'] = settled(lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
             '(list buffer-read-only (plist-get (bound-and-true-p romacs-agent-history--item) :path)))')) + [shown()],
             ['t', str(codex_file), 'nil'])
         open_board()
-        ret_on('^work  ')
+        enter('work')
+        a.keys('-k', 'Return')
         steps['project_with_session'] = settled(lambda: [showing(), shown()], [sids[1], 'nil'])
         steps['nested'] = parity_live.read_sexp(a.eval(
             f'(length (plist-get (seq-find (lambda (row) (equal (plist-get row :id) {lisp_text(sids[0])})) '
-            '(romacs-agent-board-rows (romacs-agent-summary nil) nil (romacs-agent-board--view))) '
+            '(romacs-agent-board-rows (romacs-agent-summary nil) nil '
+            f'(append (list :project (romacs-agent-board--project {lisp(a.work)})) (romacs-agent-board--view)))) '
             ':children))'))
         open_board()
+        enter('transcripts')
         ret_on('◇ +[0-9]+ more')
         steps['more'] = settled(lambda: [shown(), a.eval('(buffer-local-value (quote romacs-agent-board--all-history) (get-buffer "*romacs-agents*"))'),
                                          a.eval('(with-current-buffer "*romacs-agents*" (and (string-search " more  (" (buffer-string)) t))')],
@@ -4191,6 +4154,7 @@ def board_keys(args, base):
         # The board is not told until RET: a redraw (a batch of session
         # events, the store's rows, a transcript scan ending) would drop
         # its row before the key reaches it.
+        enter('work')
         hooks = "'(romacs-agent-ui-changed-hook romacs-agent-store-filled-hook romacs-agent-history-indexed-hook)"
         a.eval(f'(progn (dolist (hook {hooks}) (remove-hook hook (function romacs-agent-board--refresh))) t)')
         a.eval(f'(let ((id {lisp_text(sids[1])})) (delete-directory (romacs-agent-dir (romacs-agent-get id)) t) '
@@ -4203,18 +4167,18 @@ def board_keys(args, base):
         steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
                                 ['t', 'That thread is gone: the board is drawn again'])
         a.eval(f'(progn (dolist (hook {hooks}) (add-hook hook (function romacs-agent-board--refresh))) t)')
-        ret_on('^work  ')
+        ret_on(line('work'))
         steps['after_gone'] = settled(showing, sids[0])
         open_board()
         thread = lisp_text(sids[0])
-        project_row = ('(romacs-agent-board--find (romacs-agent-board--project '
+        project_row = ('(romacs-list--find (romacs-agent-board--project '
                        f'(romacs-agent-cwd (romacs-agent-get {thread}))))')
 
         def thread_row():
-            return a.eval(f'(with-selected-window {board} (and (romacs-agent-board--find {thread}) t))')
+            return a.eval(f'(with-selected-window {board} (and (romacs-list--find {thread}) t))')
 
         def settle_thread(want):
-            a.eval(f'(with-selected-window {board} (goto-char (romacs-agent-board--find {thread})) t)')
+            a.eval(f'(with-selected-window {board} (goto-char (romacs-list--find {thread})) t)')
             a.keys('-k', 's')
             return settled(thread_row, want)
 
@@ -4342,16 +4306,14 @@ def start_picker(args, base):
             return directory
 
         def chat_shown():
-            """Whether the selected window shows a chat's composer, the place to type."""
+            """Whether the selected window shows a chat, its composer the place to type."""
             return a.eval('(with-current-buffer (window-buffer (selected-window)) '
-                          "(and (or (derived-mode-p 'romacs-agent-compose-mode) "
-                          "(and (derived-mode-p 'romacs-agent-log-mode) (bound-and-true-p romacs-agent-log--input))) "
-                          '(not (active-minibuffer-window)) t))') == 't'
+                          '(and (derived-mode-p (quote romacs-agent-log-mode)) romacs-agent-log--input (not (active-minibuffer-window)) t))') == 't'
 
         def holds(text):
-            """Whether the selected composer ends with TEXT."""
-            return a.eval('(with-current-buffer (window-buffer (selected-window)) (string-suffix-p '
-                          + lisp_text(text) + f' (buffer-substring-no-properties {COMPOSER_START} (point-max))))') == 't'
+            """Whether the selected chat's composer ends with TEXT."""
+            return a.eval('(with-current-buffer (window-buffer (selected-window)) (and romacs-agent-log--input (string-suffix-p '
+                          + lisp_text(text) + ' (buffer-substring-no-properties romacs-agent-log--input (point-max)))))') == 't'
 
         def composed(text):
             """TEXT typed in the chat a start opened: its first message."""
@@ -4666,7 +4628,7 @@ def models_real(args, base):
     none known at first; a real Codex session's model menu (C-c o m) shows
     what is known and asks Codex in the background, and the open menu comes
     to list what Codex's own app-server answers `model/list'; opened again
-    it lists the same, and the capabilities tool says the same.  `romacs-agent-refresh-models' asks Claude Code too.
+    it lists the same, and the capabilities tool says the same.  `romacs-agent-refresh' asks Claude Code too.
     Free, but needs the real programs: not a default workflow."""
     a = Agents(args, base, 'mr')
     try:
@@ -4730,7 +4692,7 @@ def models_real(args, base):
             '(decode-coding-string (json-serialize (romacs-agent-tools--capabilities (romacs-mcp--object))) (quote utf-8))')))
         result['capabilities'] = {p['providerInstanceId']: [m['id'] for m in p['models']]
                                   for p in capabilities['providers']}
-        a.eval('(progn (romacs-agent-refresh-models) t)')
+        a.eval('(progn (romacs-agent-refresh) t)')
         until((kept / 'claude.json').exists, 60, 'claude models kept')
         result['claude'] = known('claude')
         result['ok'] = (result['before'] == [] and bool(result['listed'])
@@ -4835,17 +4797,16 @@ def chat_images(args, base):
         a.idle(sid)
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) t)')
         a.keyboard_ready()
-        chat = f'(romacs-agent-log-chat {a.s(sid)})'
-        typing = composer_buffer(chat)
+        chat = '(window-buffer (selected-window))'
 
         def composer():
             return parity_live.read_sexp(a.eval(
-                f'(with-current-buffer {typing} (buffer-substring-no-properties {COMPOSER_START} (point-max)))'))
+                f'(with-current-buffer {chat} (buffer-substring-no-properties romacs-agent-log--input (point-max)))'))
 
         def drawn():
             """The composer's drawn links' files, and whether images show under it."""
             files, block = parity_live.read_sexp(a.eval(
-                f'(with-current-buffer {typing} (list (cons 0 (mapcar (lambda (o) (overlay-get o (quote romacs-agent-log-image))) '
+                f'(with-current-buffer {chat} (list (cons 0 (mapcar (lambda (o) (overlay-get o (quote romacs-agent-log-image))) '
                 '(car romacs-agent-log-images--composer))) (if (cdr romacs-agent-log-images--composer) 1 0)))'))
             return [files[1:], block == 1]
 

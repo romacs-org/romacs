@@ -386,6 +386,11 @@ pub(crate) enum AssetCommand {
     },
     /// Retire an image after its last render presentation releases it.
     ImageRetire { image: ImageId },
+    /// OWNER died (contract A4), sent right after its DEAD state, so it
+    /// lands after the owner's uploads and before those of its slot's next
+    /// owner: its panes are torn down and SLOT's fonts and images forgotten
+    /// here, in that order. Exempt from the channel's capacity.
+    OwnerDied { owner: u64, slot: u8 },
     /// Create native model `id`: OBJ meshes drawn by the renderer's mesh
     /// pass at `view` on `background` (sRGB RGBA, alpha linear), `width`
     /// by `height` logical pixels.  It loads on its own thread.
@@ -539,6 +544,7 @@ impl ThreadComms {
             input_interrupt: None,
             keep_alive_without_frames: false,
             pixel_policy: crate::render_thread::PixelPolicy::Physical,
+            maximize_primary: false,
             cmd_rx: self.cmd_rx,
             input_tx: self.input_tx,
             facts_tx: self.facts_tx,
@@ -577,6 +583,8 @@ pub trait InputInterrupt: Send + Sync {
 /// Render thread communication handle
 pub(crate) struct RenderComms {
     pub pixel_policy: crate::render_thread::PixelPolicy,
+    /// The primary window opens maximized (`PaintHost::maximize_primary`).
+    pub maximize_primary: bool,
     /// The embedder's quit for a busy evaluator, when it has one.
     pub input_interrupt: Option<Arc<dyn InputInterrupt>>,
     /// Daemon root, rather than the primary native frame, owns display lifetime.

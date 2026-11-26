@@ -10,6 +10,7 @@
 //! - `retained_static`, `full_render` — the three composition strategies: the
 //!   compositor-only fast path, and the two that run the glyph pipeline.
 //! - `scene` — the editor's own picture: glyphs, child frames, content overlays.
+//! - `panes` — owners' pane pictures over the root's glyphs.
 //! - `chrome` — the window-level overlays drawn over it.
 //! - `present` — handing the result to the platform and publishing what it
 //!   says about the screen.
@@ -45,6 +46,7 @@ pub(in crate::render_thread) mod chrome;
 mod composition_targets;
 mod full_render;
 pub(in crate::render_thread) mod model_provenance;
+mod panes;
 mod present;
 pub(in crate::render_thread) mod retained_static;
 mod scene;
@@ -123,16 +125,18 @@ fn render_frame_window_contents(
         inputs.root_animated_cursor,
         inputs.bg_gradient,
     );
+    // Owners' panes, over the root and under its children and overlays.
+    let panes_animating = panes::render_pane_layers(renderer, render, surface_view, frame, native.content_size())?;
     let _non_root = romacs_renderer_wgpu::diagnostics::Span::new(
         romacs_display_protocol::present_trace::Stage::NonRootStart,
         romacs_display_protocol::present_trace::Stage::NonRootEnd,
         render.emacs_frame_id,
         frame.presentation_id,
     );
-    let renderer_effects_still_active = render.compositor.renderer_effects.needs_redraw();
+    let still_active = render.compositor.renderer_effects.needs_redraw() || panes_animating;
 
     if !include_overlays {
-        render.set_dirty(renderer_effects_still_active);
+        render.set_dirty(still_active);
         return Ok(());
     }
 
@@ -148,7 +152,7 @@ fn render_frame_window_contents(
         inputs.scroll_indicators_enabled,
         inputs.toolbar,
     )?;
-    if renderer_effects_still_active {
+    if still_active {
         render.mark_dirty();
     }
     Ok(())

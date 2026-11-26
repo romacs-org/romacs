@@ -1,10 +1,16 @@
 """display_stages_live.py's pure parts: steps, figures, refusals, bars and the table."""
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import display_stages_live as d
 
 NAMES = ('step-instructions', 'collections', 'cycles', 'instructions', 'conses', 'windows-rebuilt', 'band-expansions', 'layouts',
-         'frames-submitted', 'lines-laid', 'rows-wrapped')
+         'frames-submitted', 'lines-laid', 'rows-wrapped', 'trigger-instructions')
 IDLE = {'name': 'idle', 'paints': False}
 PAINTS = {'name': 'typed', 'paints': True}
 
@@ -73,9 +79,9 @@ class Refusals(unittest.TestCase):
         blind[1]['instructions'] = None
         self.assertIn('no instruction counter', d.refusal(PAINTS, {'readings': blind}, 1))
 
-    def test_a_step_without_a_redisplay_is_refused(self):
-        self.assertIn('steps [1] did not run as many redisplays as the others',
-                      d.refusal(IDLE, {'readings': readings(QUIET, (300, 0, 0, 0, 0, 0, 0, 0, 0))}, 2))
+    def test_a_step_the_trigger_found_current_is_no_odd_step(self):
+        # Its timer left the frame as it was: the trigger ran no redisplay.
+        self.assertIsNone(d.refusal(IDLE, {'readings': readings(QUIET, (300, 0, 0, 0, 0, 0, 0, 0, 0))}, 2))
 
     def test_a_step_of_two_redisplays_is_odd(self):
         twice = (600, 0, 2, 200, 0, 0, 4, 0, 0)
@@ -85,13 +91,16 @@ class Refusals(unittest.TestCase):
         # Each step's own and the one after a timer it set off (jit-lock's).
         twice = (1500, 0, 2, 900, 9, 2, 2, 5, 1)
         self.assertEqual(d.odd_steps(PAINTS, d.steps(readings(twice, twice, twice))), [])
-        self.assertEqual(d.odd_steps(PAINTS, d.steps(readings(twice, STEP, twice))), [1])
+        thrice = (1500, 0, 3, 900, 9, 2, 2, 5, 1)
+        self.assertEqual(d.odd_steps(PAINTS, d.steps(readings(twice, thrice, twice))), [1])
+        # One fewer is no host's extra: the forced redisplay found the frame current.
+        self.assertEqual(d.odd_steps(PAINTS, d.steps(readings(twice, STEP, twice))), [])
         self.assertEqual(d.figures(d.steps(readings(twice, twice)))['cycles'], 2)
 
     def test_a_scenario_paints_every_step_or_none(self):
-        self.assertIn('steps [1] did not run as many redisplays as the others, with a frame submitted',
+        self.assertIn('steps [1] ran more redisplays than the others, or did not run them with a frame submitted',
                       d.refusal(PAINTS, {'readings': readings(STEP, QUIET)}, 2))
-        self.assertIn('steps [1] did not run as many redisplays as the others, with no frame submitted',
+        self.assertIn('steps [1] ran more redisplays than the others, or did not run them with no frame submitted',
                       d.refusal(IDLE, {'readings': readings(QUIET, STEP)}, 2))
 
     def test_a_tenth_of_the_steps_may_be_odd(self):
@@ -127,23 +136,30 @@ class Bars(unittest.TestCase):
         self.assertEqual(row['status'], 'FAIL')
         self.assertEqual(row['reason'], 'display_instructions 500, over 499; windows_rebuilt 1, over 0')
 
-    def test_a_count_under_its_bar_fails_and_cheaper_instructions_pass(self):
-        # A step that rebuilds no window where its bar holds one no longer
-        # does its change, or got cheaper: either way the bar is to move.
-        row = d.verdict(PAINTS, self.result, 2, {'typed': {**self.bars, 'windows_rebuilt': 2}})
-        self.assertEqual((row['status'], row['reason']), ('FAIL', 'windows_rebuilt 1, under 2'))
-        cheaper = {**self.bars, 'display_instructions': 10**6, 'display_conses': 10**6, 'step_instructions': 10**6}
-        self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': cheaper})['status'], 'PASS')
+    def test_less_work_passes(self):
+        cheaper = {**self.bars, 'windows_rebuilt': 2, 'display_instructions': 10**6,
+                   'display_conses': 10**6, 'step_instructions': 10**6}
+        row = d.verdict(PAINTS, self.result, 2, {'typed': cheaper})
+        self.assertEqual((row['status'], row['off']), ('PASS', []))
 
     def test_a_recording_keeps_notes(self):
         old = {'typed': {'layouts': 3, 'layouts_note': 'why'}, 'other': {'layouts': 1}}
         self.assertEqual(d.rebarred(old, {'typed': {'layouts': 2}}),
                          {'typed': {'layouts': 2, 'layouts_note': 'why'}, 'other': {'layouts': 1}})
 
-    def test_a_scenario_or_figure_without_a_bar_fails(self):
-        self.assertIn('no bars', d.verdict(PAINTS, self.result, 2, {})['reason'])
+    def test_a_scenario_or_figure_without_a_bar_passes_and_is_reported(self):
+        new = d.verdict(PAINTS, self.result, 2, {})
+        self.assertEqual((new['status'], new['off']), ('PASS', []))
+        self.assertIn(('layouts', 0), new['unbarred'])
         partial = {k: v for k, v in self.bars.items() if k != 'layouts'}
-        self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': partial})['reason'], 'layouts 0, no bar')
+        row = d.verdict(PAINTS, self.result, 2, {'typed': partial})
+        self.assertEqual((row['status'], row['unbarred']), ('PASS', [('layouts', 0)]))
+        self.assertIn('typed · layouts 0, no bar yet', d.table([row]))
+        unset = d.verdict(PAINTS, self.result, 2, {'typed': {**partial, 'layouts': None}})
+        self.assertEqual((unset['status'], unset['unbarred']), ('PASS', [('layouts', 0)]))
+        regressed = d.verdict(PAINTS, self.result, 2, {'typed': {**partial, 'windows_rebuilt': 0}})
+        self.assertEqual(regressed['status'], 'FAIL')
+        self.assertIn('typed · layouts 0, no bar yet', d.table([regressed]))
 
     def test_a_refused_measurement_fails_and_has_no_figures(self):
         row = d.verdict(PAINTS, {'readings': readings(STEP, QUIET)}, 2, {'typed': self.bars})
@@ -196,6 +212,46 @@ class Bars(unittest.TestCase):
         text = d.table([d.verdict(PAINTS, self.result, 2, {'typed': self.bars}), d.verdict(IDLE, {'readings': []}, 2, {})])
         self.assertIn('| typed | 0.00M | 0.00M | 0.00M | 7 | 1 | 2 | 0 | 1 | 1 | 1 | PASS |', text)
         self.assertIn('| idle | - | - | - | - | - | - | - | - | - | - | FAIL — 0 readings for 2 steps |', text)
+
+
+class BarWriters(unittest.TestCase):
+    def setUp(self):
+        clean = {key: value for key, value in os.environ.items()
+                 if key not in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE')}
+        patcher = patch.dict(os.environ, clean, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_both_clis_refuse_bar_writes_on_a_topic_before_running(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            subprocess.run(['git', 'init', '-qb', 'topic', temp], check=True)
+            for filename in ('display_stages_live.py', 'render_stages_live.py'):
+                script = root / filename
+                script.write_bytes((d.HERE / filename).read_bytes())
+            beta = root / 'beta'
+            subprocess.run(['git', 'init', '-qb', 'beta', str(beta)], check=True)
+            env = {**os.environ, 'PYTHONPATH': str(d.HERE), 'FORGE_TRUNK_JOB': '0',
+                   'GIT_DIR': str(beta / '.git'), 'GIT_WORK_TREE': str(beta)}
+            output, bars = root / 'output', root / 'bars.json'
+            for script in root.glob('*.py'):
+                with self.subTest(script=script):
+                    result = subprocess.run([sys.executable, '-B', str(script), '--binary', '/missing',
+                                             '--output', str(output), '--write-bars', str(bars)],
+                                            cwd=d.HERE, env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn('--write-bars requires beta or FORGE_TRUNK_JOB=1', result.stderr)
+                    self.assertFalse(output.exists())
+                    self.assertFalse(bars.exists())
+
+    def test_beta_and_explicit_trunk_job_are_admitted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            subprocess.run(['git', 'init', '-qb', 'beta', temp], check=True)
+            with patch.dict(os.environ, {'FORGE_TRUNK_JOB': '0'}):
+                self.assertTrue(d.bar_writer_allowed(root))
+            with patch.dict(os.environ, {'FORGE_TRUNK_JOB': '1'}):
+                self.assertTrue(d.bar_writer_allowed(root / 'not-a-checkout'))
 
 
 if __name__ == '__main__':

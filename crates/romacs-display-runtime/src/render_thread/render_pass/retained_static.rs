@@ -28,8 +28,9 @@ use std::collections::{BTreeMap, HashSet};
 
 /// Whether this frame may be composed from the retained static scene:
 /// the coordinator asked for a compositor-only cursor frame, and the scene is
-/// eligible — no transition, no dynamic overlay, no pane motion, and every
-/// cursor a clean top-layer style. An ineligible frame falls through to the
+/// eligible — no transition, no dynamic overlay, no pane motion, no owner's
+/// pane (its over-pane hook runs every frame), and every cursor a clean
+/// top-layer style. An ineligible frame falls through to the
 /// ordinary full render. `ROMACS_DISABLE_RETAINED_STATIC` force-disables it.
 ///
 /// The transition test asks whether one is *active*, not whether the frame
@@ -56,6 +57,7 @@ pub(super) fn is_eligible(
         && render.compositor.current_frame.as_deref().is_some_and(top_layer_cursors)
         && render.compositor.child_frames.frames.values().all(|child| top_layer_cursors(&child.frame))
         && pane_placements.is_empty()
+        && render.compositor.current_frame.as_deref().is_none_or(|frame| frame.foreign_panes.is_empty())
         && !render.compositor.transitions.has_active()
         && !window_has_active_overlays(render)
         && pointer_appearance_allowed(&render.pointer_appearance)

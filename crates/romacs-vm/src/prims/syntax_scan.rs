@@ -53,12 +53,18 @@ fn parse_partial_sexp(cx, from: Value, to: Value; optional targetdepth: Value, s
 }}
 
 // Counters of the current buffer's syntax summaries, the index a syntax scan carries
-// its state across, as a plist: `:served' and `:declined' for parses, `:list-served',
-// `:list-declined' and `:list-fallbacks' for forward list scans with a nonbinding count.
-// Declines are alists of reasons and counts.  List fallbacks count restarts from FROM
-// after an unusable index result.  The plist also has `:leaves', `:leaf-scans', `:plain-leaves', `:composed',
-// `:context-switches', `:log-overflows' and `:bytes'; and `:char-table-writes', the writes
-// to any char table in this process so far.  nil in a unibyte buffer.
+// its state across, as a plist: `:served' and `:declined' for parses; `:list-served'
+// and `:list-declined' for forward list scans, counted for each run that consults the
+// index (a scan stopped for Lisp counts again when it goes on; one that ends within
+// its first 1,024 steps, or stops before it reads, consults none); `:folds', the spans
+// those folded by kind (excursion, exact), `:skipped', the characters they held, and
+// `:reused', those folded on summaries made before the call.  Declines are alists
+// of reasons and counts.  The plist also has `:leaves', `:leaf-scans', `:plain-leaves',
+// `:composed', `:evictions' (entries given up for a slot, by kind), `:context-switches',
+// `:context-evictions', `:context-invalidations' (contexts whose char-table write
+// count moved), `:unsafe-cuts' (for each context slot, the leaf ends it found unsafe,
+// nil for a free slot), `:log-overflows' and `:bytes'; and `:char-table-writes', the
+// writes to any char table in this process so far.  nil in a unibyte buffer.
 defsubr! { name = "romacs-syntax-summaries-stats", gnu = "romacs:syntax-summaries", effect = Reads,
 fn romacs_syntax_summaries_stats(cx) { cx.syntax_summaries_stats() }}
 

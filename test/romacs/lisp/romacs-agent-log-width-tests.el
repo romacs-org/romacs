@@ -142,12 +142,12 @@
   "Return the divider line with its properties."
   (save-excursion
     (goto-char romacs-agent-log--divider)
-    (buffer-substring (point) (line-end-position))))
+    (buffer-substring (point) (pos-eol))))
 
 (ert-deftest romacs-agent-log-width-divider-rule-is-its-newline-s-extended-face ()
   (romacs-agent-log-width-tests--shown
     (let* ((divider (romacs-agent-log-width-tests--divider))
-           (newline (save-excursion (goto-char romacs-agent-log--divider) (line-end-position)))
+           (newline (save-excursion (goto-char romacs-agent-log--divider) (pos-eol)))
            (faces (ensure-list (get-text-property newline 'face))))
       (should (eq (char-after newline) ?\n))
       (should-not (string-match-p "──" divider))

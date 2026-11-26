@@ -32,7 +32,9 @@
         (mapcar (lambda (overlay)
                   (list overlay (overlay-start overlay) (overlay-end overlay)
                         (overlay-properties overlay)))
-                (overlays-in (point-min) (point-max)))))
+                ;; The row highlight (a tabulated list's, romacs-list.el)
+                ;; follows point after each command: not the view's state.
+                (remq (bound-and-true-p hl-line-overlay) (overlays-in (point-min) (point-max))))))
 
 (ert-deftest gnosis-dashboard-file-confirmation-refuses-write ()
   "Final row confirmation cannot mutate a newly file-visiting projection."

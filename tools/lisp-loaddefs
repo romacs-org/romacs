@@ -78,7 +78,7 @@ def main():
         copy = Path(tmp)
         shutil.copytree(ROOT / 'lisp', copy / 'lisp', symlinks=True)
         shutil.copytree(ROOT / 'etc/themes', copy / 'etc/themes', symlinks=True)
-        shutil.copy(ROOT / 'etc/romacs-runtime-epoch', copy / 'etc/romacs-runtime-epoch')
+        shutil.copytree(ROOT / 'etc/romacs-runtime-epoch.d', copy / 'etc/romacs-runtime-epoch.d')
         run(args.binary, copy)
         names = sorted(set(generated(ROOT / 'lisp')) | set(generated(copy / 'lisp')))
         stale = [n for n in names if not ((ROOT / 'lisp' / n).is_file() and (copy / 'lisp' / n).is_file()

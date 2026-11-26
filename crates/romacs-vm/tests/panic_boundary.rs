@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 /// PATH, how many, why each is safe.
 const SITES: &[(&str, usize, &str)] = &[
+    ("crates/romacs-display-runtime/src/presentation/pacing/tests.rs", 2,
+     "tests of the present-mode choice failing closed, with no VM"),
     ("crates/romacs-vm-gui/src/main.rs", 2,
      "`main` holds no VM; the evaluator thread's top: the unwinding drops the VM, and the session ends"),
     ("crates/romacs-vm/src/gc.rs", 2,
@@ -28,6 +30,8 @@ const SITES: &[(&str, usize, &str)] = &[
     ("crates/romacs-vm/tests/gnu_reader.rs", 1, "a test that asserts no panic came"),
     ("crates/romacs-vm/tests/gnutls.rs", 1, "the VM is on the thread the bound gave up on"),
     ("crates/romacs-vm/tests/support/bulk.rs", 1, "a VM made in the closure, which the unwinding drops"),
+    ("crates/romacs-vm/tests/support/owner_lifecycle_table.rs", 2,
+     "its import, and a table walk's scene, whose VM is made in the closure, which the unwinding drops"),
     ("crates/romacs-gnu-tests/src/main.rs", 7,
      "its import, and six that each report the panic and exit (`panic_exit`); what goes on after one uses `catching`"),
 ];

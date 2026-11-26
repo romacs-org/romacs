@@ -97,7 +97,7 @@ fn closes_past_the_bottom_and_deep_nesting_are_served_from_kept_summaries() {
     for fixture in fixtures {
         let expression = format!(r"(with-temp-buffer {fixture}
            (let ((stats (lambda () (let ((stats (romacs-syntax-summaries-stats)))
-                                     (list (plist-get stats :leaf-scans) (plist-get stats :context-switches) (plist-get stats :plain-leaves)))))
+                                     (list (plist-get stats :leaf-scans) (plist-get stats :context-invalidations) (plist-get stats :plain-leaves)))))
                  (clean 0) (tries 0) (result nil))
              (probe) (chain)
              (while (and (not result) (< tries 20))
@@ -280,13 +280,13 @@ fn property_changes_near_the_end_keep_the_summaries_before_them() {
     assert_eq!(actual.as_deref(), Ok(expected.as_str()));
     let counted = format!("(let ((scans (plist-get (romacs-syntax-summaries-stats) :leaf-scans))) {PARSE}
         (setq counts (list (plist-get (romacs-syntax-summaries-stats) :leaves) (- (plist-get (romacs-syntax-summaries-stats) :leaf-scans) scans)
-                           (plist-get (romacs-syntax-summaries-stats) :log-overflows) (plist-get (romacs-syntax-summaries-stats) :context-switches))))");
+                           (plist-get (romacs-syntax-summaries-stats) :log-overflows) (plist-get (romacs-syntax-summaries-stats) :context-invalidations))))");
     let counts = undisturbed(&format!("(let ((counts nil)) {} counts)", CASE.replace("SECOND", &counted)));
     assert_eq!(counts, "(137 4 1)", "leaves, summaries the second parse made again, hulls taken");
 }
 
 /// What EXPRESSION shows, a list whose last element is its buffer's count
-/// of context switches, without that element, from a run where it is 0: a
+/// of context invalidations, without that element, from a run where it is 0: a
 /// char-table write by any thread of the process changes every index's
 /// context, and with it the leaves a parse scans.
 fn undisturbed(expression: &str) -> String {
@@ -328,6 +328,6 @@ fn a_property_write_changes_only_the_runs_it_changes() {
                (funcall scans (lambda () (remove-list-of-text-properties 1000 3000 '(syntax-table syntax-multiline))))
                (funcall scans (lambda () (put-text-property 5000 100000 'syntax-table (list 1))))
                (plist-get (romacs-syntax-summaries-stats) :log-overflows)
-               (plist-get (romacs-syntax-summaries-stats) :context-switches))))"#;
+               (plist-get (romacs-syntax-summaries-stats) :context-invalidations))))"#;
     assert_eq!(undisturbed(source), "(94 0 2 0 94 0)", "leaves summarized again after each write, and no hull");
 }

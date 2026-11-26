@@ -33,12 +33,11 @@ The report has, without bars, `driver_instructions' (acquire, submit and
 present: wgpu's and the driver's, which on a software adapter is the
 rasterizer) and the extras' median `extra_own_instructions'.
 
-The bars file maps each scenario to a bar per figure.  The rows are held
-to theirs exactly, so a scenario that tessellates a row more fails as one
-that no longer runs does; every other figure is a cost held under a
-ceiling.  A scenario or figure without a bar fails, and work that removes
-cost lowers its bars in the same change.  --write-bars FILE writes the
-bars this run would pass: the rows as counted, the costs a tenth higher.
+The bars file maps each scenario to a bar per figure.  Costs have ceilings,
+reused rows have a floor, and cursor rows are held exactly.  A measured
+figure with no bar is reported as "no bar yet".  A bar without its
+measurement fails.  --write-bars FILE writes the rows as measured and the
+costs a tenth higher.  It requires branch beta or FORGE_TRUNK_JOB=1.
 
 A measurement is refused when the thread has no instruction counter, or
 when fewer than nine tenths of the steps drew a scene frame.
@@ -70,11 +69,9 @@ from scaling_live import Refused
 HERE = Path(__file__).resolve().parent
 SCENARIOS = (stages.SCENARIOS, HERE / 'render_stages.el')
 BARS = HERE / 'render_stages_bars.json'
-# The figures that are a line's count as it is, the stretches inside a draw
-# that are the surface's and the driver's, and the figures held exactly.
-COUNTS = ('rows_tessellated', 'rows_reused', 'cursor_rows', 'glyphs_walked', 'font_identities', 'bytes_uploaded')
+ROWS = ('rows_tessellated', 'rows_reused', 'cursor_rows')
+COUNTS = (*ROWS, 'glyphs_walked', 'font_identities', 'bytes_uploaded')
 DRIVER = ('acquire_instructions', 'submit_instructions', 'present_instructions')
-EXACT = ('rows_tessellated', 'rows_reused', 'cursor_rows')
 MARGIN_PERCENT = 110
 SCENES = 0.9
 
@@ -136,14 +133,6 @@ def refusal(drawn, steps):
     return None
 
 
-def off(measured, bars):
-    """The figures of MEASURED off their bar or without one: (figure,
-    value, bar or None).  A row count is off when it differs, a cost over
-    its bar."""
-    return [(figure, value, bars.get(figure)) for figure, value in measured.items()
-            if bars.get(figure) is None or value > bars[figure] or (value < bars[figure] and figure in EXACT)]
-
-
 def verdict(scenario, stderr_text, steps, bars):
     """SCENARIO's row from its session's STDERR_TEXT: PASS, or FAIL with a reason."""
     row = {'name': scenario['name']}
@@ -153,20 +142,13 @@ def verdict(scenario, stderr_text, steps, bars):
         return {**row, 'status': 'FAIL', 'reason': problem}
     row['figures'], row['said'] = figures(drawn, steps)
     row['frames'] = drawn
-    if scenario['name'] not in bars:
-        return {**row, 'status': 'FAIL', 'reason': 'no bars for this scenario'}
-    row['off'] = off(row['figures'], bars[scenario['name']])
-    if row['off']:
-        reason = '; '.join(f'{figure} {value}, ' + ('no bar' if bar is None else f"{'over' if value > bar else 'under'} {bar}")
-                           for figure, value, bar in row['off'])
-        return {**row, 'status': 'FAIL', 'reason': reason}
-    return {**row, 'status': 'PASS'}
+    return stages.bar_verdict(row, bars.get(scenario['name'], {}), floors=('rows_reused',), exact=('cursor_rows',))
 
 
 def ceiling(figure, value):
     """The bar --write-bars sets for FIGURE measured at VALUE: a row count
     as it is, a cost its margin higher, to three digits."""
-    if figure in EXACT or value <= 0:
+    if figure in ROWS or value <= 0:
         return value
     raised = -(-value * MARGIN_PERCENT // 100)
     unit = 10 ** max(0, len(str(raised)) - 3)
@@ -192,7 +174,7 @@ def table(rows):
                  if f else ['-'] * 10)
         note = f" — {row['reason']}" if row.get('reason') else ''
         lines.append(f"| {row['name']} | {' | '.join(map(str, cells))} | {row['status']}{note} |")
-    return '\n'.join(lines) + '\n'
+    return '\n'.join(lines) + '\n' + stages.unbarred_lines(rows)
 
 
 # Sessions.
@@ -251,6 +233,8 @@ def main():
     parser.add_argument('--record', action='store_true')
     parser.add_argument('--timeout', type=float, default=300, help='seconds per session')
     args = parser.parse_args()
+    if args.write_bars and not stages.bar_writer_allowed(HERE):
+        parser.error('--write-bars requires beta or FORGE_TRUNK_JOB=1')
     if args.steps < 1:
         parser.error('--steps: at least one step')
     args.output = args.output.resolve()
@@ -261,7 +245,7 @@ def main():
               'compositor_renderer': scaling.compositor_env().get('WLR_RENDERER', 'pixman')}
     started = time.monotonic()
     try:
-        bars = json.loads(args.bars.read_text()) if args.bars.is_file() else {}
+        bars = stages.read_bars(args.bars, args.write_bars is not None)
         scaling.prepare(binary, home, args.timeout)
         selected = scenarios(binary, home, args.timeout)
         stale = sorted(set(bars) - {s['name'] for s in selected})

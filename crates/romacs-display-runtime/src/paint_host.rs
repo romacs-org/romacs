@@ -8,6 +8,9 @@ use crate::thread_comm::{
     RenderComms, ThreadComms, WindowCommand,
 };
 use romacs_display_protocol::FrameGlyphBuffer;
+use romacs_display_protocol::pane_picture::PanePicture;
+use romacs_display_protocol::pane_revisions::PaneRevisions;
+use romacs_display_protocol::pane_sink::{PaneSettled, PaneSink, PaneState};
 
 /// The id of the evaluator's initial frame, `F1`: the frame a session's
 /// first window shows. Every other frame has the id the evaluator gave it.
@@ -18,6 +21,8 @@ pub use crate::input_bridge::PaintDiagnostic;
 pub struct PaintHost {
     event_loop: render_thread::RenderEventLoop,
     render: RenderComms,
+    /// The pane mailbox the render thread takes from (`PaintSender::pane_sink`).
+    panes: std::sync::Arc<crate::pane_mailbox::PaneMailbox>,
     initial: render_thread::InitialWindowReceiver,
     _lifetime: render_thread::InitialWindowLifetime,
     title: String,
@@ -32,6 +37,27 @@ pub struct PaintSender {
     facts: std::sync::Arc<crate::input_bridge::Facts>,
     /// The last request id issued (`InputEvent::Reply`).
     requests: std::sync::atomic::AtomicU64,
+    /// The render thread's pane mailbox.
+    panes: std::sync::Arc<crate::pane_mailbox::PaneMailbox>,
+}
+
+/// The pane mailbox as the ownership side posts to it: each post wakes the
+/// render thread.
+struct WakingPaneSink {
+    mailbox: std::sync::Arc<crate::pane_mailbox::PaneMailbox>,
+    proxy: render_thread::RenderEventLoopProxy,
+}
+
+impl PaneSink for WakingPaneSink {
+    fn post(&self, owner: u64, picture: PanePicture, revisions: std::sync::Arc<PaneRevisions>) {
+        self.mailbox.post(owner, picture, revisions);
+        self.proxy.wake_up();
+    }
+
+    fn state(&self, owner: u64, state: PaneState) {
+        self.mailbox.state(owner, state);
+        self.proxy.wake_up();
+    }
 }
 
 impl PaintHost {
@@ -80,10 +106,12 @@ impl PaintHost {
                 }))
                 .map_err(|error| error.to_string())?;
         }
+        let panes = std::sync::Arc::<crate::pane_mailbox::PaneMailbox>::default();
         Ok((
             Self {
                 event_loop,
                 render,
+                panes: panes.clone(),
                 initial,
                 _lifetime: lifetime,
                 title,
@@ -94,6 +122,7 @@ impl PaintHost {
                 proxy,
                 facts,
                 requests: std::sync::atomic::AtomicU64::new(0),
+                panes,
             },
         ))
     }
@@ -104,6 +133,12 @@ impl PaintHost {
         self.render.input_interrupt = Some(hook);
     }
 
+    /// Open the first window maximized: for a default size the screen may
+    /// not hold (an X11 window manager shows it from its title bar down).
+    pub fn maximize_primary(&mut self) {
+        self.render.maximize_primary = true;
+    }
+
     pub fn run(self) -> Result<render_thread::RenderLoopExit, render_thread::RenderLoopError> {
         render_thread::run_render_loop_current_thread(
             self.event_loop,
@@ -112,6 +147,7 @@ impl PaintHost {
             self.title,
             std::sync::Arc::default(),
             std::sync::Arc::default(),
+            self.panes,
         )
     }
 }
@@ -163,6 +199,23 @@ impl PaintSender {
         romacs_display_protocol::call_count::count("sender.on_render");
         let registered = self.facts.on_render(wake);
         assert!(registered, "one render waiter per paint sender");
+    }
+
+    /// The render thread's pane sink (`romacs_display_protocol::pane_sink`):
+    /// SETTLED is called on the render thread, once per posted picture,
+    /// when the pane path is done with it. After the render thread closed
+    /// the sink (at exit), a post settles synchronously on the posting
+    /// thread, and may overlap the callbacks of the exit's final drain.
+    /// One sink per sender.
+    ///
+    /// # Panics
+    ///
+    /// When one is already installed.
+    pub fn pane_sink(&self, settled: PaneSettled) -> std::sync::Arc<dyn PaneSink> {
+        romacs_display_protocol::call_count::count("sender.pane_sink");
+        let installed = self.panes.install(settled) && self.panes.connect(self.commands.clone());
+        assert!(installed, "one pane sink per paint sender");
+        std::sync::Arc::new(WakingPaneSink { mailbox: self.panes.clone(), proxy: self.proxy.clone() })
     }
 
     /// FRAME's window size in logical pixels, as its last resize said: None

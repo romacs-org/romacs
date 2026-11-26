@@ -472,9 +472,11 @@ line (`romacs-agent--claude-result-events')."
                when (equal btype "text")
                collect (list :type 'status :text (gethash "text" block) :parent parent))))))
 
-(defun romacs-agent--claude-result-events (line api-error)
+(defun romacs-agent--claude-result-events (line api-error &optional refused)
   "Decode a Claude Code result LINE, API-ERROR the code its turn's API
-error said (`romacs-agent--claude-assistant-events'), or nil."
+error said (`romacs-agent--claude-assistant-events'), or nil; REFUSED,
+its account refused a request of the turn
+\(`romacs-agent--claude-rate-limit-event')."
   (list (list :type 'done :cost (gethash "total_cost_usd" line)
               :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
               ;; Its account's sign-in refused.
@@ -483,8 +485,11 @@ error said (`romacs-agent--claude-assistant-events'), or nil."
               ;; Refused at a usage limit: its instance's, or its model's
               ;; alone (one that needs usage credits the account has spent;
               ;; its other models still run).
-              :limit (pcase (gethash "api_error" line)
-                       ("usage_limit_reached" t) ("model_requires_usage_credits" 'model))
+              ;; A turn that says no API error at all, a compaction's, ends
+              ;; at the limit its account's report said it was refused at.
+              :limit (pcase (romacs-agent--value (gethash "api_error" line))
+                       ("usage_limit_reached" t) ("model_requires_usage_credits" 'model)
+                       ('nil (and refused (not api-error) t)))
               :reason (romacs-agent--claude-reason line)
               :duration (let ((ms (gethash "duration_ms" line))) (and (numberp ms) (/ ms 1000.0)))
               :context-window (let ((usage (gethash "modelUsage" line)) (window nil))
@@ -496,15 +501,19 @@ error said (`romacs-agent--claude-assistant-events'), or nil."
                                 window))))
 
 (defun romacs-agent--claude-rate-limit-event (line)
-  "Decode the usage window reported in Claude Code LINE."
+  "Decode the usage window reported in Claude Code LINE.  One that refuses
+its account is kept for the turn's end (`romacs-agent--claude-result-events'):
+a failed compaction's end says no API error of its own."
   (let ((info (gethash "rate_limit_info" line)))
     (when (hash-table-p info)
-      (list (list :type 'rate-limit
-                  :status (romacs-agent--claude-limit-status (gethash "status" info))
-                  :used (romacs-agent--value (gethash "utilization" info))
-                  :resets (romacs-agent--value (gethash "resetsAt" info))
-                  :window (romacs-agent--value (gethash "rateLimitType" info))
-                  :windows (romacs-agent--claude-windows info))))))
+      (let ((event (list :type 'rate-limit
+                         :status (romacs-agent--claude-limit-status (gethash "status" info))
+                         :used (romacs-agent--value (gethash "utilization" info))
+                         :resets (romacs-agent--value (gethash "resetsAt" info))
+                         :window (romacs-agent--value (gethash "rateLimitType" info))
+                         :windows (romacs-agent--claude-windows info))))
+        (cons event (and (romacs-agent-refuses-account-p event)
+                         (list (list :type 'handshake :state (list :refused t)))))))))
 
 (defun romacs-agent--claude-events (session line)
   "Decode a Claude Code output LINE using SESSION's context."
@@ -518,7 +527,8 @@ error said (`romacs-agent--claude-assistant-events'), or nil."
      (list :compacting (romacs-agent-compacting session))
      (pcase (gethash "type" line)
        ("stream_event" (list :message (romacs-agent-message session)))
-       ("result" (list :api-error (plist-get (romacs-agent-driver-state session) :api-error)))
+       ("result" (let ((state (romacs-agent-driver-state session)))
+                   (list :api-error (plist-get state :api-error) :refused (plist-get state :refused))))
        ("assistant"
         (list :streamed (gethash (gethash "id" (gethash "message" line)) (romacs-agent-streamed session))))
        ("control_request" (list :owed (plist-get (romacs-agent-driver-state session) :owed)))
@@ -550,10 +560,12 @@ error said (`romacs-agent--claude-assistant-events'), or nil."
               ("assistant"
                (romacs-agent--claude-assistant-events line parent (plist-get context :streamed)))
               ("user" (romacs-agent--claude-user-events line parent compacting))
-              ("result" (let ((api-error (plist-get context :api-error)))
-                          ;; Its turn's error ends with it.
+              ("result" (let ((api-error (plist-get context :api-error))
+                              (refused (plist-get context :refused)))
+                          ;; Its turn's error and refusal end with it.
                           (append (and api-error (list (list :type 'handshake :state (list :api-error nil))))
-                                  (romacs-agent--claude-result-events line api-error))))
+                                  (and refused (list (list :type 'handshake :state (list :refused nil))))
+                                  (romacs-agent--claude-result-events line api-error refused))))
               ("control_request"
                (romacs-agent--claude-control-request (plist-get context :owed)
                                                    (gethash "request_id" line) (gethash "request" line)))
@@ -589,6 +601,22 @@ seconds since the epoch, or nil."
               (token (gethash "accessToken" oauth))
               ((stringp token)))
     (cons token (/ (or (gethash "expiresAt" oauth) 0) 1000.0))))
+
+;; Only Claude Code's own sessions renew a sign-in.  A renewal rotates the
+;; refresh token, and a session holding the old one then loses the account's
+;; sign-in when it renews in turn: so Romacs reads the sign-in, and runs no
+;; Claude Code that would renew it (a models probe, `claude auth status').
+
+(defconst romacs-agent--claude-renew-margin 600
+  "Seconds before its expiry by which Claude Code may renew a sign-in: it
+renews minutes ahead, so one with less left is not touched.")
+
+(defun romacs-agent--claude-renew-due (sign-in)
+  "Why SIGN-IN (`romacs-agent--claude-token') is not to be touched now, its
+renewal due (`romacs-agent--claude-renew-margin'), or nil: none, or a
+fresh one."
+  (when (and sign-in (<= (cdr sign-in) (+ (float-time) romacs-agent--claude-renew-margin)))
+    "its sign-in is due to renew: its next session renews it"))
 
 (defun romacs-agent--claude-credentials-stamp (home)
   "The stamp of the sign-in kept at HOME (`:credentials-stamp' of
@@ -636,9 +664,9 @@ its exit status once it ends.  The process is returned."
                      (funcall then text (process-exit-status process))))))))
 
 (defun romacs-agent--claude-fetch-usage (token callback)
-  "Ask the usage endpoint by TOKEN; CALLBACK with its report or nil, as of
-when it was asked: a turn's report made meanwhile is newer.  The token
-goes to curl on its stdin, never on a command line."
+  "Ask the usage endpoint by TOKEN; CALLBACK with its report, or with nil
+and why not, as of when it was asked: a turn's report made meanwhile is
+newer.  The token goes to curl on its stdin, never on a command line."
   (let* ((asked (float-time))
          (process
          (romacs-agent--claude-run
@@ -648,40 +676,34 @@ goes to curl on its stdin, never on a command line."
                 romacs-agent--claude-usage-url)
           process-environment
           (lambda (text status)
-            (funcall callback
-                     (when-let* (((eql status 0))
-                                 (end (string-search "\n" text (max 0 (- (length text) 5))))
-                                 ((equal (substring text (1+ end)) "200"))
-                                 (object (ignore-errors (json-parse-string (substring text 0 end)
-                                                                           :object-type 'hash-table
-                                                                           :null-object nil :false-object nil))))
-                       (and (hash-table-p object) (romacs-agent--claude-usage-report object asked))))))))
+            (let* ((end (and (eql status 0) (string-search "\n" text (max 0 (- (length text) 5)))))
+                   (code (and end (substring text (1+ end))))
+                   (object (and (equal code "200")
+                                (ignore-errors (json-parse-string (substring text 0 end)
+                                                                  :object-type 'hash-table
+                                                                  :null-object nil :false-object nil))))
+                   (report (and (hash-table-p object) (romacs-agent--claude-usage-report object asked))))
+              (funcall callback report
+                       (unless report
+                         (pcase code
+                           ('nil "no answer")
+                           ("401" "its sign-in was refused")
+                           ("429" "asked too often: ask later")
+                           ("200" "no limit reported")
+                           (_ (format "answered %s" code))))))))))
     (process-send-string process (format "Authorization: Bearer %s\n" token))
     (process-send-eof process)))
 
 (defun romacs-agent--claude-usage (home callback)
   "Ask the usage of the account signed in at HOME (`:usage' of
-`romacs-agent-define-harness'); CALLBACK with its report, or nil when not
-known: no sign-in, no answer.  A token expired is renewed by Claude Code
-itself, in place (`claude auth status'): renewing it here would rotate the
-account's tokens under its sessions."
-  (let ((fresh (lambda (sign-in) (and sign-in (> (cdr sign-in) (+ (float-time) 60))))))
-    (if-let* ((sign-in (romacs-agent--claude-token home)) ((funcall fresh sign-in)))
-        (romacs-agent--claude-fetch-usage (car sign-in) callback)
-      (if (null (romacs-agent--claude-token home))
-          (funcall callback nil)
-        (romacs-agent--claude-run
-         "romacs-agent-sign-in" (list romacs-agent-claude-program "auth" "status" "--json")
-         ;; Its default directory is its variable unset, as a session's.
-         (let ((environment (romacs-agent--harness-environment)))
-           (if (equal home (romacs-agent--home 'claude nil)) environment
-             (cons (concat "CLAUDE_CONFIG_DIR=" home) environment)))
-         (lambda (_text _status)
-           (let ((sign-in (romacs-agent--claude-token home)))
-             (if (not (funcall fresh sign-in))
-                 (funcall callback nil)
-               (condition-case nil (romacs-agent--claude-fetch-usage (car sign-in) callback)
-                 (error (funcall callback nil)))))))))))
+`romacs-agent-define-harness'); CALLBACK with its report, or with nil and
+why not: no sign-in, one due to renew (`romacs-agent--claude-renew-due'),
+no answer."
+  (if-let* ((sign-in (romacs-agent--claude-token home)))
+      (if-let* ((due (romacs-agent--claude-renew-due sign-in)))
+          (funcall callback nil due)
+        (romacs-agent--claude-fetch-usage (car sign-in) callback))
+    (funcall callback nil "not signed in")))
 
 (defun romacs-agent--claude-limit-status (status)
   (pcase status ("rejected" 'rejected) ("allowed_warning" 'warning) (_ 'allowed)))
@@ -736,16 +758,22 @@ alias is no model."
 the user's settings, so its models are a session's, but running none of
 their hooks, nor the instance's own arguments, which may name more.  Nil
 for an instance whose arguments name settings of their own: its sessions
-alone say what it offers."
-  (unless (seq-some (lambda (word) (string-match-p "\\`--setting\\(?:s\\|-sources\\)\\(?:=\\|\\'\\)" word))
-                    (plist-get instance :arguments))
+alone say what it offers.  Not while its sign-in is due to renew
+\(`romacs-agent--claude-renew-due'): the probe would renew it."
+  (cond
+   ((seq-some (lambda (word) (string-match-p "\\`--setting\\(?:s\\|-sources\\)\\(?:=\\|\\'\\)" word))
+              (plist-get instance :arguments))
+    nil)
+   ((romacs-agent--claude-renew-due
+     (romacs-agent--claude-token (romacs-agent--home 'claude (plist-get instance :config-dir)))))
+   (t
     (list :argv (list (plist-get instance :program) "-p" "--output-format" "stream-json"
                       "--input-format" "stream-json" "--verbose" "--no-session-persistence"
                       "--strict-mcp-config" "--settings" "{\"disableAllHooks\":true}")
           :input (concat (json-serialize (romacs-mcp--object "type" "control_request" "request_id" "romacs-models"
                                                              "request" (romacs-mcp--object "subtype" "initialize")))
                          "\n")
-          :read #'romacs-agent--claude-probed-models)))
+          :read #'romacs-agent--claude-probed-models))))
 
 (defun romacs-agent--claude-probed-models (line)
   "What LINE says to the models probe's `initialize', or nil."
@@ -783,8 +811,9 @@ EFFORT.  Neither can be cleared in a live harness: `restart' then."
   (pcase (gethash "type" line)
     ("user" (list (list :type 'input :text (romacs-agent--text-of (gethash "content" (gethash "message" line)))
                         :images (append (gethash "images" line) nil))
-                  ;; Spoken to before any initialize: a run of before, ready as it is.
-                  (list :type 'handshake :state (list :spoken t))))
+                  ;; Spoken to before any initialize: a run of before, ready as
+                  ;; it is.  A refusal reported before it was another turn's.
+                  (list :type 'handshake :state (list :spoken t :refused nil))))
     ("control_request"
      (pcase (gethash "subtype" (gethash "request" line))
        ("initialize" (list (list :type 'handshake :state (list :initialize (gethash "request_id" line)))))

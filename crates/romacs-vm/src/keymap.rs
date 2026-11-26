@@ -1,12 +1,27 @@
 //! Keymaps use a traced, Lisp-mutable cons graph, with character tables for dense maps.
 //! No Rust side table caches bindings: setcdr/nconc edits remain authoritative.
 use super::*;
-
-/// A walk stopped at a menu filter it has no result for yet.
-pub(crate) const KEYMAP_FILTER_PENDING: &str = "keymap menu filter must be evaluated (VM2 define-key does not)";
 use data::Object;
 
-struct KeyEvent { value: Value, input_index: usize }
+mod walk;
+pub(crate) use walk::{KeyWalk, Walked};
+
+/// A key sequence's event as a lookup reads it (keymap.c `lookup_key_1`).
+enum Decoded {
+    One(Value),
+    /// A meta character: the meta prefix event, then its base character.
+    Meta(Value, Value),
+    /// A (FROM . TO) range of characters, which only `define-key` stores.
+    Range(Value),
+}
+
+/// What one entry of a keymap's list says of an event (`access_keymap_1`).
+enum Element {
+    /// The entry binds the event to this.
+    Binding(Value),
+    /// The entry is a default binding, `(t . DEFINITION)`.
+    Default(Value),
+}
 
 impl Vm {
     fn keymap_symbol(&mut self, name: &str) -> Value {
@@ -83,39 +98,21 @@ impl Vm {
     /// error when a menu item's `:filter' would have to run, which a caller
     /// that must not run Lisp takes as "cannot tell".
     pub(crate) fn lookup_one_event(&mut self, map: Value, event: Value, remap: bool, defaults: bool) -> Result<Value> {
-        let events = if remap {
-            vec![KeyEvent { value: self.keymap_symbol("remap"), input_index: 0 }, KeyEvent { value: event, input_index: 1 }]
-        } else if let Some(c) = event.integer_value() {
-            let meta = 1 << 27;
-            if c & meta != 0 {
-                let prefix = self.slots[self.names["meta-prefix-char"]].value;
-                vec![KeyEvent { value: prefix, input_index: 0 }, KeyEvent { value: Value::integer(c & !meta)?, input_index: 0 }]
-            } else { vec![KeyEvent { value: event, input_index: 0 }] }
-        } else {
-            vec![KeyEvent { value: self.canonical_key_event_symbol(event)?, input_index: 0 }]
-        };
-        self.mutator.keymap_filters.clear();
-        self.mutator.keymap_pending_filter = None;
-        let binding = self.lookup_keymap_key(map, &events, defaults);
-        self.mutator.keymap_pending_filter = None;
-        let binding = binding?;
+        let remap_event = self.keymap_symbol("remap");
+        let events: &[Value] = if remap { &[remap_event, event] } else { &[event] };
+        let binding = self.key_lookup_events(map, events, defaults)?;
         Ok(if binding.integer_value().is_some() { Value::NIL } else { binding })
     }
-    /// One `lookup-key' walk with FILTERS as the known menu-filter results:
-    /// the binding, or the first filter still to run.
-    pub(crate) fn lookup_key_walk(&mut self, map: Value, key: Value, defaults: bool, filters: Vec<(Value, Value)>)
-        -> Result<std::result::Result<Value, (Value, Value, Value)>> {
-        self.mutator.keymap_filters = filters;
-        self.mutator.keymap_pending_filter = None;
-        let result = self.key_events(key).and_then(|events| self.lookup_keymap_key(map, &events, defaults));
-        self.mutator.keymap_filters.clear();
-        match result {
-            Err(e) if e == KEYMAP_FILTER_PENDING => Ok(Err(self.mutator.keymap_pending_filter.take().expect("pending filter"))),
-            other => other.map(Ok),
+    /// The local keymap of the buffer at INDEX, text or unibyte.
+    pub(crate) fn local_keymap(&self, index: usize) -> &Value {
+        match &self.objects[index] {
+            Object::Buffer(buffer) => &buffer.local_keymap,
+            Object::ByteBuffer(buffer) => &buffer.local_keymap,
+            _ => unreachable!("buffer_index names a buffer"),
         }
     }
-    /// The local keymap of the buffer at INDEX, text or unibyte.
-    pub(crate) fn local_keymap(&mut self, index: usize) -> &mut Value {
+    /// As `local_keymap`, to store into.
+    pub(crate) fn local_keymap_mut(&mut self, index: usize) -> &mut Value {
         match self.objects.entry_mut(index) {
             Object::Buffer(buffer) => &mut buffer.local_keymap,
             Object::ByteBuffer(buffer) => &mut buffer.local_keymap,
@@ -172,110 +169,58 @@ impl Vm {
         }
         self.cons_pair(rest).is_ok_and(|(kind, _)| kind == Value::reference(keymap + 1, 7))
     }
-    /// keymap.c get_keyelt with AUTOLOAD: a menu item's `:filter' result
-    /// comes from `keymap_filters'; one not computed yet is left pending
-    /// for the caller to run (KEYMAP_FILTER_PENDING).
-    fn keymap_definition(&mut self, mut value: Value) -> Result<Value> {
+    /// keymap.c get_keyelt with AUTOLOAD: VALUE's definition past menu
+    /// item and menu string wrappers, or Err (FILTER, DEFINITION) for a menu
+    /// item's `:filter' to apply first, whose result is unwrapped in turn.
+    fn keymap_definition(&self, mut value: Value) -> Result<std::result::Result<Value, (Value, Value)>> {
         for _ in 0..=64 {
-            let Ok((head, tail)) = self.cons_pair(value) else { return Ok(value); };
+            let Ok((head, tail)) = self.cons_pair(value) else { return Ok(Ok(value)); };
             if self.names.get("menu-item").is_some_and(|&s| head == Value::reference(s + 1, 7)) {
-                let item = value;
-                let Ok((_, definition)) = self.cons_pair(tail) else { return Ok(value); };
+                let Ok((_, definition)) = self.cons_pair(tail) else { return Ok(Ok(value)); };
                 let object = self.cons_pair(definition).map_or(definition, |p| p.0);
                 let mut properties = definition;
-                let mut filter = None;
                 for _ in 0..=self.list_limit() {
                     let Ok((key, next)) = self.cons_pair(properties) else { break; };
                     if self.cons_pair(next).is_err() { break; }
                     if self.names.get(":filter").is_some_and(|&s| key == Value::reference(s + 1, 7)) {
-                        filter = Some(self.cons_pair(next)?.0);
-                        break;
+                        return Ok(Err((self.cons_pair(next)?.0, object)));
                     }
                     properties = next;
                     if properties == definition { return Err("circular menu item".into()); }
                 }
-                value = match filter {
-                    None => object,
-                    Some(filter) => match self.mutator.keymap_filters.iter().find(|(i, _)| *i == item) {
-                        Some(&(_, result)) => result,
-                        None => {
-                            self.mutator.keymap_pending_filter = Some((item, filter, object));
-                            return Err(KEYMAP_FILTER_PENDING.into());
-                        }
-                    },
-                };
+                value = object;
             } else if self.str_view(head).is_some() {
                 value = tail;
-            } else { return Ok(value); }
+            } else { return Ok(Ok(value)); }
         }
         Err("keymap menu nesting limit exceeded".into())
     }
-    fn keymap_entry(&mut self, map: Value, event: Value, inherit: bool, defaults: bool) -> Result<Option<Value>> {
-        self.keymap_entry_at(map, event, inherit, defaults, 0)
-    }
-    fn keymap_entry_at(&mut self, map: Value, event: Value, inherit: bool, defaults: bool, depth: usize) -> Result<Option<Value>> {
-        if depth > 64 { return Err("keymap nesting limit exceeded".into()); }
-        let keymap = Value::reference(self.names["keymap"] + 1, 7);
-        let (_, mut tail) = self.cons_pair(map)?;
-        let mut fallback = None;
-        let mut found = None;
-        let mut prefixes: Vec<Value> = Vec::new();
-        let limit = self.list_limit();
-        for _ in 0..=limit {
-            if tail == Value::NIL { return self.keymap_prefixes(found, &prefixes).or(fallback).map(|v| self.keymap_definition(v)).transpose(); }
-            if !tail.tag_is(3) {
-                let parent = self.resolve_keymap_as(tail, keymap).ok_or("keymap parent required")?;
-                tail = parent;
-            }
-            let (entry, next) = self.cons_pair(tail)?;
-            let binding = if entry == keymap {
-                if !inherit || found == Some(Value::NIL) { return self.keymap_prefixes(found, &prefixes).or(fallback).map(|v| self.keymap_definition(v)).transpose(); }
-                if let Some(child) = found {
-                    let parent = self.keymap_entry_at(tail, event, true, defaults, depth + 1)?;
-                    if let Some(parent) = parent.and_then(|v| self.resolve_keymap_as(v, keymap)) {
-                        // The prefixes found, then the parent's as their tail.
-                        let prefixes = if prefixes.is_empty() { vec![child] } else { prefixes };
-                        let composed = prefixes.iter().rev().fold(parent, |tail, &prefix| self.keymap_cons(prefix, tail));
-                        let head = self.keymap_symbol("keymap");
-                        return Ok(Some(self.keymap_cons(head, composed)));
-                    }
-                    return Ok(self.keymap_prefixes(found, &prefixes));
-                }
-                None
-            } else if let Some(submap) = self.resolve_keymap_as(entry, keymap) {
-                self.keymap_entry_at(submap, event, inherit, defaults, depth + 1)?
-            } else if let Some((key, value)) = (entry.tag_is(3)).then(|| self.cons_pair(entry).ok()).flatten() {
-                let range_match = (key.tag_is(3)).then(|| self.cons_pair(key).ok()).flatten().and_then(|(lo,hi)| Some((lo.integer_value()?,hi.integer_value()?,event.integer_value()?))).is_some_and(|(lo,hi,event)| lo <= event && event <= hi);
-                if key == event || (range_match && found.is_none()) { Some(value) }
-                else {
-                    if defaults && key == Value::TRUE && fallback.is_none() { fallback = Some(value); }
-                    None
-                }
-            } else if matches!(self.object_if(entry), Some(Object::CharTable(_))) {
-                event.integer_value().filter(|&c| c >= 0 && c < char_table::CharTable::LEN as i64)
-                    .map(|c| self.char_table_get(entry, c as usize)).transpose()?.filter(|&v| v != Value::NIL)
-            } else if let Some(Object::Vector(slots)) = self.object_if(entry) {
-                // access_keymap_1: a vector binds each character below its
-                // length, a nil slot an explicit nil that shadows a parent.
-                event.integer_value().and_then(|c| usize::try_from(c).ok()).and_then(|c| slots.get(c).copied())
-            } else if matches!(self.object_if(entry), Some(Object::SyntaxTable(_))) {
-                return Err("dense keymaps are not supported".into());
-            } else { None };
-            if let Some(value) = binding {
-                let value = self.keymap_definition(if value == Value::TRUE { Value::NIL } else { value })?;
-                if self.resolve_keymap_as(value, keymap).is_some() {
-                    // FOUND is the first prefix binding; the walk's answer
-                    // is all of them (`keymap_prefixes').
-                    if prefixes.is_empty() { found = Some(value); }
-                    prefixes.push(value);
-                } else {
-                    if found.is_none() || found == Some(Value::NIL) { found = Some(value); }
-                    if value != Value::NIL { return Ok(self.keymap_prefixes(found, &prefixes)); }
-                }
-            }
-            tail = next;
+    /// What a (KEY . VALUE) entry of a keymap's list, no embedded keymap,
+    /// says of EVENT; a (FROM . TO) range of characters binds only while
+    /// UNFOUND, nothing bound to the event yet.
+    #[inline]
+    fn keymap_pair_binding(&self, key: Value, value: Value, event: Value, unfound: bool) -> Option<Element> {
+        if key == event { return Some(Element::Binding(value)); }
+        if unfound && key.tag_is(3) {
+            let in_range = self.cons_pair(key).ok()
+                .and_then(|(from, to)| Some((from.integer_value()?, to.integer_value()?, event.integer_value()?)))
+                .is_some_and(|(from, to, c)| from <= c && c <= to);
+            if in_range { return Some(Element::Binding(value)); }
         }
-        Err("circular keymap".into())
+        (key == Value::TRUE).then_some(Element::Default(value))
+    }
+    /// What ENTRY, an element of a keymap's list that is no cons and no
+    /// keymap, says of EVENT: a character table or a vector binds characters.
+    fn keymap_object_binding(&self, entry: Value, event: Value) -> Result<Option<Element>> {
+        Ok(match self.object_if(entry) {
+            Some(Object::CharTable(_)) => event.integer_value().filter(|&c| c >= 0 && c < char_table::CharTable::LEN as i64)
+                .map(|c| self.char_table_get(entry, c as usize)).transpose()?.filter(|&v| v != Value::NIL).map(Element::Binding),
+            // access_keymap_1: a vector binds each character below its
+            // length, a nil slot an explicit nil that shadows a parent.
+            Some(Object::Vector(slots)) => event.integer_value().and_then(|c| usize::try_from(c).ok()).and_then(|c| slots.get(c).copied()).map(Element::Binding),
+            Some(Object::SyntaxTable(_)) => return Err("dense keymaps are not supported".into()),
+            _ => None,
+        })
     }
     /// GNU's `access_keymap_1`: several prefix bindings of one event compose as
     /// one flat (keymap PREFIX...), in the order found; made once, when
@@ -522,45 +467,85 @@ impl Vm {
         }
         false
     }
-    fn key_events(&mut self, sequence: Value) -> Result<Vec<KeyEvent>> {
-        let (raw, bytes) = if let Some(view) = self.str_view(sequence) {
-            (view.chars().map(|c| Value::integer(c as i64).unwrap()).collect(), !view.is_multibyte())
-        } else { match self.object_if(sequence) {
-            Some(Object::Vector(v)) => (v.clone(), false),
+    /// The number of events in KEY, a key sequence.
+    fn key_length(&self, key: Value) -> Result<usize> {
+        if let Some(view) = self.str_view(key) { return Ok(view.len()); }
+        match self.object_if(key) {
+            Some(Object::Vector(v)) => Ok(v.len()),
+            _ => Err("key sequence string or vector required".into()),
+        }
+    }
+    /// KEY's event at INDEX, read from KEY as it is now.  In a string, AT is
+    /// the byte of that event when the reader knows it, and is left at the
+    /// next event's: a reader keeps it while no Lisp runs, and for an
+    /// executable image's string, which never changes, across callbacks.
+    /// Unknown, it is found through the string's own character/byte
+    /// position (`str_view_from`, GNU's `string_char_to_byte`), which costs
+    /// the characters stepped since its last use, not INDEX.
+    fn key_event_at(&mut self, key: Value, index: usize, at: &mut Option<usize>) -> Result<Decoded> {
+        let short = "key sequence shorter than its length";
+        let (event, bytes) = if Self::image_string(key) {
+            // An image's literal is multibyte unless ASCII, where the two read
+            // alike.  Its first read checks it whole (`string_value`); the
+            // others read one character, its pages checked.
+            let start = match *at { Some(byte) => byte, None => char_byte(self.string_value(key)?.as_bytes(), index) };
+            let (c, width) = self.image_string_char(key, start)?.ok_or(short)?;
+            *at = Some(start + width);
+            (Value::integer(i64::from(c))?, false)
+        } else if let Some(view) = self.str_view(key) {
+            let (text, multibyte) = (view.bytes(), view.is_multibyte());
+            let start = match *at {
+                Some(byte) => byte,
+                None => text.len() - self.str_view_from(key, index).ok_or(short)?.bytes().len(),
+            };
+            let (c, width) = if multibyte { char_at(text, start) } else { text.get(start).map(|&b| (u32::from(b), 1)) }.ok_or(short)?;
+            *at = Some(start + width);
+            (Value::integer(i64::from(c))?, !multibyte)
+        } else { match self.object_if(key) {
+            Some(Object::Vector(v)) => (*v.get(index).ok_or(short)?, false),
             _ => return Err("key sequence string or vector required".into()),
         }};
-        let mut events = vec![];
-        for (input_index, mut event) in raw.into_iter().enumerate() {
-            if event.tag_is(3) {
-                // keymap.c: a modifier list (lucid_event_type_list_p) is
-                // converted; a (FROM . TO) character range stays as it is
-                // for store_in_keymap; another list, such as a mouse click,
-                // stands for its EVENT_HEAD.
-                if self.lucid_event_type_list_p(event) {
-                    event = self.key_event_from_list(event)?;
-                } else if self.character_range(event)?.is_some() {
-                    events.push(KeyEvent { value: event, input_index });
-                    continue;
-                } else {
-                    event = self.cons_pair(event)?.0;
-                }
+        self.decode_key_event(event, bytes)
+    }
+    /// EVENT of a key sequence as a lookup reads it; BYTES when the
+    /// sequence is a unibyte string, whose 0x80 bit is meta.
+    fn decode_key_event(&mut self, mut event: Value, bytes: bool) -> Result<Decoded> {
+        if event.tag_is(3) {
+            // keymap.c: a modifier list (lucid_event_type_list_p) is
+            // converted; a (FROM . TO) character range stays as it is
+            // for store_in_keymap; another list, such as a mouse click,
+            // stands for its EVENT_HEAD.
+            if self.lucid_event_type_list_p(event) {
+                event = self.key_event_from_list(event)?;
+            } else if self.character_range(event)?.is_some() {
+                return Ok(Decoded::Range(event));
+            } else {
+                event = self.cons_pair(event)?.0;
             }
-            if event.tag_is(7) {
-                event = self.canonical_key_event_symbol(event)?;
+        }
+        if event.tag_is(7) {
+            event = self.canonical_key_event_symbol(event)?;
+        }
+        if let Some(c) = event.integer_value() {
+            if c < 0 { return Err("invalid event".into()); }
+            let meta = if bytes { 128 } else { 1 << 27 };
+            if c & meta != 0 {
+                let prefix = self.slots[self.names["meta-prefix-char"]].value;
+                return Ok(Decoded::Meta(prefix, Value::integer(c & !meta)?));
             }
-            if let Some(mut c) = event.integer_value() {
-                if c < 0 { return Err("invalid event".into()); }
-                let meta = if bytes { 128 } else { 1 << 27 };
-                if c & meta != 0 {
-                    let slot = self.names["meta-prefix-char"];
-                    events.push(KeyEvent { value: self.slots[slot].value, input_index });
-                    c &= !meta;
-                }
-                event = Value::integer(c)?;
-            } else if !event.tag_is(7) && event != Value::NIL && event != Value::TRUE && self.str_view(event).is_none() {
-                return Err("integer or symbol event required".into());
+        } else if !event.tag_is(7) && event != Value::NIL && event != Value::TRUE && self.str_view(event).is_none() {
+            return Err("integer or symbol event required".into());
+        }
+        Ok(Decoded::One(event))
+    }
+    /// SEQUENCE's events as `define-key' stores them.
+    fn key_events(&mut self, sequence: Value) -> Result<Vec<Value>> {
+        let (mut events, mut at) = (vec![], None);
+        for index in 0..self.key_length(sequence)? {
+            match self.key_event_at(sequence, index, &mut at)? {
+                Decoded::One(event) | Decoded::Range(event) => events.push(event),
+                Decoded::Meta(prefix, base) => events.extend([prefix, base]),
             }
-            events.push(KeyEvent { value: event, input_index });
         }
         Ok(events)
     }
@@ -584,14 +569,13 @@ impl Vm {
     fn event_head(&self, event: Value) -> Value {
         if event.tag_is(3) { self.cons_pair(event).map_or(event, |(head, _)| head) } else { event }
     }
-    fn define_keymap_key(&mut self, map: Value, events: &[KeyEvent], value: Value, remove: bool) -> Result<Value> {
+    fn define_keymap_key(&mut self, map: Value, events: &[Value], value: Value, remove: bool) -> Result<Value> {
         let mut map = self.resolve_keymap(map).ok_or("keymap required")?;
-        for (i, event) in events.iter().enumerate() {
-            let event = event.value;
+        for (i, &event) in events.iter().enumerate() {
             if i + 1 == events.len() { self.keymap_store(map, event, value, remove)?; return Ok(value); }
             // Fdefine_key: a range must be a leaf.
             if event.tag_is(3) { return Err("Key sequence contains invalid event".into()); }
-            let binding = self.keymap_entry(map, event, false, false)?.unwrap_or(Value::NIL);
+            let binding = self.keymap_access(map, event, false, false)?;
             map = if binding == Value::NIL {
                 let prefix = self.sparse_keymap(Value::NIL);
                 self.keymap_store(map, event, prefix, false)?;
@@ -599,29 +583,6 @@ impl Vm {
             } else { self.resolve_keymap(binding).ok_or("key sequence starts with non-prefix key")? };
         }
         Ok(Value::NIL)
-    }
-    fn lookup_keymap_key(&mut self, map: Value, events: &[KeyEvent], defaults: bool) -> Result<Value> {
-        // lookup_key_1: a cons is searched as it is, so a list of keymaps
-        // acts as their composition; nil is an empty keymap.
-        let is_list = map == Value::NIL || map.tag_is(3);
-        if events.is_empty() && is_list { return Ok(map); }
-        let mut map = match self.resolve_keymap(map) {
-            Some(map) => map,
-            None if is_list => { let keymap = self.intern("keymap"); self.keymap_cons(keymap, map) }
-            None => return Err("keymap required".into()),
-        };
-        for (i, event) in events.iter().enumerate() {
-            let event = self.event_head(event.value);
-            let binding = self.keymap_entry(map, event, true, defaults)?.unwrap_or(Value::NIL);
-            if i + 1 == events.len() { return Ok(binding); }
-            let Some(prefix) = self.resolve_keymap(binding) else {
-                let consumed = events[i].input_index + 1;
-                return if events.last().unwrap().input_index < consumed { Ok(Value::NIL) }
-                else { Value::integer(consumed as i64) };
-            };
-            map = prefix;
-        }
-        Ok(map)
     }
     fn key_modifier(c: i64, modifier: &str) -> Result<i64> {
         Ok(match modifier {
@@ -676,16 +637,32 @@ impl Vm {
                 let result = self.define_keymap_key(map, &events, value, remove)?;
                 Ok(if p == GlobalSetKey { Value::NIL } else { result })
             }
-            LookupKey => { let events = self.key_events(args[1])?; self.lookup_keymap_key(args[0], &events, n == 3 && args[2] != Value::NIL) }
+            LookupKey => self.key_lookup_native(args[0], args[1], n == 3 && args[2] != Value::NIL),
             UseLocalMap => {
                 if args[0] != Value::NIL && self.resolve_keymap(args[0]).is_none() { return Err("keymap required".into()); }
                 let index = self.buffer_index()?;
-                *self.local_keymap(index) = args[0];
+                *self.local_keymap_mut(index) = args[0];
                 Ok(Value::NIL)
             }
             _ => unreachable!(),
         }
     }
+}
+
+/// The byte of the character at INDEX in TEXT, multibyte text.
+fn char_byte(text: &[u8], index: usize) -> usize {
+    let mut byte = 0;
+    for _ in 0..index {
+        if byte >= text.len() { break; }
+        byte += crate::lstring::string_char(&text[byte..]).1;
+    }
+    byte
+}
+
+/// The character at byte START of TEXT, multibyte text, and its width.
+fn char_at(text: &[u8], start: usize) -> Option<(u32, usize)> {
+    let rest = text.get(start..).filter(|rest| !rest.is_empty())?;
+    Some(crate::lstring::string_char(rest))
 }
 
 /// keyboard.c modifier_names: the symbol for each modifier bit.

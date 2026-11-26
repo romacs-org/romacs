@@ -254,11 +254,14 @@ fn alpha_lower_limit(cx: &mut Leaf<'_>) -> std::result::Result<f32, Fault> {
 /// and `internal-border-width' the gaps between and around its windows;
 /// `tab-bar-lines' its tab bar; `romacs-status-bar-lines' its status bar,
 /// which is its windows' mode line, and `romacs-status-bar-position'
-/// where (VM2-STATUS-BAR). Other parameters, and
-/// every parameter of a frame without a window system, are only stored.
+/// where (VM2-STATUS-BAR). Other parameters, and every parameter of a
+/// frame without a window system, are only stored; but an owner's frames,
+/// laid out for its master's display, take their fringes.
 fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
-    if cx.kind(key) != leaf::Kind::Symbol || cx.windows().window_system(frame)? == Value::NIL { return Ok(()); }
+    if cx.kind(key) != leaf::Kind::Symbol { return Ok(()); }
     let fringe = [cx.intern("left-fringe"), cx.intern("right-fringe")].iter().position(|&k| k == key);
+    let shown = if fringe.is_some() { cx.windows().fringes_shown() } else { cx.windows().window_system(frame)? != Value::NIL };
+    if !shown { return Ok(()); }
     if let Some(side) = fringe {
         // gui_set_left_fringe (frame.c:5800): a fixnum's magnitude, else 8.
         let width = value.integer_value().map_or(crate::frame::DEFAULT_FRINGE, |n| n.unsigned_abs().min(i32::MAX as u64) as u32);
@@ -731,12 +734,12 @@ fn frame_total_lines(cx; optional frame: Value) {
 defsubr! { name = "window-system", gnu = "frame.c:415", effect = Reads,
 fn window_system(cx; optional frame: Value) { cx.windows().window_system(frame) }}
 defsubr! { name = "current-message", gnu = "editfns.c:3288", effect = Reads,
-fn current_message(cx) {
-    // In batch, message writes to stderr and the echo area stays empty.
-    let noninteractive = cx.intern("noninteractive");
-    if cx.variable_value(noninteractive)?.unwrap_or(Value::NIL) != Value::NIL { return Ok(Value::NIL); }
-    let echo = cx.intern(crate::prim::ECHO_AREA_MESSAGE);
-    Ok(cx.variable_value(echo)?.unwrap_or(Value::NIL))
+fn current_message(cx) { cx.current_message() }}
+
+// Return non-nil if the host can establish that echo sync has nothing to show.
+defsubr! { name = "romacs--echo-current-p", gnu = "romacs:echo", effect = Reads,
+fn romacs_echo_current_p(cx) {
+    Ok(if cx.echo_current() { Value::TRUE } else { Value::NIL })
 }}
 defsubr! { name = "internal-handle-focus-in", gnu = "keyboard.c:7891", effect = Reads,
 fn internal_handle_focus_in(cx, event: Value) {

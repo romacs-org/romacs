@@ -99,8 +99,11 @@ pub(crate) struct Channel {
     pub pid: i32,
     /// GNU decoding_buf: undecoded bytes held over to the next read.
     pub carryover: Vec<u8>,
-    /// GNU write_queue: bytes not yet written.
-    pub pending: Vec<u8>,
+    /// GNU write_queue: bytes not yet written, taken from the front as the
+    /// peer reads.
+    pub pending: std::collections::VecDeque<u8>,
+    /// `set-process-framing': output is split into frames before Lisp sees it.
+    pub framer: Option<crate::framing::Framer>,
     /// add_process_read_fd: the wait polls `infd'.
     pub reading: bool,
     /// A :nowait connection in progress (GNU's NON_BLOCKING_CONNECT_FD): the

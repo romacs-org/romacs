@@ -1,7 +1,9 @@
-//! `romacs--logo-frame`: a frame of the Romacs mark and wordmark in braille
-//! cells (the romacs-logo crate) for lisp/ui/romacs-landing.el.
+//! Frames the romacs-logo crate draws, for Lisp's still frames:
+//! `romacs--logo-frame`, the Romacs mark and wordmark in braille cells
+//! (lisp/ui/romacs-landing.el), and `romacs--banner-frame`, a banner
+//! (lisp/ui/romacs-banner.el).
 use super::leaf_scalars::number;
-use super::orderless::list;
+use super::orderless::{elements, list};
 use super::*;
 
 // The logo's frame, COLS by ROWS cells joined by newlines, for cells
@@ -47,4 +49,39 @@ fn romacs_logo_frame(cx, cols: Value, rows: Value, cell_aspect: Value; optional 
         faced.push((range, face));
     }
     Ok(cx.faced_text(text, &faced))
+}}
+
+// A banner's frame (romacs_logo::banner), COLS by ROWS cells joined by
+// newlines, in PATTERN (`wave', `rain', `sparkle' or `sweep'), seeded by
+// EPOCH (0 when nil), TIME seconds into its motion (0 when nil): each lit
+// cell's `face' is the face of FACES its colour stop names.  The display
+// draws the same frames, so this is its still frame.  Signals
+// `args-out-of-range' outside 1..400 columns, 1..200 rows or 1..4 faces.
+defsubr! { name = "romacs--banner-frame", gnu = "romacs:logo", effect = Reads,
+fn romacs_banner_frame(cx, pattern: Value, cols: Value, rows: Value, faces: Value; optional epoch: Value, time: Value) {
+    use romacs_logo::banner;
+    let count = |v: Value| v.integer_value().map(|n| usize::try_from(n).unwrap_or(0)).ok_or_else(|| Fault::Wrong("integerp", v));
+    let shape = banner::Pattern::named(&cx.symbol_name(pattern)?).ok_or_else(|| Fault::Wrong("romacs-banner-pattern-p", pattern))?;
+    let faces = elements(cx, faces)?;
+    let (cols_v, rows_v) = (cols, rows);
+    let (cols, rows) = (count(cols)?, count(rows)?);
+    if !banner::valid(cols, rows, faces.len()) { return Err(Fault::Range(cols_v, rows_v)); }
+    let epoch = if epoch == Value::NIL { 0 } else { epoch.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or_else(|| Fault::Wrong("natnump", epoch))? };
+    let time = if time == Value::NIL { 0.0 } else { number(cx, time)? };
+    let cells = banner::frame(shape, cols, rows, faces.len(), epoch, time);
+    let mut text = String::with_capacity(cells.len() * 3 + rows);
+    // Runs of one stop, in byte offsets of TEXT.
+    let mut runs: Vec<(std::ops::Range<usize>, Value)> = vec![];
+    for (i, &(c, stop)) in cells.iter().enumerate() {
+        if i > 0 && i % cols == 0 { text.push('\n'); }
+        let start = text.len();
+        text.push(c);
+        if let Some(face) = stop.map(|s| faces[s]) {
+            match runs.last_mut() {
+                Some((range, last)) if *last == face && range.end == start => range.end = text.len(),
+                _ => runs.push((start..text.len(), face)),
+            }
+        }
+    }
+    Ok(cx.faced_text(text, &runs))
 }}

@@ -91,3 +91,30 @@ fn frame_snapshots_run_window_change_functions_on_changes() {
     assert_eq!(vm.eval_source("(prog1 (reverse wc-log) (setq window-size-change-functions nil window-buffer-change-functions nil))").unwrap().display().unwrap(),
                "(unchanged size mode-line buffer size)");
 }
+
+#[test]
+fn master_window_changes_never_probe_owner_frame_parameters() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source(&tree_lisp::text("vm/window-change.el"))
+        .unwrap();
+    let observed = vm
+        .eval_source(
+            r#"(progn
+                (romacs--run-window-change-functions)
+                (setq wc-global 0 wc-owner-probes 0 wc-frame-parameter (symbol-function 'frame-parameter))
+                (fset 'frame-parameter
+                  (lambda (frame parameter)
+                    (when (eq parameter 'owner-window)
+                      (setq wc-owner-probes (1+ wc-owner-probes)))
+                    (funcall wc-frame-parameter frame parameter)))
+                (add-hook 'window-buffer-change-functions
+                  (lambda (_) (setq wc-global (1+ wc-global))))
+                (set-window-buffer (selected-window) (get-buffer-create "wc-master"))
+                (romacs--run-window-change-functions)
+                (list wc-global wc-owner-probes))"#,
+        )
+        .unwrap()
+        .display()
+        .unwrap();
+    assert_eq!(observed, "(1 0)");
+}

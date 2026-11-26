@@ -2,7 +2,7 @@
 
 ;; Keys typed into that chat's composer (with the post-command hook): flat.
 (scaling-probe agent-chat-typing :n 100000 :k 10
-  :setup (romacs-agent-log-composer-buffer (scaling--big-chat n))
+  :setup (with-current-buffer (scaling--big-chat n) (goto-char (point-max)) (current-buffer))
   :body (with-current-buffer it
           (dotimes (_ 50)
             (let ((last-command-event ?a) (this-command 'self-insert-command))

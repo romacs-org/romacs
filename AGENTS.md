@@ -69,6 +69,10 @@ possible; say so where you do.
 
 ## Development
 
+- Branches never edit shared counters, ledgers, baselines or bars. Add
+  fragments for Rust/Lisp contract changes as in `lisp/vm/AGENTS.md`.
+  Generate checks from source or read trunk-owned records.
+
 - Optimize for useful capabilities, easy modification, and a short feedback loop.
 - A build or fix request authorizes focused edits, checks, review, and a local
   commit. Questions, explanations, and reviews remain read-only unless changes

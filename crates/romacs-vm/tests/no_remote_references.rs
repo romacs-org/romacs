@@ -86,7 +86,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("quit", Free), ("force_quit_count", Free), ("deferred_escapes", Free), ("quit_slots", Free),
     // Interned symbols, which no collection frees, and indices.
     ("face_keys", Free),
-    ("debug_event_slots", Free), ("keymap_generation", Free), ("process_jobs", Free), ("subprocesses", Free),
+    ("debug_event_slots", Free), ("echo_function_slots", Free), ("keymap_generation", Free), ("process_jobs", Free), ("subprocesses", Free),
     ("environment_snapshot", Free), ("trapped", Free), ("retrap", Free), ("doc_file", Free),
     ("terminal_bindings", Root),
     // The buffer list's order: read at every mark and rewritten when objects
@@ -112,6 +112,8 @@ const FIELDS: &[(&str, Class)] = &[
     // An alias names a symbol slot, a Value in all but type.
     ("variable_redirects", Owed),
     ("forwarded", Root),
+    // The input streams and the reads in progress (command_loop/stream.rs).
+    ("streams", Root), ("reads", Root),
     ("fixnum_slots", Free), ("textget_slots", Free),
     ("gc_stats", Free), ("gc_times", Free), ("gc_census", Free), ("collection_log", Free), ("gc_retained", Free), ("gc_payload_bytes", Free),
     ("gc_retained_slots", Free), ("gc_code", Free), ("gc_floor", Free), ("job_budget", Free), ("gc_retained_payload", Free),
@@ -155,8 +157,6 @@ const FIELDS: &[(&str, Class)] = &[
     ("doomed_finalizers", Root),
     ("post_gc_due", Free), ("undo_offers_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
     ("suspended", Root),
-    // Set and cleared around one keymap walk, which never collects (keymap.rs).
-    ("keymap_filters", Transient), ("keymap_pending_filter", Transient),
     // A native call's watched writes, from the write to its engine's drain;
     // `may_collect` refuses while any waits (`watchers.rs`).
     ("deferred_writes", Transient),
@@ -171,7 +171,7 @@ const FIELDS: &[(&str, Class)] = &[
 const VARIANTS: &[(&str, Class)] = &[
     ("SyntaxTable", Free), ("Float", Free), ("Bignum", Free),
     ("Window", Barrier), ("Frame", Barrier), ("Terminal", Barrier), ("WindowConfiguration", Barrier),
-    ("Sqlite", Free), ("Treesit", Barrier), ("Process", Barrier), ("Finalizer", Barrier), ("Thread", Free),
+    ("Sqlite", Free), ("Treesit", Barrier), ("Process", Barrier), ("Finalizer", Barrier), ("Thread", Free), ("Backing", Free),
     ("String", Barrier), ("RawString", Barrier), ("Vector", Barrier), ("BoolVector", Free), ("Record", Barrier),
     // Their nodes are shared and locked, so a node's store hooks no one entry:
     // their contents are written only through char_table.rs's funnel (`wrote`),
@@ -545,7 +545,7 @@ const ENTRIES: &[(&str, Variants)] = &[
         ("Window", &["window.rs:Window"]), ("Frame", &["frame.rs:Frame"]), ("Terminal", &["frame.rs:Terminal"]),
         ("WindowConfiguration", &["window_config.rs:WindowConfiguration"]), ("Sqlite", &["sqlite.rs:Handle"]),
         ("Treesit", &["treesit/mod.rs:Object"]),
-        ("Process", &["subprocess.rs:Process"]), ("Finalizer", &[]), ("Thread", &[]),
+        ("Process", &["subprocess.rs:Process"]), ("Finalizer", &[]), ("Thread", &[]), ("Backing", &["frozen.rs:Backing"]),
         ("String", &["data.rs:LispString"]), ("RawString", &["data.rs:LispString"]), ("Vector", &[]),
         ("BoolVector", &["bool_vector.rs:BoolVector"]), ("Record", &[]),
         ("CharTable", &["char_table.rs:CharTable"]), ("SubCharTable", &["char_table.rs:CharTableNode"]),
@@ -554,6 +554,7 @@ const ENTRIES: &[(&str, Variants)] = &[
         ("ByteBuffer", &["bytes.rs:ByteBuffer"]), ("HashTable", &["hash.rs:HashTable"]), ("Obarray", &["obarray.rs:Obarray"]),
         ("Free", &[]),
     ]),
+    ("frozen.rs:Backing", &[("Inline", &[]), ("Sealed", &[])]),
     ("treesit/mod.rs:Object", &[
         ("Parser", &["treesit/mod.rs:Parser"]), ("Node", &["treesit/mod.rs:Node"]),
         ("Query", &["treesit/mod.rs:Query"]), ("Task", &["treesit/mod.rs:Task"]),

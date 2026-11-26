@@ -103,6 +103,7 @@ impl Vm {
     pub(crate) fn typed_value(&self, v: Value) -> Result<Json> {
         self.typed_depth(v, 0)
     }
+    // SMELL(long-function): an arm for each Object variant, each kind one decision a reader checks in place.
     fn typed_depth(&self, v: Value, depth: usize) -> Result<Json> {
         if depth > 100 {
             return Err("result depth exceeded".into());
@@ -145,6 +146,7 @@ impl Vm {
                 data::Object::Treesit(_) => Ok(json!({"type":"treesit"})),
                 data::Object::Finalizer(_) => Ok(json!({"type":"finalizer"})),
                 data::Object::Thread => Ok(json!({"type":"thread"})),
+                data::Object::Backing(_) => Ok(json!({"type":"frozen-backing"})),
                 data::Object::Process(_) => Ok(json!({"type":"process"})),
                 data::Object::Marker(_) => Ok(json!({"type":"marker"})),
                 data::Object::Overlay(_) => Ok(json!({"type":"overlay"})),

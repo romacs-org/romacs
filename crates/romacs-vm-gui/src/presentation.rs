@@ -34,6 +34,8 @@ pub fn render_stall() -> Duration {
 
 pub struct Presentation {
     dirty: bool,
+    /// How many times a frame was asked for (`changed`).
+    changes: u64,
     /// The paint submitted and not yet drawn, and when the oldest undrawn
     /// paint it stands for was submitted.
     in_flight: Option<(u64, Instant)>,
@@ -42,11 +44,18 @@ pub struct Presentation {
 }
 
 impl Presentation {
-    pub fn new() -> Self { Self { dirty: false, in_flight: None, warned: false } }
+    pub fn new() -> Self { Self { dirty: false, changes: 0, in_flight: None, warned: false } }
 
-    pub fn changed(&mut self) { self.dirty = true; }
+    pub fn changed(&mut self) { self.dirty = true; self.changes += 1; }
+
+    /// How many times a frame was asked for: a frame built after only one
+    /// request shows that request's changes alone.
+    pub fn changes(&self) -> u64 { self.changes }
 
     pub fn ready(&self) -> bool { self.dirty && self.in_flight.is_none() }
+
+    /// A frame is due, drawn now or once the one in flight is.
+    pub fn pending(&self) -> bool { self.dirty }
 
     pub fn after_batch<T>(&self, submit: impl FnOnce() -> T) -> Option<T> {
         self.ready().then(submit)

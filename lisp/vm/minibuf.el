@@ -100,7 +100,8 @@ INHERIT is INHERIT-INPUT-METHOD."
          ;; only inside a minibuffer, and its restore puts it back.
          (outer-selected (and (> outer-level 0) romacs--minibuf-selected-window))
          (outer-prompts romacs--minibuf-prompts)
-         (outer-keys romacs--command-keys)
+         ;; minibuf.c:750: the caller's command keys, put back after.
+         (outer-keys (this-command-keys-vector))
          (outer-loop-levels romacs--minibuf-loop-levels)
          (level (1+ outer-level))
          (reused (get-buffer (format " *Minibuf-%d*" level)))
@@ -206,12 +207,12 @@ INHERIT is INHERIT-INPUT-METHOD."
       ;; reselect the caller when it is still live (a command at the prompt
       ;; may have deleted it; GNU's record_unwind_current_buffer likewise
       ;; restores the buffer only if it is live).
+      (romacs--set-command-keys outer-keys)
       (setq current-prefix-arg outer-prefix prefix-arg nil
             minibuffer-default outer-default romacs--minibuf-level outer-level
             current-minibuffer-command outer-command
             romacs--minibuf-selected-window outer-selected
             romacs--minibuf-prompts outer-prompts romacs--minibuf-loop-levels outer-loop-levels
-            romacs--command-keys outer-keys
             minibuffer-history-variable outer-history-variable
             minibuffer-history-position outer-history-position
             minibuffer-completing-file-name outer-completing-file-name)

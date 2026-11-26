@@ -15,10 +15,6 @@
 ;; session no process has loaded gets its row from its manifest and kept
 ;; state (`romacs-agent-store-fill'), no journal read: a batch process
 ;; does it once (`romacs-agent-store-fill-soon').
-;;
-;; It also keeps which projects the board shows folded (`board_folds'),
-;; the one thing in it no record holds: a table of its own, kept when the
-;; sessions' table is made again; lost with the file, every project shows.
 
 ;;; Code:
 
@@ -87,6 +83,24 @@ has made it."
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (setq romacs-agent-store--db nil)
       (if queued (romacs-agent-store--open-to-read file) (romacs-agent-store--open-to-write file)))))
+
+(define-error 'romacs-agent-store-unread "The agents' store could not be read")
+
+(defun romacs-agent-store--readable (what &optional listing)
+  "The store opened to read, or nil when there is none.  A store there
+that will not open (of another version until the writer makes it again,
+a lock timed out) signals `romacs-agent-store-unread' with WHAT, naming
+what was read: unread rows are never taken for no rows.  For a LISTING
+(which sessions have rows), so does one the editor's writer is still to
+make: absent there is not yet, not none, and a start waits for it."
+  (or (condition-case err (romacs-agent-store--open)
+        (error (signal 'romacs-agent-store-unread (list what (error-message-string err)))))
+      ;; There unless known absent: a link to one out of reach is there; a
+      ;; lookup that fails is no proof of absence.
+      (when (or (and listing (romacs-agent-writer-queued-p))
+                (condition-case err (file-attributes (romacs-agent-store--file))
+                  (error (signal 'romacs-agent-store-unread (list what (error-message-string err))))))
+        (signal 'romacs-agent-store-unread (list what "the store could not be opened")))))
 
 (defconst romacs-agent-store-patient 60000
   "The milliseconds a process off the editor waits for the store's lock:
@@ -394,9 +408,11 @@ manifest."
             :seq (let ((seq (plist-get state :seq))) (and (integerp seq) seq))))))
 
 (defun romacs-agent-store--missing ()
-  "The directories of recorded sessions that have no row."
+  "The directories of recorded sessions that have no row.  A store that
+cannot be read signals `romacs-agent-store-unread': its rows unknown,
+none is taken for missing."
   (let ((rows (make-hash-table :test #'equal)))
-    (when-let* ((db (romacs-agent-store--open)))
+    (when-let* ((db (romacs-agent-store--readable 'missing t)))
       (dolist (row (sqlite-select db "select id from sessions")) (puthash (car row) t rows)))
     (cl-remove-if (lambda (dir) (gethash (file-name-nondirectory dir) rows))
                   (and (file-directory-p (romacs-agent--state-root))
@@ -511,7 +527,9 @@ else every session with no row and every marked one, asked here."
     ;; What it said lost or cut short: asked here, the rows missing and
     ;; every marked session, one it marked before it stopped among them.
     (romacs-agent-store--load-missing
-     (append (mapcar #'file-name-nondirectory (romacs-agent-store--missing))
+     (append (mapcar #'file-name-nondirectory
+                     ;; Unread: none taken for missing, the marked alone.
+                     (ignore-error romacs-agent-store-unread (romacs-agent-store--missing)))
              ;; Its marks so far, known whole or not.
              (when-let* ((marked (romacs-agent--marked t))) (hash-table-keys marked)))
      t)))
@@ -537,7 +555,7 @@ waited on (`romacs-agent--marks-reconcile').  Not SAID, every recorded
 session with no row, asked here."
   (let ((idle (null romacs-agent--restore-pending)))
     (dolist (dir (if said (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)
-                   (romacs-agent-store--missing)))
+                   (ignore-error romacs-agent-store-unread (romacs-agent-store--missing))))
       ;; One gone (a mark it left): nothing to load, nor to know as loaded.
       (unless (or (gethash (file-name-nondirectory dir) romacs-agent--sessions)
                   (not (file-directory-p dir))
@@ -556,8 +574,10 @@ or, as an editor's start restores (`romacs-agent-restore-soon'), one is
 coming, a batch fill running (`romacs-agent-store-fill-soon', started
 here the first time a row is missing).  A start with no rows then loads
 only the live and waiting sessions, the others shown as their rows land;
-one still missing a row after a fill is loaded as it is."
-  (when-let* ((db (romacs-agent-store--open)))
+one still missing a row after a fill is loaded as it is.  A store that
+cannot be read signals `romacs-agent-store-unread': a start then waits
+for it, never loading every session as unlisted."
+  (when-let* ((db (romacs-agent-store--readable dir t)))
     (or (and (sqlite-select db "select 1 from sessions where id = ?" (list (file-name-nondirectory dir))) t)
         (and romacs-agent--restoring (not noninteractive)
              (progn (unless (or romacs-agent-store--filled (process-live-p romacs-agent-store--filling))
@@ -772,28 +792,16 @@ none let it go (ITEM-ID nil: every one of ID's), here.  A failure signals."
           (t (sqlite-execute db "delete from queued where session = ?" (list id))))
     t))
 
-(define-error 'romacs-agent-store-unread "The agents' store could not be read")
-
 (defun romacs-agent-store-queued (id)
   "The messages kept waiting for the session ID names, in order; none when
 there is no store.  A store that cannot be read signals
 `romacs-agent-store-unread': unread rows are never taken for no rows."
-  (let* ((file (romacs-agent-store--file))
-         ;; An open that fails, a lock timed out say, is unread too.
-         (db (condition-case err (romacs-agent-store--open)
-               (error (signal 'romacs-agent-store-unread (list id (error-message-string err)))))))
-    (cond
-     (db (condition-case err
-             (mapcar (lambda (row) (apply #'romacs-agent-store--item-of row))
-                     (sqlite-select db "select id, position, item from queued where session = ? order by position"
-                                    (list id)))
-           (error (signal 'romacs-agent-store-unread (list id (error-message-string err))))))
-     ;; A store there that will not open is unread, not empty: there
-     ;; unless known absent (a link to one out of reach is there; a
-     ;; lookup that fails is no proof of absence).
-     ((condition-case err (file-attributes file)
-        (error (signal 'romacs-agent-store-unread (list id (error-message-string err)))))
-      (signal 'romacs-agent-store-unread (list id "the store could not be opened"))))))
+  (when-let* ((db (romacs-agent-store--readable id)))
+    (condition-case err
+        (mapcar (lambda (row) (apply #'romacs-agent-store--item-of row))
+                (sqlite-select db "select id, position, item from queued where session = ? order by position"
+                               (list id)))
+      (error (signal 'romacs-agent-store-unread (list id (error-message-string err)))))))
 
 (defun romacs-agent-store--unsure-text (id title texts)
   "What task ID (TITLE) is told of TEXTS, messages kept for it whose
@@ -878,28 +886,6 @@ one.  A cancelled task's is let go."
                                  (and (romacs-agent-store-queued (file-name-nondirectory (directory-file-name dir))) t)
                                (romacs-agent-store-unread t)))))
 
-;;; The board's folds
-
-(defun romacs-agent-store-folded ()
-  "The projects the board shows folded, their directories; nil when
-there is no database."
-  (when-let* ((db (romacs-agent-store--open)))
-    (condition-case err (mapcar #'car (sqlite-select db "select project from board_folds"))
-      (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
-
-(defun romacs-agent-store-fold (project folded)
-  "Keep PROJECT, a directory, FOLDED on the board or not, by the writer;
-quietly nothing when the database cannot be written."
-  (romacs-agent-write 'romacs-agent-store--fold-row (list project folded) nil (list 'fold project)))
-
-(defun romacs-agent-store--fold-row (project folded)
-  "Keep PROJECT FOLDED on the board or not, here.  A failure signals."
-  (let ((db (or (romacs-agent-store--open) (error "No agents store to keep the board's folds in"))))
-    (sqlite-execute db (if folded "insert or ignore into board_folds values (?)"
-                         "delete from board_folds where project = ?")
-                    (list project))
-    t))
-
 (defvar romacs-agent-store--titles (make-hash-table :test #'equal)
   "Each session id to the title its row was last asked to say.")
 
@@ -922,7 +908,8 @@ was asked for meanwhile."
   "Set the title in the row of the session ID names to TITLE, here, and
 nothing else of it.  A failure signals."
   (let ((db (or (romacs-agent-store--open) (error "No agents store to keep a title in"))))
-    (sqlite-execute db "update sessions set title = ? where id = ?" (list title id))
+    (sqlite-execute db "update sessions set rowid = (select max(rowid) + 1 from sessions),
+                       title = ? where id = ?" (list title id))
     t))
 
 (defun romacs-agent-store--settlement (dir)
@@ -936,7 +923,8 @@ nothing else of it.  A failure signals."
   "Project ID's settlement from DIR, preserving the rest of its row."
   (when-let* ((fields (romacs-agent-store--settlement dir))
               (db (or (romacs-agent-store--open) (error "No agents store to keep settlement"))))
-    (sqlite-execute db "update sessions set seen_seq = ?, settled_seq = ?, resume_time = ? where id = ?"
+    (sqlite-execute db "update sessions set rowid = (select max(rowid) + 1 from sessions),
+                       seen_seq = ?, settled_seq = ?, resume_time = ? where id = ?"
                     (append fields (list id)))
     fields))
 
@@ -1000,12 +988,20 @@ with REQUEST, or nil."
 
 (add-hook 'romacs-agent-kept-functions #'romacs-agent-store-put)
 (add-hook 'romacs-agent-requested-functions #'romacs-agent-store-requested)
-;; Restored: the rows of sessions recorded with none are made, off the editor.
-(add-hook 'romacs-agent-restored-hook #'romacs-agent-store-fill-soon)
+;; Restored: the rows of sessions recorded with none are made, off the
+;; editor, once a process: the sessions a fill finds load late, and their
+;; restore's hook runs again (`romacs-agent--restore-finish'), never a
+;; second fill on the first's heels.
+(defun romacs-agent-store--fill-at-restore ()
+  "Fill the store once this process, at its first restore."
+  (unless romacs-agent-store--filled (romacs-agent-store-fill-soon)))
+
+(add-hook 'romacs-agent-restored-hook #'romacs-agent-store--fill-at-restore)
 (defun romacs-agent-store-listed-ids ()
-  "The ids of the sessions with a row, as a table: one query, however many."
+  "The ids of the sessions with a row, as a table: one query, however many.
+A store that cannot be read signals `romacs-agent-store-unread'."
   (let ((table (make-hash-table :test #'equal)))
-    (when-let* ((db (romacs-agent-store--open)))
+    (when-let* ((db (romacs-agent-store--readable 'listed t)))
       (dolist (row (sqlite-select db "select id from sessions")) (puthash (car row) t table)))
     table))
 
@@ -1017,8 +1013,8 @@ with REQUEST, or nil."
 
 (defun romacs-agent-store-rows-since (place)
   "(IDS . PLACE): the ids of the sessions whose rows were written after
-PLACE (a rowid: a row written again takes a new one), nil for none yet,
-and the place after them; nil with no listing to ask."
+PLACE, and the place after them.  Inserts, replacements and updates
+take a new rowid.  Nil PLACE starts at the end; nil result means no listing."
   (when-let* ((db (romacs-agent-store--open)))
     (if (null place)
         (cons nil (or (caar (sqlite-select db "select max(rowid) from sessions")) 0))

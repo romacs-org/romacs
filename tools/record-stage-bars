@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Measure and record display or render stage bars on beta."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+STAGES = ROOT / 'crates/romacs-vm-gui/harness'
+
+
+def tightened(current: dict, draft: dict, kind: str) -> dict:
+    """Retain existing coverage and any tighter limit."""
+    rows = {name: dict(figures) for name, figures in draft.items()}
+    for name, figures in current.items():
+        recorded = rows.setdefault(name, {})
+        for figure, before in figures.items():
+            after = recorded.get(figure)
+            if after is None or isinstance(before, str):
+                recorded[figure] = before
+            elif type(before) in (int, float):
+                limit = max if kind == 'render' and figure == 'rows_reused' else min
+                recorded[figure] = limit(before, after)
+    return rows
+
+
+def publish(bars: Path, draft: Path, kind: str) -> bool:
+    """Replace BARS when at least one figure changed."""
+    current = json.loads(bars.read_text())
+    updated = tightened(current, json.loads(draft.read_text()), kind)
+    if updated == current:
+        return False
+    with tempfile.NamedTemporaryFile('w', dir=bars.parent, prefix=f'.{bars.name}.', delete=False) as output:
+        path = Path(output.name)
+        try:
+            output.write(json.dumps(updated, indent=1) + '\n')
+            output.close()
+            path.chmod(stat.S_IMODE(bars.stat().st_mode))
+            path.replace(bars)
+        finally:
+            path.unlink(missing_ok=True)
+    return True
+
+
+def measure(kind: str, bars: Path, target: Path, work: Path, env: dict[str, str]) -> None:
+    """Build the GUI and write the harness draft in WORK."""
+    env = dict(env, CARGO_TARGET_DIR=str(target), ROMACS_RUNTIME_ROOT=str(ROOT), PYTHONDONTWRITEBYTECODE='1')
+    paths = (env['ROMACS_TOOLCHAIN_BIN'], env.get('ROMACS_DISPLAY_TOOLS'),
+             os.path.dirname(env['ROMACS_TEST_LABWC']), env.get('PATH', os.defpath))
+    env['PATH'] = os.pathsep.join(path for path in paths if path)
+    env.pop('ROMACS_HARNESS_WLR_ENV', None)
+    env.pop('ROMACS_LISP_DIR', None)
+    build = ['cargo', 'build', '--profile', 'gate', '--locked', '--offline', '-p', 'romacs-vm-gui',
+             '--bin', 'romacs-vm-gui']
+    record = [sys.executable, '-B', str(STAGES / f'{kind}_stages_live.py'), '--binary', str(target / 'gate/romacs-vm-gui'),
+              '--output', str(work / 'report'), '--bars', str(bars), '--write-bars', str(work / 'draft.json')]
+    for command in (build, record):
+        subprocess.run(command, cwd=ROOT, env=env, check=True, stdin=subprocess.DEVNULL)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('kind', choices=('display', 'render'))
+    kind = parser.parse_args().kind
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(STAGES))
+    from display_stages_live import bar_writer_allowed
+
+    if not bar_writer_allowed(ROOT):
+        parser.error('recording stage bars requires beta or FORGE_TRUNK_JOB=1')
+    for name in ('ROMACS_TOOLCHAIN_BIN', 'ROMACS_TEST_LABWC', 'CARGO_TARGET_DIR'):
+        if not os.environ.get(name):
+            parser.error(f'set {name} for the recorder')
+    target = Path(os.environ['CARGO_TARGET_DIR']).resolve()
+    bars = STAGES / f'{kind}_stages_bars.json'
+    try:
+        with tempfile.TemporaryDirectory(prefix=f'romacs-{kind}-bars-') as work:
+            measure(kind, bars, target, Path(work), dict(os.environ))
+            changed = publish(bars, Path(work) / 'draft.json', kind)
+    except subprocess.CalledProcessError as error:
+        return error.returncode if error.returncode > 0 else 1
+    except (OSError, ValueError) as error:
+        print(f'record-stage-bars: {error}', file=sys.stderr)
+        return 1
+    print(f'{bars.relative_to(ROOT)} {"updated" if changed else "unchanged"}')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -66,8 +66,9 @@ fn romacs_native_stack_room(_cx) {
 
 // Microseconds the first redisplay after the last mark took on the evaluator: the
 // frame's snapshot, its layout and, when it has one, the submission of its paint (a
-// prompt's paint waits for its render too); nil before one ran, or with no mark.  With MARK
-// non-nil, return that and set a new mark.
+// prompt's paint waits for its render too), or the redisplay trigger's check that found
+// the frame current; nil before one ran, or with no mark.  With MARK non-nil, return that
+// and set a new mark.
 defsubr! { name = "romacs--redisplay-since-mark", gnu = "romacs:profiler", effect = Global,
 fn romacs_redisplay_since_mark(cx; optional mark: Value) {
     // Microseconds the first redisplay after the last mark took on the

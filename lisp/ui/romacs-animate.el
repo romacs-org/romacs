@@ -303,6 +303,11 @@ shown; ID stops when BUFFER is killed."
   (unless romacs-animate--animations (romacs-animate--watch nil))
   (romacs-animate--wake))
 
+(defun romacs-animate-buffer (id)
+  "The buffer animation ID animates, or nil when ID is not running."
+  (let ((animation (romacs-animate--get id)))
+    (and animation (romacs-animate--slot animation :buffer))))
+
 (defun romacs-animate-pause (id)
   "Hold animation ID at its current frame."
   (let ((animation (romacs-animate--get id)))

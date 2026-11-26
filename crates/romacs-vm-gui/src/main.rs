@@ -4,7 +4,7 @@ use romacs_display_protocol::submission::{SubmissionReceipt, SubmittedWindow};
 use romacs_display_runtime::paint_host::{PaintHost, PaintSender};
 use romacs_display_runtime::render_thread::DisplaySelection;
 use romacs_display_runtime::thread_comm::InputEvent;
-use romacs_vm::Vm;
+use romacs_vm::{Vm, cursor_colour, placed_animations};
 use serde_json::{Value as Json, json};
 use std::io::{BufRead, Write};
 use std::time::Instant;
@@ -30,6 +30,7 @@ fn diagnostic_line(value: &serde_json::Value) {
 use romacs_vm_gui::{command, echo, fonts, grammars, loading, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
 mod latency;
 mod title;
+mod trigger;
 mod prompt;
 mod batch;
 mod user_init;
@@ -148,9 +149,25 @@ mod native_wake_tests {
         vm.set_terminal_host(Some(Box::new(SlowDrain(drain)))).unwrap();
         vm.eval_source("(defun romacs-process-dispatch-ready () (setq dispatched (romacs--process-ready)))
                         (romacs--process-start '(\"sleep\" \"0.2\") \"\" \"/\" 5)").unwrap();
-        assert!(super::service_native(&mut vm).unwrap());
+        let native = super::service_native(&mut vm).unwrap();
+        assert!(native.shown && native.ran, "a non-nil dispatch asks for a frame");
         assert_eq!(vm.eval_source("dispatched").unwrap().display().unwrap(), "(1)");
         assert!(!vm.background_processes_ready());
+    }
+
+    /// A callback that returns nil still ran: the redisplay trigger asks
+    /// whether what it did left the frame stale.
+    #[test]
+    fn a_nil_dispatch_still_ran() {
+        let mut vm = romacs_vm::Vm::new();
+        let (completed, done) = channel();
+        let completed = std::sync::Mutex::new(completed);
+        vm.set_background_wake(std::sync::Arc::new(move || { let _ = completed.lock().unwrap().send(()); }));
+        vm.eval_source("(defun romacs-process-dispatch-ready () (romacs--process-ready) nil)
+                        (romacs--process-start '(\"true\") \"\" \"/\" 5)").unwrap();
+        done.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+        let native = super::service_native(&mut vm).unwrap();
+        assert!(native.ran && !native.shown, "ran, and asked for no frame itself");
     }
 }
 
@@ -490,6 +507,35 @@ mod frame_tests {
         }
     }
 
+    /// A frame differing only in its status bar (the global mode line) or
+    /// its tab bar paints differently: a bar's text or face alone repaints.
+    #[test]
+    fn a_frame_band_alone_repaints() {
+        use romacs_layout_input::{StatusBarSnapshot, TabBarSnapshot, TextSlice};
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let painted = super::frame(&mut vm, false, 1200, 800).unwrap();
+        let text = |utf8: &str| TextSlice { extends: vec![], utf8: utf8.into(), face_runs: vec![], raw: vec![] };
+        let bar = |utf8: &str| Some(StatusBarSnapshot { x: 0, y: 760, width: 1200, height: 20, text: text(utf8),
+            face: Default::default(), faces: vec![], window: 1, focused: true, marks: Default::default() });
+        let tabs = |utf8: &str| Some(TabBarSnapshot { height: 20, text: text(utf8), face: Default::default(), faces: vec![] });
+        let mut base = (*painted.snapshot).clone();
+        (base.status_bar, base.tab_bar) = (bar(" main.rs  L1"), tabs("*scratch*"));
+        let changes: [fn(&mut romacs_layout_input::FrameSnapshot); 4] = [
+            |f| f.status_bar.as_mut().unwrap().text.utf8 = " main.rs  L2".into(),
+            |f| f.status_bar = None,
+            |f| f.tab_bar.as_mut().unwrap().text.utf8 = "*Messages*".into(),
+            |f| f.tab_bar = None,
+        ];
+        assert!(super::frames_alike(&base, &base.clone()));
+        for change in changes {
+            let mut other = base.clone();
+            change(&mut other);
+            assert!(!super::frames_alike(&base, &other));
+        }
+    }
+
     /// Selecting the buffer a window already shows resets its end, though its
     /// frame stays equal; keeping the paint must keep `window-end' too.
     #[test]
@@ -542,6 +588,8 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
         && a.font_alternatives == b.font_alternatives && a.fontsets == b.fontsets && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
         && a.no_font == b.no_font
         && a.chrome == b.chrome
+        // The frame's own bands: the global mode line and the tab bar.
+        && a.status_bar == b.status_bar && a.tab_bar == b.tab_bar
         && windows_alike(&a.windows, &b.windows)
         && a.children.len() == b.children.len()
         && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha, a.radius)
@@ -662,6 +710,9 @@ fn main() {
         // So nothing touches it concurrently.
         unsafe { std::env::set_var("RADV_PERFTEST", perftest) };
     }
+    // Its workers, and itself as one, are this build (`ROMACS_BUILD_ID`,
+    // build.rs): a worker whose hello names another is refused.
+    romacs_vm::isolate_set_build_id(env!("ROMACS_BUILD_ID"));
     // A session's every end says why (exit.rs); other modes keep their own.
     let end = match std::panic::catch_unwind(run) {
         Ok(Ok(None)) => return,
@@ -891,6 +942,9 @@ fn run() -> Result<Option<exit::Exit>, String> {
     }
     let title = if live { "romacs — VM" } else { "VM G1a" };
     let (mut host, sender) = PaintHost::new(&display, width, height, title.into(), serve.is_some())?;
+    // X11 window managers place the default size as asked, larger than a
+    // small screen: with no size given, it fills the screen instead.
+    if live && geometry.is_none() && display.wayland_socket().is_none() { host.maximize_primary(); }
     // A live session's C-g quits a busy evaluator out of band (quit.rs).
     let quit = live.then(|| std::sync::Arc::new(romacs_vm::QuitSignal::new()));
     if let Some(quit) = &quit { host.set_input_interrupt(std::sync::Arc::new(quit::QuitHook(quit.clone()))); }
@@ -1320,25 +1374,6 @@ fn steady_cursors(frame: &mut romacs_display_protocol::FrameGlyphBuffer, childre
 /// Lay out and submit a frame for a prompt waiting inside a command
 /// (prompt.rs). The same cursor policy as `paint`; no VM access, because the
 /// evaluator is suspended in Lisp and redisplay already ran in its own engine.
-/// The cursor's colour: the frame's `cursor-color', which SNAPSHOT carries.
-fn cursor_colour(snapshot: &romacs_layout_input::FrameSnapshot) -> romacs_display_protocol::Color {
-    let [r, g, b] = snapshot.chrome.cursor.unwrap_or_default();
-    romacs_display_protocol::Color::from_pixel(u32::from_be_bytes([0, r, g, b]))
-}
-
-/// ANIMATIONS on the rows ENDS laid their windows out in: an anchored one
-/// (a working thread) on the row its anchor is laid on, and dropped where
-/// no laid row shows it; any other as it is.
-fn placed_animations(animations: &[(u64, romacs_display_protocol::text_animation::TextAnimation)],
-                     ends: &[romacs_vm::WindowEnd]) -> Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)> {
-    animations.iter().filter_map(|(id, animation)| {
-        if animation.anchor.is_none() { return Some((*id, animation.clone())); }
-        let end = ends.iter().find(|end| end.id == animation.window)?;
-        let rows: Vec<(usize, f32, f32)> = end.rows.iter().map(|row| (row.start, row.y, row.height)).collect();
-        animation.placed(&rows, end.end, end.origin_y).map(|placed| (*id, placed))
-    }).collect()
-}
-
 fn paint_prompt(
     engine: &mut romacs_layout::LayoutEngine,
     sender: &PaintSender,
@@ -1421,6 +1456,26 @@ fn tracked(event: InputEvent, delivery: Option<romacs_display_protocol::input_pr
     match delivery {
         Some(delivery) => InputEvent::Tracked { event: Box::new(event), delivery },
         None => event,
+    }
+}
+
+/// A live redisplay cycle ended: SUBMITTED, its paint's snapshot start and
+/// time and presentation, now in flight for LIVE and traced with TIMINGS;
+/// or None, the frame on screen unchanged.
+fn cycle_ended(submitted: Option<(Instant, u128, u64)>, live: &mut presentation::Presentation, vm: &mut Vm,
+               host: &std::cell::RefCell<prompt::Shared>, timings: &mut Option<latency::Paint>) {
+    let Some((snapshot_start, snapshot_ns, presentation)) = submitted else {
+        live.unchanged();
+        vm.typing_unchanged();
+        return;
+    };
+    live.submitted(presentation, Instant::now());
+    if let Some(trace) = &mut host.borrow_mut().trace {
+        trace.submitted(presentation, timings.take().expect("traced paint"), snapshot_start, snapshot_ns);
+    }
+    if tracing() {
+        crate::diagnostic_line(&json!({"diagnostic":"latency-snapshot","presentation":presentation,
+            "units":"ns","snapshot_ns":snapshot_ns}));
     }
 }
 
@@ -1710,6 +1765,7 @@ fn evaluate(
               if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?
     };
     title::consider(&mut vm, sender, &host);
+    let mut trigger = trigger::Trigger::new(&mut vm, host.borrow().window_shown())?;
     let mut live_presentation = presentation::Presentation::new();
     if live && host.borrow().window_shown() {
         // In flight, drawn or not: the loop retires it when it sees it drawn
@@ -1733,8 +1789,9 @@ fn evaluate(
             terminate(&mut vm, &host, Lent { live: &mut live_presentation, width: &mut width, height: &mut height })?;
             // Background callbacks are Lisp the loop runs, and may prompt.
             let lent = Lent { live: &mut live_presentation, width: &mut width, height: &mut height };
-            let (changed, closed) = lent.run(&host, |_| service_native(&mut vm));
-            if changed? { live_presentation.changed(); }
+            let (native, closed) = lent.run(&host, |_| service_native(&mut vm));
+            let native = native?;
+            if native.shown || native.ran { trigger.after_lisp(&mut vm, native.shown, &mut live_presentation, &previous, sender, &host)?; }
             if closed && close_window(&mut vm, &host, Lent { live: &mut live_presentation, width: &mut width, height: &mut height })? {
                 return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
             }
@@ -1850,6 +1907,7 @@ fn evaluate(
                 key.map(Some)
             };
             if let Some(first) = translated {
+                trigger.command();
                 let outcome = if live {
                     let lent = Lent { live: &mut live_presentation, width: &mut width, height: &mut height };
                     vm.enter_busy();
@@ -1957,35 +2015,27 @@ fn evaluate(
                 // such as show-paren's runs after every key.
                 let lost = images.borrow().must_repaint(sender.as_ref());
                 let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation(), lost)? else {
+                    trigger.accept(&mut vm, None)?;
                     vm.redisplay_done(snapshot_start.elapsed());
                     return Ok(None)
                 };
+                trigger.changed(&mut vm, &live_presentation);
                 let presentation = next_presentation(&host)?;
                 previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &host, Wait::No, &mut paint_timings)?;
+                trigger.accept(&mut vm, Some(&*previous.frame.snapshot))?;
                 // The evaluator's part: the frame's snapshot, layout and
                 // submission; the render thread draws it meanwhile.
                 vm.redisplay_done(snapshot_start.elapsed());
                 Ok(Some((snapshot_start, snapshot_ns, presentation)))
             }) {
-                if let Some((snapshot_start, snapshot_ns, presentation)) = result? {
-                    live_presentation.submitted(presentation, Instant::now());
-                    if let Some(trace) = &mut host.borrow_mut().trace {
-                        trace.submitted(presentation, paint_timings.take().expect("traced paint"), snapshot_start, snapshot_ns);
-                    }
-                    if tracing() {
-                        crate::diagnostic_line(&json!({"diagnostic":"latency-snapshot","presentation":presentation,
-                            "units":"ns","snapshot_ns":snapshot_ns}));
-                    }
-                } else {
-                    live_presentation.unchanged();
-                    vm.typing_unchanged();
-                }
+                cycle_ended(result?, &mut live_presentation, &mut vm, &host, &mut paint_timings);
             }
             settle_typing(vm.take_typing_outcomes(), &mut host.borrow_mut().trace);
             if vm.deferred_parse_done() { live_presentation.changed(); }
             if queue(&host).is_empty() && sender.input().is_empty() {
                 // read_char: with no key to read, idle and run ripe timers;
-                // after any ran, redisplay and check again before blocking.
+                // after any ran, check again before blocking, redisplaying
+                // if it left the frame stale (trigger.rs).
                 // A timer may read input (`read-event' with a timeout, a
                 // prompt) as a command may, so it gets the same handoff.
                 let auto_save = retired || live_presentation.in_flight().is_none()
@@ -2006,9 +2056,10 @@ fn evaluate(
                     let _ = echo::show(&mut vm, &format!("Timer: {error}"));
                     timers::Idle { ran: true, message: false, delay: None }
                 });
+                // After any ran, check again before blocking.
                 if idle.ran || idle.message {
                     if idle.message { echo::sync_current_message(&mut vm)?; }
-                    live_presentation.changed();
+                    trigger.after_lisp(&mut vm, idle.message, &mut live_presentation, &previous, sender, &host)?;
                     continue;
                 }
                 // An event the idle pass took from the channel to see it
@@ -2136,19 +2187,30 @@ impl Lent<'_> {
     }
 }
 
+/// What servicing native work did (`service_native`).
+struct Native {
+    /// A terminal's output changed a displayed buffer, or a background
+    /// callback returned non-nil (lisp/vm/process.el): a frame is due.
+    shown: bool,
+    /// Background callbacks ran: whatever they returned, the redisplay
+    /// trigger asks whether they left the frame stale.
+    ran: bool,
+}
+
 /// Native work that woke the wait: terminal output, then completed background
 /// commands. Draining the shared wake first means a completion that lands
 /// after the drain signals the next wait, and one before it is dispatched
-/// here. Whether a displayed buffer changed.
-fn service_native(vm: &mut Vm) -> Result<bool, String> {
-    let mut changed = vm.poll_terminal_output()?;
+/// here.
+fn service_native(vm: &mut Vm) -> Result<Native, String> {
+    let mut native = Native { shown: vm.poll_terminal_output()?, ran: false };
     if vm.background_processes_ready() {
+        native.ran = true;
         match vm.eval_source("(if (fboundp 'romacs-process-dispatch-ready) (romacs-process-dispatch-ready) (progn (romacs--process-ready) nil))") {
-            Ok(value) => changed |= !value.is_nil(),
-            Err(error) => { echo::show(vm, &format!("Background command: {error}"))?; changed = true; },
+            Ok(value) => native.shown |= !value.is_nil(),
+            Err(error) => { echo::show(vm, &format!("Background command: {error}"))?; native.shown = true; },
         }
     }
-    Ok(changed)
+    Ok(native)
 }
 
 /// END, once the session's processes and window are shut down.

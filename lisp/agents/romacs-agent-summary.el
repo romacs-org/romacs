@@ -31,6 +31,7 @@
 
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
 (declare-function romacs-agent-tools--wake-rule "romacs-agent-tools" (child))
+(declare-function romacs-agent-tools--wanted-p "romacs-agent-tools" (session seq &optional summary))
 (declare-function romacs-agent-store-unloaded-rows "romacs-agent-store" (&optional parent))
 (declare-function romacs-agent-store-row "romacs-agent-store" (id))
 (declare-function romacs-agent-store-row-parent "romacs-agent-store" (row))
@@ -73,9 +74,10 @@
   ;; its end wakes its parent (`romacs-agent-tools--wake-rule'); its last
   ;; end at its instance's usage limit, the move to another account aside.
   ;; Where it could go on from there is read when asked, never kept
-  ;; (`romacs-agent-summary-alternatives').
+  ;; (`romacs-agent-summary-alternatives').  Whether its last end still
+  ;; waits to be delivered to its parent (`romacs-agent-tools--wanted-p').
   plan-offer-waits turns reply cancelled role worktree branch conversation
-  requested-model wake-rule limited)
+  requested-model wake-rule limited undelivered)
 
 (defun romacs-agent-summary--plain (value)
   "VALUE with every string in it, at any depth, without text properties:
@@ -260,6 +262,14 @@ its user: as data, its reply shared, not copied
           (romacs-agent-summary-limited summary)
           (romacs-agent-summary--plain (romacs-agent--without (romacs-agent-limited session) '(:moving :moving-since)))
           (romacs-agent-summary-reply summary) (romacs-agent-summary--shared (romacs-agent-reply session)))
+    ;; Its cancellation read first, above.
+    ;; Of the ends it keeps for its parent alone: a seq a note advanced is
+    ;; none, and one with no ends kept reads no file.
+    (setf (romacs-agent-summary-undelivered summary)
+          (and (plist-get options :parent)
+               (cl-some (lambda (end) (romacs-agent-tools--wanted-p session (car end) summary))
+                        (romacs-agent-ends session))
+               t))
     summary))
 
 (defvar romacs-agent-summary--made-under nil

@@ -2668,12 +2668,6 @@ here at keypress time."
       (keymap-set map key cmd))
     map))
 
-(defun keymap-popup-active-p ()
-  "Return non-nil while a popup is open: shown, its keys active, and not
-closing.  Code that waits for the user to be done with popups, as a
-function on `keymap-popup-exit-hook' may, can ask this."
-  (and (keymap-popup--popup-buffer) t))
-
 (defun keymap-popup-dismiss ()
   "Dismiss the active popup, if any.
 Deactivates every transient map in a nested popup session and

@@ -58,6 +58,9 @@ kurbo.workspace = true
 romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }
 romacs-infra.workspace = true
 png.workspace = true
+# Pane pictures laid out as an owner lays them out (render_pass/tests/panes_test.rs).
+romacs-layout = { path = "../romacs-layout" }
+romacs-layout-input = { path = "../romacs-layout-input" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 smithay-clipboard.workspace = true

@@ -14,7 +14,7 @@
 //! compiler's version and the environment native builds read (`CC`,
 //! `CFLAGS`, the bundled `SQLite`'s `SQLITE_*`). The libraries the process loads are not known here:
 //! the embedder hashes them at run time, as the world store does.
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 
@@ -117,6 +117,9 @@ fn cc_variants(target: &str, host: &str) -> Vec<String> {
     names
 }
 
+#[path = "../romacs-vm/runtime_epoch_build.rs"]
+mod runtime_epoch_build;
+
 fn main() {
     let workspace = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
     let workspace = workspace.canonicalize().unwrap();
@@ -134,7 +137,7 @@ fn main() {
     inputs.dedup();
     inputs.push(PathBuf::from("Cargo.lock"));
     inputs.push(PathBuf::from("Cargo.toml"));
-    let mut hash = Sha256::new();
+    let mut hash = runtime_epoch_build::build_hash(&workspace);
     for relative in &inputs {
         let path = workspace.join(relative);
         println!("cargo:rerun-if-changed={}", path.display());

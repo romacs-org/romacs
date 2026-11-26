@@ -230,7 +230,7 @@ impl RenderApp {
                     self.cancel_gpu_startup();
                     self.frame_windows
                         .reject_ready(emacs_frame_id, "Native frame creation cancelled");
-                    self.frame_windows.take_primary_window();
+                    self.take_primary_window();
                     self.frame_windows.clear_primary_mapping();
                 } else if self.frame_windows.get(emacs_frame_id).is_some() {
                     self.frame_windows.request_destroy(emacs_frame_id);

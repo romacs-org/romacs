@@ -296,6 +296,357 @@ state root that has said two things, its writes to its harness in
       (accept-process-output nil 0.2)
       (should (= relaunched 1)))))
 
+(defmacro romacs-agent-renew-tests--switching (&rest body)
+  "BODY in `romacs-agent-renew-tests--with' a claude session, a codex
+instance configured beside it."
+  (declare (indent 0))
+  `(romacs-agent-renew-tests--with 'claude
+     (let ((romacs-agent-providers (mapcar (lambda (name) (let ((dir (expand-file-name name root)))
+                                                            (make-directory dir t)
+                                                            (cons name dir)))
+                                           '("claude" "codex"))))
+       ;; Its records in SQLite, as every session's is once imported.
+       (puthash (romacs-agent-id session) t romacs-agent-events--imported)
+       (romacs-agent-renew-tests--journal
+        session (romacs-agent-renew-tests--prompt 5 "build the parser")
+        (romacs-agent-renew-tests--reply "u1" "the parser is built")
+        (romacs-agent-renew-tests--prompt 9 "now its tests")
+        (romacs-agent-renew-tests--reply "u2" "its tests pass"))
+       ,@body)))
+
+(defun romacs-agent-renew-tests--ran-on (session harness)
+  "SESSION's next run's note, naming HARNESS, as its supervisor journals it."
+  (let ((record (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "t" 99.0
+                                    "note" (romacs-mcp--object "type" "run" "harness" harness))))
+    (romacs-agent-renew-tests--append session record)
+    (romacs-agent--record session record)))
+
+(defun romacs-agent-renew-tests--switch (session provider &optional model)
+  "`romacs-agent-switch-harness''s outcome, waited for."
+  (let ((outcome nil) (end (+ (float-time) 30)))
+    (romacs-agent-switch-harness session provider model nil "carry on" (lambda (result) (setq outcome result)))
+    (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05))
+    outcome))
+
+(ert-deftest romacs-agent-renew-switch-goes-on-in-the-same-session ()
+  ;; Another harness: the same session, its id and manifest, in a new
+  ;; conversation of that harness, briefed; nothing asked of the old one.
+  (romacs-agent-renew-tests--switching
+    (let ((id (romacs-agent-id session)))
+      (should (eq (car (romacs-agent-renew-tests--switch session "codex" "m2")) :done))
+      (should (= relaunched 1))
+      (should (equal (romacs-agent-id session) id))
+      (should (eq (romacs-agent-harness session) 'codex))
+      (should (equal (romacs-agent-provider session) "codex"))
+      (should (equal (plist-get (romacs-agent-options session) :model) "m2"))
+      (should (string-match-p "the parser is built" (romacs-agent-brief session)))
+      (let ((note (car (romacs-agent-renew-tests--notes session)))
+            (manifest (romacs-agent-renew-tests--manifest session)))
+        (should (equal (gethash "harness" note) "codex"))
+        (should (equal (gethash "continue" note) "carry on"))
+        (should (equal (gethash "harness" manifest) "codex"))
+        (should (equal (gethash "startHarness" manifest) "claude"))
+        (should (equal (gethash "provider" manifest) "codex")))
+      ;; Its chat says where it went.
+      (should (equal (plist-get (romacs-agent--record-note-event (car (romacs-agent-renew-tests--notes session))) :provider)
+                     "codex")))))
+
+(ert-deftest romacs-agent-renew-switch-replays-each-record-under-its-harness ()
+  ;; Read again from the first record, as a restart with no kept state
+  ;; does: under the harness it began in until the next run's note names
+  ;; another, whatever the old run journaled after the switch's note.
+  (romacs-agent-renew-tests--switching
+    (romacs-agent-renew-tests--switch session "codex")
+    (let ((exit (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "t" 98.0
+                                    "note" (romacs-mcp--object "type" "exit" "status" 0))))
+      (romacs-agent-renew-tests--append session exit)
+      (romacs-agent--record session exit))
+    (romacs-agent-renew-tests--ran-on session "codex")
+    (let* ((dir (romacs-agent-dir session))
+           (copy (romacs-agent--of-manifest dir (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
+           (seen nil))
+      (should (eq (romacs-agent-harness copy) 'claude))
+      (romacs-agent--read-journal copy (lambda (record)
+                                         (romacs-agent--record copy record)
+                                         (push (cons (gethash "seq" record) (romacs-agent-harness copy)) seen)))
+      (should (eq (romacs-agent-harness copy) 'codex))
+      ;; The old run's exit after the note is still claude's.
+      (should (eq (cdr (nth 1 seen)) 'claude))
+      (should (eq (cdr (car seen)) 'codex))
+      ;; A replay copy from the first record reads it under the harness
+      ;; that began it.
+      (let ((scratch (romacs-agent--scratch session)))
+        (romacs-agent--record scratch (car (romacs-agent--journal-records session)))
+        (should (eq (romacs-agent-harness scratch) 'claude))))))
+
+(ert-deftest romacs-agent-renew-switch-kept-state-holds-its-harness ()
+  ;; The kept state is the fold as of its seq: its harness with it.
+  (should-not (memq 'harness romacs-agent--unkept))
+  (romacs-agent-renew-tests--switching
+    (romacs-agent-renew-tests--switch session "codex")
+    (romacs-agent-renew-tests--ran-on session "codex")
+    (let* ((dir (romacs-agent-dir session))
+           (copy (romacs-agent--of-manifest dir (romacs-agent--read-json (expand-file-name "manifest.json" dir)))))
+      (setf (romacs-agent-driver copy) (romacs-agent--driver-of 'claude))
+      (cl-letf (((symbol-function 'romacs-agent--read-kept)
+                 (lambda (_) (list :version romacs-agent--kept-version :seq (romacs-agent-seq session)
+                                   :fields (list (cons 'harness 'codex)))))
+                ((symbol-function 'romacs-agent--journal-after) (lambda (&rest _) 1)))
+        (should (eql (romacs-agent--restore-kept copy) 1)))
+      (should (eq (romacs-agent-harness copy) 'codex))
+      (should (eq (romacs-agent--driver copy) (romacs-agent--driver-of 'codex))))))
+
+(ert-deftest romacs-agent-renew-switch-refusals ()
+  (romacs-agent-renew-tests--switching
+    (should-error (romacs-agent-switch-harness session "claude") :type 'user-error)
+    (should-error (romacs-agent-switch-harness session "nowhere") :type 'user-error)
+    (setf (romacs-agent-state session) 'running)
+    (should (string-match-p "busy" (cadr (should-error (romacs-agent-switch-harness session "codex") :type 'user-error))))))
+
+(ert-deftest romacs-agent-renew-switch-soon-waits-for-the-turn-end ()
+  ;; A task switching itself mid-turn switches at that turn's end.
+  (romacs-agent-renew-tests--switching
+    (setf (romacs-agent-state session) 'running)
+    (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t)))
+      (should (eq (romacs-agent-switch-harness-soon session "codex") 'soon))
+      (should-not (romacs-agent-renew-tests--notes session))
+      (setf (romacs-agent-state session) 'idle)
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+      (let ((end (+ (float-time) 30)))
+        (while (and (= relaunched 0) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (= relaunched 1))
+      (should (eq (romacs-agent-harness session) 'codex)))))
+
+(ert-deftest romacs-agent-renew-switch-survives-the-launch-manifest ()
+  ;; The launch writes the whole manifest again: the harness its records
+  ;; began in, and an imported transcript's, stay.
+  (romacs-agent-renew-tests--switching
+    (setf (romacs-agent-imported session) (list :path "/t.jsonl" :size 3))
+    (romacs-agent-renew-tests--switch session "codex")
+    (romacs-agent--manifest session nil)
+    (let ((manifest (romacs-agent-renew-tests--manifest session)))
+      (should (equal (gethash "startHarness" manifest) "claude"))
+      (should (equal (gethash "harness" (gethash "imported" manifest)) "claude")))
+    ;; Back to where it began: still a switched session's records.
+    (setf (romacs-agent-harness session) 'claude)
+    (romacs-agent--manifest session nil)
+    (should (equal (gethash "startHarness" (romacs-agent-renew-tests--manifest session)) "claude"))))
+
+(ert-deftest romacs-agent-renew-switch-copies-start-under-their-records-harness ()
+  ;; A view replaying from the middle reads under the harness of the run
+  ;; it starts in.
+  (romacs-agent-renew-tests--switching
+    (let ((before (romacs-agent-seq session)))
+      (romacs-agent-renew-tests--switch session "codex")
+      (romacs-agent-renew-tests--ran-on session "codex")
+      (let ((after (romacs-agent-seq session)))
+        (should (eq (romacs-agent--harness-at session before) 'claude))
+        (should (romacs-agent-events-p session))
+        (progn
+          (should (eq (romacs-agent--harness-at session after) 'codex))
+          (let ((copy (romacs-agent-replay-copy session after)))
+            (romacs-agent--record copy (romacs-mcp--object "seq" (1+ after) "t" 1.0
+                                                           "note" (romacs-mcp--object "type" "x")))
+            (should (eq (romacs-agent-harness copy) 'codex))))))))
+
+(ert-deftest romacs-agent-renew-switch-leaves-a-cut-off-turn ()
+  ;; Cut off mid-turn (at its limit): the new harness starts a turn of its
+  ;; own, never steers one it does not have.
+  (romacs-agent-renew-tests--switching
+    (setf (romacs-agent-input-seq session) 9 (romacs-agent-completed-seq session) 4
+          (romacs-agent-interrupted session) t)
+    (should (eq (car (romacs-agent-renew-tests--switch session "codex")) :done))
+    (should-not (romacs-agent-input-seq session))
+    (should-not (romacs-agent--turn-under-way-p session))))
+
+(ert-deftest romacs-agent-renew-switch-drops-a-pending-selection ()
+  (romacs-agent-renew-tests--switching
+    (romacs-agent--manifest-put session "switch" (romacs-mcp--object "model" "old"))
+    (setf (romacs-agent-pending-selection session) (list :state 'armed :model "old"))
+    (romacs-agent-renew-tests--switch session "codex")
+    (should-not (romacs-agent-pending-selection session))
+    (should-not (gethash "switch" (romacs-agent-renew-tests--manifest session)))))
+
+(ert-deftest romacs-agent-renew-switch-launch-failure-keeps-its-ends ()
+  ;; A task that ran before keeps what it owes its parent when the new
+  ;; harness fails to start; one that never ran starts afresh.
+  (let ((forgot 0))
+    (cl-letf (((symbol-function 'romacs-agent-tools--forget-ends) (lambda (_) (cl-incf forgot))))
+      (romacs-agent-tools--on-event (romacs-agent--make :id "a" :driver-state (list :run 3)) '(:type unstarted))
+      (should (= forgot 0))
+      (romacs-agent-tools--on-event (romacs-agent--make :id "c" :renewing 9) '(:type unstarted))
+      (should (= forgot 0))
+      (romacs-agent-tools--on-event (romacs-agent--make :id "b") '(:type unstarted))
+      (should (= forgot 1)))))
+
+(ert-deftest romacs-agent-renew-switch-ends-the-cut-off-turns-row ()
+  ;; The turn the old harness was cut off in is a row of its own, ended
+  ;; interrupted, before the new harness's first prompt.
+  (let ((session (romacs-agent--make :id "s" :dir "/d")) (written nil)
+        (romacs-agent-turns--open (make-hash-table :test #'eq :weakness 'key)))
+    (cl-letf (((symbol-function 'romacs-agent-turns--write)
+               (lambda (s _seq) (push (plist-get (gethash s romacs-agent-turns--open) :done) written)
+                 (remhash s romacs-agent-turns--open))))
+      (romacs-agent-turns--event session '(:type input :seq 3 :text "go"))
+      (romacs-agent-turns--event session '(:type renewed :seq 7 :switch t))
+      (should (plist-get (car written) :interrupted))
+      (romacs-agent-turns--event session '(:type input :seq 9 :text "brief"))
+      (should (equal (plist-get (gethash session romacs-agent-turns--open) :first) 9)))))
+
+(ert-deftest romacs-agent-renew-switch-needs-its-records-in-sqlite ()
+  (romacs-agent-renew-tests--switching
+    (cl-letf (((symbol-function 'romacs-agent-events-p) #'ignore))
+      (should (string-match-p "database" (cadr (should-error (romacs-agent-switch-harness session "codex")
+                                                             :type 'user-error)))))))
+
+(ert-deftest romacs-agent-renew-switch-waits-for-a-starting-harness ()
+  (romacs-agent-renew-tests--switching
+    (setf (romacs-agent-startup-pending session) t)
+    (should (string-match-p "busy" (cadr (should-error (romacs-agent-switch-harness session "codex") :type 'user-error))))))
+
+(ert-deftest romacs-agent-renew-switch-scans-a-turn-from-its-renewal ()
+  ;; Records before a prompt: a renewal note between ends what came before.
+  (let ((session (romacs-agent--make :id "s" :harness 'claude)))
+    (should (romacs-agent--turn-free-records-p
+             session (romacs-agent--scratch session)
+             (list (romacs-mcp--object "seq" 5 "note" (romacs-mcp--object "type" "renew"))
+                   (romacs-mcp--object "seq" 4 "in" (romacs-mcp--object "romacsRequest" 1)))
+             nil))))
+
+(ert-deftest romacs-agent-renew-switch-copy-forgets-the-live-conversation ()
+  ;; A copy read under another harness than the live one never takes the
+  ;; live conversation for its records'.
+  (romacs-agent-renew-tests--switching
+    (romacs-agent-renew-tests--switch session "codex")
+    (romacs-agent-renew-tests--ran-on session "codex")
+    (setf (romacs-agent-harness-session session) "thread-new")
+    (let ((copy (romacs-agent--scratch session)))
+      (romacs-agent--record copy (car (romacs-agent--journal-records session)))
+      (should (eq (romacs-agent-harness copy) 'claude))
+      (should-not (romacs-agent-harness-session copy)))))
+
+(ert-deftest romacs-agent-renew-switch-is-finished-when-loaded ()
+  ;; Romacs ended after the switch's note: loaded with no supervisor, it
+  ;; goes on in the new harness before anything resumes the old one.
+  (romacs-agent-renew-tests--switching
+    (puthash (romacs-agent-id session) session romacs-agent--sessions)
+    (let ((note (romacs-mcp--object "seq" 50 "t" 50.0 "note"
+                                    (romacs-mcp--object "type" "renew" "from" "old" "to" :null "brief" "B"
+                                                        "harness" "codex" "provider" "codex"))))
+      (romacs-agent-renew-tests--append session note)
+      (romacs-agent--record session note))
+    (romacs-agent-renew--loaded session nil)
+    (should (= relaunched 1))
+    (should (eq (romacs-agent-harness session) 'codex))))
+
+(ert-deftest romacs-agent-renew-slash-commands-are-named-ones-only ()
+  ;; A defined name after its slash, alone or with words: a command.
+  ;; Anything else starting with a slash is a message.
+  (should (equal (car (romacs-agent-slash-command "/clear")) "clear"))
+  (should (equal (cddr (romacs-agent-slash-command "/clear  now please")) "now please"))
+  (should (equal (cddr (romacs-agent-slash-command "/clear\nmore")) "more"))
+  (should-not (romacs-agent-slash-command "/home/user/file.el"))
+  (should-not (romacs-agent-slash-command "/compact"))
+  (should-not (romacs-agent-slash-command "/clearly not"))
+  (should-not (romacs-agent-slash-command "please /clear")))
+
+(defun romacs-agent-renew-tests--submit (session text)
+  "SESSION's answer to a draft of TEXT, waited for."
+  (let ((answer nil) (end (+ (float-time) 30)))
+    (romacs-agent-submit (romacs-agent-id session)
+                         (list :draft-id (romacs-agent--uuid) :kind 'send :text text :attachments nil)
+                         (lambda (result) (setq answer result)))
+    (while (and (not answer) (< (float-time) end)) (accept-process-output nil 0.05))
+    answer))
+
+(ert-deftest romacs-agent-renew-slash-clear-starts-a-new-conversation ()
+  ;; /clear: the same session in a new conversation of its harness,
+  ;; nothing of the old one carried over, the draft never sent.
+  (romacs-agent-renew-tests--with 'claude
+    (puthash (romacs-agent-id session) session romacs-agent--sessions)
+    (let ((old (romacs-agent-harness-session session))
+          (answer (romacs-agent-renew-tests--submit session "/clear")))
+      (should (eq (plist-get answer :status) 'accepted))
+      (should (equal (plist-get answer :command) "clear"))
+      (should-not (romacs-agent-queue session))
+      (let ((end (+ (float-time) 30)))
+        (while (and (= relaunched 0) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (= relaunched 1))
+      (let ((note (car (romacs-agent-renew-tests--notes session))))
+        (should (equal (gethash "why" note) "clear"))
+        (should (equal (gethash "brief" note) "")))
+      (should-not (equal (romacs-agent-harness-session session) old))
+      (should-not (romacs-agent-brief session)))))
+
+(ert-deftest romacs-agent-renew-slash-clear-waits-for-the-turn ()
+  (romacs-agent-renew-tests--with 'claude
+    (puthash (romacs-agent-id session) session romacs-agent--sessions)
+    (setf (romacs-agent-state session) 'running)
+    (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t)))
+      (should (string-match-p "once this turn ends"
+                              (plist-get (romacs-agent-renew-tests--submit session "/clear") :message)))
+      (should-not (romacs-agent-renew-tests--notes session))
+      (setf (romacs-agent-state session) 'idle)
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+      (let ((end (+ (float-time) 30)))
+        (while (and (= relaunched 0) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (= relaunched 1))
+      (should (equal (gethash "why" (car (romacs-agent-renew-tests--notes session))) "clear"))
+      ;; Asked again mid-turn, then the harness ends: dropped, never run later.
+      (setf (romacs-agent-state session) 'running)
+      (romacs-agent-renew--release session (romacs-agent-renew--holder session))
+      (cl-letf (((symbol-function 'romacs-agent--held-p) #'ignore))
+        (romacs-agent-renew-tests--submit session "/clear"))
+      (should (equal (gethash session romacs-agent-renew--wanted) '(:clear)))
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type exit))
+      (should-not (gethash session romacs-agent-renew--wanted)))))
+
+(ert-deftest romacs-agent-renew-slash-clear-runs-once-a-draft ()
+  ;; The same draft sent again (a retry) gets the same answer, nothing
+  ;; cleared twice; other text under its id is a conflict.
+  (romacs-agent-renew-tests--with 'claude
+    (puthash (romacs-agent-id session) session romacs-agent--sessions)
+    (let* ((id (romacs-agent--uuid))
+           (send (lambda (text)
+                   (let ((answer nil) (end (+ (float-time) 30)))
+                     (romacs-agent-submit (romacs-agent-id session)
+                                          (list :draft-id id :kind 'send :text text :attachments nil)
+                                          (lambda (result) (setq answer result)))
+                     (while (and (not answer) (< (float-time) end)) (accept-process-output nil 0.05))
+                     answer)))
+           (first (funcall send "/clear")))
+      (should (equal (plist-get first :command) "clear"))
+      (let ((end (+ (float-time) 30)))
+        (while (and (= relaunched 0) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (equal (funcall send "/clear") first))
+      (should (eq (plist-get (funcall send "something else") :reason) 'conflict))
+      (accept-process-output nil 0.2)
+      (should (= relaunched 1))
+      (should (= (length (romacs-agent-renew-tests--notes session)) 1)))))
+
+(ert-deftest romacs-agent-renew-slash-clear-refusals ()
+  (romacs-agent-renew-tests--with 'claude
+    (puthash (romacs-agent-id session) session romacs-agent--sessions)
+    ;; With an image: refused, the draft kept for the user to change.
+    (let ((answer nil))
+      (romacs-agent-submit (romacs-agent-id session)
+                           (list :draft-id (romacs-agent--uuid) :kind 'interrupt :text "/clear"
+                                 :attachments (list (expand-file-name "x.png" root)))
+                           (lambda (result) (setq answer result)))
+      (let ((end (+ (float-time) 10))) (while (and (not answer) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (eq (plist-get answer :status) 'refused)))
+    ;; Held by another renewal, or starting: refused, never left to wait.
+    (cl-letf (((symbol-function 'romacs-agent--held-p) (lambda (_) t)))
+      (should (eq (plist-get (romacs-agent-renew-tests--submit session "/clear") :status) 'refused)))
+    ;; Starting, a turn not begun: refused, not left to wait.
+    (setf (romacs-agent-state session) 'starting)
+    (should (eq (plist-get (romacs-agent-renew-tests--submit session "/clear") :status) 'refused))
+    (setf (romacs-agent-state session) 'idle)
+    ;; A harness started afresh each turn: refused.
+    (cl-letf (((symbol-function 'romacs-agent--per-turn-p) (lambda (_) t)))
+      (should (eq (plist-get (romacs-agent-renew-tests--submit session "/clear") :status) 'refused)))
+    (should-not (romacs-agent-renew-tests--notes session))))
+
 (ert-deftest romacs-agent-renew-a-failed-write-keeps-the-brief ()
   (romacs-agent-renew-tests--with 'claude
     (romacs-agent-renew-tests--run session)

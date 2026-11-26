@@ -365,6 +365,11 @@ never two of one."
        ((eq type 'done)
         (when turn (plist-put turn :done event))
         (romacs-agent-turns--write session (or (plist-get event :seq) (romacs-agent-seq session))))
+       ;; A switch to another harness leaves a turn cut off there: its row
+       ;; ends here, interrupted, before the new harness's first prompt.
+       ((and turn (eq type 'renewed))
+        (plist-put turn :done (list :type 'done :interrupted t :reason "the session switched harness"))
+        (romacs-agent-turns--write session (or (plist-get event :seq) (romacs-agent-seq session))))
        (turn
         (romacs-agent-turns--item turn event)
         (when (eq type 'tool)
@@ -380,7 +385,10 @@ never two of one."
 (defun romacs-agent-turns--ended (session event)
   "A live turn's end: SESSION's rows are caught up a moment later, by a
 batch process (`romacs-agent-turns-fill-soon'), not here."
-  (when (and (eq (plist-get event :type) 'done) (romacs-agent-dir session)
+  (when (and (or (eq (plist-get event :type) 'done)
+                 ;; A switch ends the turn its old harness was cut off in.
+                 (and (eq (plist-get event :type) 'renewed) (plist-get event :switch)))
+             (romacs-agent-dir session)
              (eq (romacs-agent-loaded (romacs-agent-id session)) session))
     (unless romacs-agent-turns--due
       (run-with-timer 2 nil (lambda () (let ((ids romacs-agent-turns--due))
@@ -431,7 +439,9 @@ records to SQLite: the editor alone does."
         ;; Its queue is the editor's to restore and write, never this
         ;; process's: a snapshot written here could land over a newer one.
         (cl-letf (((symbol-function 'romacs-agent--attach) #'ignore))
-          (let ((romacs-agent-loaded-functions (remq 'romacs-agent-store--requeue romacs-agent-loaded-functions)))
+          ;; Nor its renewal's to finish: that launches a harness.
+          (let ((romacs-agent-loaded-functions (seq-difference romacs-agent-loaded-functions
+                                                               '(romacs-agent-store--requeue romacs-agent-renew--loaded))))
             (romacs-agent--load dir)))
         (when-let* ((session (romacs-agent-loaded (file-name-nondirectory dir))))
           ;; Whether records came since its rows is the records' to say: a
@@ -472,8 +482,19 @@ runs, once it ends."
                              (setq romacs-agent-turns--waiting nil)
                              (romacs-agent-turns-fill-soon (unless (eq waiting t) waiting))))))))))
 
-;; Restored: what ran while no editor was there gets its rows, off the editor.
-(add-hook 'romacs-agent-restored-hook #'romacs-agent-turns-fill-soon)
+;; Restored: what ran while no editor was there gets its rows, off the
+;; editor, once a process: a late load's run of the hook again fills
+;; nothing anew (a running session writes its own turns' rows).
+(defvar romacs-agent-turns--filled-at-restore nil
+  "Non-nil once this process's first restore asked its sessions' rows filled.")
+
+(defun romacs-agent-turns--fill-at-restore ()
+  "Fill the turns' rows once this process, at its first restore."
+  (unless romacs-agent-turns--filled-at-restore
+    (setq romacs-agent-turns--filled-at-restore t)
+    (romacs-agent-turns-fill-soon)))
+
+(add-hook 'romacs-agent-restored-hook #'romacs-agent-turns--fill-at-restore)
 
 ;;; Reading
 

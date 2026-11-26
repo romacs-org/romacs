@@ -160,7 +160,7 @@ impl RenderApp {
     /// and it rejoins only by presenting after exposure (design §6.2).
     pub(super) fn handle_window_occluded(&mut self, emacs_frame_id: u64, occluded: bool) {
         if let Some(window) = self.frame_windows.get_mut(emacs_frame_id) {
-            window.render.compositor.text_animations.occlude(occluded);
+            window.render.compositor.occlude_animations(occluded);
         }
         if occluded {
             self.note_models_window_hidden(emacs_frame_id);
@@ -368,7 +368,7 @@ impl RenderApp {
                 );
                 if self.comms.keep_alive_without_frames {
                     if is_primary {
-                        self.frame_windows.take_primary_window();
+                        self.take_primary_window();
                         self.frame_windows.clear_primary_mapping();
                     } else if emacs_fid != 0 {
                         self.frame_windows.request_destroy(emacs_fid);
@@ -409,7 +409,7 @@ impl RenderApp {
                 }
                 self.handle_window_focus_models(emacs_fid, focused);
                 if let Some(window) = self.frame_windows.get_by_winit_mut(window_id) {
-                    window.render.compositor.text_animations.focus(focused);
+                    window.render.compositor.focus_animations(focused);
                     window.render.cursor.set_focused(focused, romacs_display_protocol::frame_time::observe_platform_now());
                 }
                 if !focused {

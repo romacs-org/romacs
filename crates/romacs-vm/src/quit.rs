@@ -182,6 +182,18 @@ impl Vm {
         pressed || (busy && self.slots[self.quit_slots[0]].value != Value::NIL && self.slots[self.quit_slots[0]].value != Value::UNBOUND)
     }
 
+    /// Whether a native loop's entry should stop before it starts, as
+    /// GNU's maybe_quit: `quit_due`, or a user signal still queued that
+    /// `debug-on-event' may name, then the full [`Self::native_stop_due`].
+    /// The queue, not the arrival flag: a safepoint that looked while
+    /// `debug-on-event' named another event cleared the flag and left the
+    /// signal counted. A few loads where nothing is pending: every short
+    /// scan asks.
+    #[inline(always)]
+    pub(crate) fn entry_stop_due(&self) -> bool {
+        (self.quit_due() || crate::host::user_signal_waiting(u8::MAX)) && self.native_stop_due()
+    }
+
     /// The engine's periodic safepoint also polls inside `while-no-input',
     /// whose input arrives as ordinary events (keyboard.c
     /// kbd_buffer_store_event sets `quit-flag' to `throw-on-input').
@@ -597,36 +609,38 @@ impl Vm {
     /// (`worker_wake_fd'), whose wake returns at once with FDS's events as
     /// they are, for the caller to quit (`worker_quit') or dispatch them. A
     /// press or debug event returns no events, for the next safepoint.
-    pub(crate) fn poll_quittable(&self, fds: &[(std::os::fd::RawFd, i16)], timeout: Option<std::time::Duration>)
+    pub(crate) fn poll_quittable(&mut self, fds: &[(std::os::fd::RawFd, i16)], timeout: Option<std::time::Duration>)
                                  -> std::io::Result<Vec<i16>> {
         self.poll_for(fds, timeout, WaitFor::Input)
     }
 
     /// Wait on FDS and the worker wake pipe. A running child can quit on
     /// a debugger event; a child being stopped leaves that event for Lisp.
-    pub(crate) fn poll_for(&self, fds: &[(std::os::fd::RawFd, i16)], timeout: Option<Duration>,
+    /// In an owner the wait answers its spawner's pings (`poll_answering`).
+    pub(crate) fn poll_for(&mut self, fds: &[(std::os::fd::RawFd, i16)], timeout: Option<Duration>,
                            events: WaitFor) -> std::io::Result<Vec<i16>> {
         let active = events != WaitFor::Child || (self.mutator.native_quit && self.native_quit_reached());
         let debug = if active && events != WaitFor::ChildStop { self.debug_event_mask() } else { 0 };
+        // A debug event ends it too, without a host (handle_user_signal
+        // interrupts GNU's select).
+        let shared = active && std::sync::Arc::strong_count(&self.mutator.quit) > 1;
+        let quit = self.mutator.quit.clone();
         let pending = || active && match events {
-            WaitFor::Input => self.mutator.quit.pressed(),
-            WaitFor::Child | WaitFor::ChildStop => self.mutator.quit.due(),
+            WaitFor::Input => quit.pressed(),
+            WaitFor::Child | WaitFor::ChildStop => quit.due(),
         };
         let wake = self.worker_wake_fd();
         let set: Vec<_> = fds.iter().copied().chain(wake.map(|fd| (fd, libc::POLLIN))).collect();
         // FDS's events and whether the wake pipe woke it (drained, so an
         // interrupt `inhibit-quit' holds does not wake the next wait).
-        let poll = |timeout| -> std::io::Result<(Vec<i16>, bool)> {
-            let mut revents = crate::subprocess::poll(&set, timeout)?;
+        let poll = |vm: &mut Self, timeout| -> std::io::Result<(Vec<i16>, bool)> {
+            let mut revents = vm.poll_answering(&set, timeout)?;
             let woken = wake.is_some() && revents.pop().is_some_and(|r| r != 0);
             if woken { crate::host::drain_isolate_wake(); }
             Ok((revents, woken))
         };
-        // A debug event ends it too, without a host (handle_user_signal
-        // interrupts GNU's select).
-        let shared = active && std::sync::Arc::strong_count(&self.mutator.quit) > 1;
         if !shared && debug == 0 && (events == WaitFor::Input || !pending()) {
-            return Ok(poll(timeout)?.0);
+            return Ok(poll(self, timeout)?.0);
         }
         let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
         loop {
@@ -635,10 +649,32 @@ impl Vm {
                 return Ok(vec![0; fds.len()]);
             }
             let left = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
-            let (revents, woken) = poll(Some(left.map_or(QUIT_SLICE, |left| left.min(QUIT_SLICE))))?;
+            let (revents, woken) = poll(self, Some(left.map_or(QUIT_SLICE, |left| left.min(QUIT_SLICE))))?;
             if woken || revents.iter().any(|&r| r != 0) || left.is_some_and(|left| left <= QUIT_SLICE) {
                 return Ok(revents);
             }
+        }
+    }
+
+    /// `subprocess::poll` of SET for at most TIMEOUT. In an owner it watches
+    /// its spawner's socket too: pings there are answered and the wait goes
+    /// on; any other frame stays queued for its turn (ownership design O1
+    /// §2.7), so a turn blocked in a wait is never wedged.
+    fn poll_answering(&mut self, set: &[(std::os::fd::RawFd, i16)], timeout: Option<Duration>) -> std::io::Result<Vec<i16>> {
+        let Some(control) = self.owner_control_fd() else { return crate::subprocess::poll(set, timeout) };
+        let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
+        let watched: Vec<_> = set.iter().copied().chain([(control, libc::POLLIN)]).collect();
+        loop {
+            let left = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
+            let mut revents = crate::subprocess::poll(&watched, left)?;
+            let control_ready = revents.pop().is_some_and(|r| r != 0);
+            if !control_ready || revents.iter().any(|&r| r != 0) || left.is_some_and(|left| left.is_zero()) {
+                if control_ready { self.owner_answer_pings(); }
+                return Ok(revents);
+            }
+            self.owner_answer_pings();
+            // The spawner gone: its end is the loop's to see.
+            if self.owner_control_fd().is_none() { return Ok(revents); }
         }
     }
 

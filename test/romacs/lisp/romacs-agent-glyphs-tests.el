@@ -51,7 +51,8 @@
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (point-min-marker))
+            romacs-agent-log--end (point-min-marker)
+            romacs-agent-log--input (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
       (let ((romacs-agent-glyph-alist (copy-alist romacs-agent-glyph-alist)))
         (romacs-agent-log-draw session (list :type 'tool :state 'started :id "a" :name "Agent"
@@ -74,7 +75,8 @@
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (point-min-marker))
+            romacs-agent-log--end (point-min-marker)
+            romacs-agent-log--input (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
       (romacs-agent-log--separator t)
       (romacs-agent-log-draw session (list :type 'delta :text "Some words."))
@@ -84,25 +86,9 @@
         (romacs-agent-log--marks-changed)
         (should (equal (buffer-string) before))))))
 
-(ert-deftest romacs-agent-glyphs-a-composer-takes-a-changed-prompt-mark ()
-  ;; The composer's prompt is the table's mark, a changed one at once,
-  ;; shown once before its first line.
-  (with-temp-buffer
-    (romacs-agent-log-mode)
-    (let ((composer (romacs-agent-log-composer-buffer (current-buffer)))
-          (romacs-agent-glyph-alist (copy-alist romacs-agent-glyph-alist)))
-      (setf (alist-get 'composer romacs-agent-glyph-alist) ">>")
-      (run-hooks 'romacs-agent-glyph-alist-changed-hook)
-      (with-current-buffer composer
-        (insert "draft")
-        (should (string-suffix-p ">> " (overlay-get romacs-agent-compose--start 'before-string)))
-        (should (= (overlay-start romacs-agent-compose--start) (point-min)))
-        (should-not (get-char-property (point-min) 'line-prefix))
-        (should-not line-prefix)))))
-
 (ert-deftest romacs-agent-glyphs-a-cut-cell-fits-its-column ()
   (dolist (text '("❤️🤔x" "🤔🤔🤔🤔🤔" "abcdefgh"))
-    (should (= (string-width (romacs-agent-board--cell text 4)) 4))))
+    (should (= (string-width (romacs-list-cell text 4)) 4))))
 
 (provide 'romacs-agent-glyphs-tests)
 ;;; romacs-agent-glyphs-tests.el ends here

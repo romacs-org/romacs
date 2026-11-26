@@ -203,6 +203,65 @@ journal one turn long."
         (should-not (romacs-agent-loaded old))
         (should (romacs-agent-get live))))))
 
+;; A store not read yet (of another version while the writer makes it
+;; again for this build) is rows unknown, not none: the start waits for
+;; it, loading nothing, never every session as unlisted; read, it goes on.
+(ert-deftest romacs-agent-store-an-unread-store-holds-the-restore ()
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let ((old "aaaaaaaa-0000-4000-8000-000000000001") (live "aaaaaaaa-0000-4000-8000-000000000002")
+          (romacs-agent--restore-pending nil) (romacs-agent--restoring nil)
+          (romacs-agent--restored nil) (romacs-agent--restore-count 0)
+          (romacs-agent-store-readable-hook nil) (romacs-agent--restore-retry nil) (retry nil))
+      (record old "old")
+      (record live "live" t)
+      (romacs-agent-store-fill)
+      (sqlite-execute (romacs-agent-store--open) "update sessions set state = 'running' where id = ?" (list live))
+      (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
+                ((symbol-function 'romacs-agent--endpoint) #'ignore)
+                ((symbol-function 'romacs-agent--sweep) #'ignore)
+                ((symbol-function 'romacs-agent-store-fill-soon) #'ignore)
+                ((symbol-function 'romacs-startup-progress) #'ignore)
+                ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+        (cl-letf (((symbol-function 'romacs-agent-store--open) #'ignore))
+          (should-error (romacs-agent-store-listed-ids) :type 'romacs-agent-store-unread)
+          ;; Absent while the editor's writer is still to make it: not yet, not none.
+          (let ((file (romacs-agent-store--file)))
+            (cl-letf (((symbol-function 'romacs-agent-store--file) (lambda () (concat file ".absent")))
+                      ((symbol-function 'romacs-agent-writer-queued-p) (lambda () t)))
+              (should-error (romacs-agent-store-listed-ids) :type 'romacs-agent-store-unread)
+              (should-error (romacs-agent-store--missing) :type 'romacs-agent-store-unread)))
+          (cl-letf (((symbol-function 'run-at-time)
+                     (lambda (_time _repeat f &rest args)
+                       (if (eq f #'romacs-agent--restore-when-readable) (setq retry (timer-create)) (apply f args)))))
+            (romacs-agent-restore-soon))
+          (should-not romacs-agent--restoring)
+          (should (zerop (hash-table-count romacs-agent--sessions)))
+          (should (memq #'romacs-agent--restore-when-readable romacs-agent-store-readable-hook))
+          ;; Tried again later too, should no writer answer.
+          (should retry)
+          ;; A view meanwhile loads none either, nor takes it for restored.
+          (should-not (romacs-agent--load-new))
+          (romacs-agent-restore)
+          (should-not (eq romacs-agent--restored romacs-agent--sessions)))
+        (run-hooks 'romacs-agent-store-readable-hook)
+        (should-not romacs-agent-store-readable-hook)
+        (should-not (romacs-agent-loaded old))
+        (should (romacs-agent-get live))))))
+
+;; The sessions a fill finds load late and run the restore's hook again:
+;; no second fill, nor turns' fill, on the first's heels.
+(ert-deftest romacs-agent-store-a-late-load-fills-nothing-again ()
+  (require 'romacs-agent-turns)
+  (let ((fills 0) (turns 0) (romacs-agent-store--filled nil) (romacs-agent-turns--filled-at-restore nil))
+    (cl-letf (((symbol-function 'romacs-agent-store-fill-soon) (lambda () (cl-incf fills) (setq romacs-agent-store--filled t)))
+              ((symbol-function 'romacs-agent-turns-fill-soon) (lambda (&rest _) (cl-incf turns))))
+      (dotimes (_ 3)
+        (romacs-agent-store--fill-at-restore)
+        (romacs-agent-turns--fill-at-restore)))
+    (should (= fills 1))
+    (should (= turns 1))))
+
 ;; A first start, no rows yet: their fill runs aside, only the live
 ;; session is loaded; once the fill has run, one still with no row is
 ;; loaded as it is.
@@ -379,7 +438,7 @@ journal one turn long."
 
 (ert-deftest romacs-agent-store-an-older-table-is-made-again-and-the-rest-kept ()
   ;; A database whose sessions table an earlier build made: made again with
-  ;; this build's columns, its rows, records and the board's folds kept.
+  ;; this build's columns, its rows, records and an unrelated table kept.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-store-tests--with
     (ignore #'record)
@@ -390,8 +449,8 @@ journal one turn long."
         (sqlite-execute db "insert into sessions values ('old', '/x', 'idle')")
         (sqlite-execute db "create table events (session text not null, seq integer not null, t real, kind text, record text not null)")
         (sqlite-execute db "insert into events values ('old', 1, 1.0, 'note', '{}')")
-        (sqlite-execute db "create table board_folds (project text primary key)")
-        (sqlite-execute db "insert into board_folds values ('/p')")
+        (sqlite-execute db "create table legacy_metadata (name text primary key)")
+        (sqlite-execute db "insert into legacy_metadata values ('kept')")
         (sqlite-pragma db "user_version = 3")
         (sqlite-close db))
       (let ((db (romacs-agent-store--open)))
@@ -399,7 +458,7 @@ journal one turn long."
         (should (member "seq" (mapcar #'cadr (sqlite-select db "pragma table_info(sessions)"))))
         (should (equal (sqlite-select db "select id, dir, state, seq from sessions") '(("old" "/x" "idle" nil))))
         (should (equal (sqlite-select db "select session, seq from events") '(("old" 1))))
-        (should (equal (sqlite-select db "select project from board_folds") '(("/p"))))))))
+        (should (equal (sqlite-select db "select name from legacy_metadata") '(("kept"))))))))
 
 (defconst romacs-agent-store-tests--older-open
   '("drop table if exists sessions"
@@ -424,8 +483,8 @@ writes: the sessions table made again in its form, the rest left.")
   ;; A store this build migrated, opened by an earlier build (a rollback),
   ;; then by this one again: the earlier one makes its sessions table
   ;; again, this one reforms it with the rows it holds; the records, what
-  ;; is imported, the turns and the board's folds are kept, and an
-  ;; imported session reads as it did.
+  ;; is imported and the turns are kept, and an imported session reads
+  ;; as it did.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (require 'romacs-agent-events)
   (romacs-agent-store-tests--with
@@ -435,7 +494,6 @@ writes: the sessions table made again in its form, the rest left.")
       (make-directory (file-name-directory (romacs-agent-store--file)) t)
       (let ((session (romacs-agent--make :id "imp" :dir (expand-file-name "imp" root))))
         (should (romacs-agent-events-import session))
-        (romacs-agent-store-fold "/p/one/" t)
         (let* ((db (romacs-agent-store--open))
                (kept (romacs-agent-store-tests--tables db))
                (seqs (lambda ()
@@ -574,7 +632,7 @@ writes: the sessions table made again in its form, the rest left.")
       (let ((finished (romacs-agent-store-unloaded)))
         (delete-directory (expand-file-name gone root) t)
         (cl-letf (((symbol-function 'romacs-agent-board--finished) (lambda (_rows) (mapcar #'romacs-agent-id finished)))
-                  ((symbol-function 'romacs-agent-board--shown-rows) #'ignore)
+                  ((symbol-function 'romacs-list-shown-rows) #'ignore)
                   ((symbol-function 'romacs-agent-board--redraw) #'ignore)
                   ((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
           (romacs-agent-board-settle-finished)))
@@ -585,25 +643,11 @@ writes: the sessions table made again in its form, the rest left.")
         (should (romacs-agent--unloaded-p (romacs-agent-dir row)))
         (with-temp-buffer
           (romacs-agent-board-mode)
-          (cl-letf (((symbol-function 'romacs-agent-board--row) (lambda () (list :summary (romacs-agent-summary kept))))
+          (cl-letf (((symbol-function 'romacs-list-row) (lambda () (list :summary (romacs-agent-summary kept))))
                     ((symbol-function 'romacs-agent-board--redraw) #'ignore))
             (call-interactively (keymap-lookup romacs-agent-board-mode-map "s")))))
       (should-not (romacs-agent-settled-p (romacs-agent-store-row-session kept)))
       (should-not (romacs-agent-loaded kept)))))
-
-(ert-deftest romacs-agent-store-keeps-the-board-s-folds ()
-  ;; Folded projects are kept, and kept past the sessions' table made
-  ;; again for another form of it.
-  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
-  (romacs-agent-store-tests--with
-    (romacs-agent-store-fold "/p/one" t)
-    (romacs-agent-store-fold "/p/two" t)
-    (romacs-agent-store-fold "/p/two" nil)
-    (should (equal (romacs-agent-store-folded) '("/p/one")))
-    (sqlite-pragma (cdr romacs-agent-store--db) "user_version = 0")
-    (sqlite-close (cdr romacs-agent-store--db))
-    (setq romacs-agent-store--db nil)
-    (should (equal (romacs-agent-store-folded) '("/p/one")))))
 
 ;;; romacs-agent-store-tests.el ends here
 
@@ -860,6 +904,24 @@ has it: in a transaction of its own, after the statement FIRST when given."
                       (format "romacs-agent-store: filled 0\nromacs-agent-store: marked %s\n" one))
                      (list one))))))
 
+(ert-deftest romacs-agent-store-gui-start-restores-marks-without-a-supervisor ()
+  (let* ((root (make-temp-file "romacs-cold-start-" t))
+         (process-environment (copy-sequence process-environment))
+         (noninteractive nil)
+         (restored nil))
+    (setenv "XDG_STATE_HOME" (expand-file-name "state" root))
+    (setenv "XDG_RUNTIME_DIR" (expand-file-name "run" root))
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time) (lambda (_time _repeat then) (funcall then)))
+                  ((symbol-function 'romacs-agent-restore-soon) (lambda () (setq restored t))))
+          (romacs-agent--marks-known)
+          (romacs-agent--restore-at-startup)
+          (should-not restored)
+          (romacs-agent-mark "aaaaaaaa-0000-4000-8000-000000000001" 'watches t)
+          (romacs-agent--restore-at-startup)
+          (should restored))
+      (delete-directory root t))))
+
 (ert-deftest romacs-agent-store-a-start-asks-of-the-marked-and-the-live-alone ()
   ;; Its marks known, an editor's start asks whether to load only the
   ;; sessions something waits on and those whose supervisor's socket is
@@ -976,3 +1038,32 @@ has it: in a transaction of its own, after the statement FIRST when given."
           (should-not romacs-agent--restore-pending)
           (should-not romacs-agent--late-loads)
           (should (= timers 0)))))))
+
+(ert-deftest romacs-agent-store-cursor-follows-peer-row-updates ()
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (should (romacs-agent-store-write '(:id "a" :dir "/a" :title "before")))
+    (should (romacs-agent-store-write '(:id "b" :dir "/b" :title "other")))
+    (make-directory (expand-file-name "a" root))
+    (let* ((initial (cdr (romacs-agent-store-rows-since nil)))
+           (peer (sqlite-open (romacs-agent-store--file)))
+           (dir (expand-file-name "a" root)))
+      (unwind-protect
+          (progn
+            (let ((romacs-agent-store--db (cons (car romacs-agent-store--db) peer)))
+              (romacs-agent-store--title-row "a" "after"))
+            (pcase-let ((`(,ids . ,renamed) (romacs-agent-store-rows-since initial)))
+              (should (equal ids '("a")))
+              (should (> renamed initial))
+              (with-temp-file (expand-file-name "manifest.json" dir)
+                (insert "{\"seenSeq\":2,\"settledSeq\":2}"))
+              (let ((romacs-agent-store--db (cons (car romacs-agent-store--db) peer)))
+                (romacs-agent-store--settlement-row "a" dir))
+              (pcase-let ((`(,ids . ,settled) (romacs-agent-store-rows-since renamed)))
+                (should (equal ids '("a")))
+                (should (> settled renamed))
+                (should (equal (romacs-agent-store-rows-since settled) (cons nil settled))))
+              (should (equal (sqlite-select (romacs-agent-store--open)
+                                            "select title, settled_seq from sessions where id = 'a'")
+                             '(("after" 2))))))
+        (sqlite-close peer)))))

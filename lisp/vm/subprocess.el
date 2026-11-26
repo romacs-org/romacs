@@ -539,7 +539,7 @@ family; nil for anything else, or for an element out of range."
         (romacs--proc-set proc 'buffer buffer)
         (romacs--proc-set proc 'sentinel (process-sentinel server))
         (romacs--proc-set proc 'filter filter)
-        (romacs--proc-attach proc connection)
+        (romacs--frame-as server (romacs--proc-attach proc connection))
         (romacs--proc-set proc 'status 'run)
         (romacs--proc-set proc 'decode (romacs--proc-get server 'decode))
         (romacs--proc-set proc 'encode (romacs--proc-get server 'encode))
@@ -746,9 +746,21 @@ PROC, then run and \"open\" (its handshake waited for the connection)."
       (romacs--proc-set proc 'status 'run)
       (romacs--exec-sentinel proc "open\n")))))
 
+(defvar romacs--sending-processes nil
+  "The processes a synchronous send is writing, innermost first.
+The waits leave their queues to that send (`romacs--send-process'), as
+GNU's wait never writes a write_queue: only the send writes, and it
+returns as soon as the last write succeeds, so a peer's answer to it
+reaches no filter before the send returns.  The send's own wait, given
+its process as SEND-PROC, ends once that process can take more
+\(`romacs--proc-select' returns `writable').  Not in GNU.")
+
 (defun romacs--send-process (proc string)
-  "send_process: encode STRING as PROC's encoding requires, and write it,
-waiting (and reading output) while the channel is full."
+  "send_process: encode STRING as PROC's encoding requires, and write it.
+While the channel is full, wait at most 20 ms, until PROC can take
+more, reading output and running filters and timers as GNU's wait
+does, but write PROC only here (`romacs--sending-processes'), returning
+right after the last write."
   (if (eq (process-type proc) 'network) (romacs--wait-while-connecting proc))
   (let ((bytes string))
     (if (multibyte-string-p string)
@@ -756,8 +768,9 @@ waiting (and reading output) while the channel is full."
           (romacs--proc-set proc 'encode coding)
           (setq bytes (encode-coding-string string coding t))))
     (if (not (romacs--proc-send proc bytes))
-        (while (not (romacs--proc-send proc nil))
-          (romacs--wait-reading-process-output 0.02 nil 0)))))
+        (let ((romacs--sending-processes (cons proc romacs--sending-processes)))
+          (while (not (romacs--proc-send proc nil))
+            (romacs--wait-reading-process-output 0.02 nil 0 nil proc))))))
 
 (defun process-send-string (process string)
   "Send PROCESS the contents of STRING as input.  GNU process.c Fprocess_send_string."
@@ -768,11 +781,12 @@ waiting (and reading output) while the channel is full."
 (defun romacs-process-send-nowait (process &optional string)
   "Send PROCESS STRING, or with STRING nil what it holds unsent, never
 waiting: t when all of it is written, else nil, the rest held by its
-channel and written as its peer reads (`romacs--proc-send').  A caller
-that must not wait on its peer (a server with many clients) sends
-through this and holds what follows until it says t again (romacs#324).
-A network PROCESS still connecting is waited for, as for any send: call
-it on an accepted or connected one."
+channel, behind what it already held, and written as its peer reads,
+whenever Romacs waits (`romacs--proc-send').  A caller that must not wait
+on its peer (a server with many clients) sends through this and bounds
+what a slow peer may leave unread with `romacs-process-unsent-bytes'
+\(romacs#324).  A network PROCESS still connecting is waited for, as for
+any send: call it on an accepted or connected one."
   (let ((proc (romacs--get-process process)))
     (if (eq (process-type proc) 'network) (romacs--wait-while-connecting proc))
     (romacs--proc-send proc (if (and string (multibyte-string-p string))
@@ -797,6 +811,47 @@ it on an accepted or connected one."
                (romacs--proc-status-message proc)))
     (romacs--proc-send-eof proc)
     process))
+
+;;;; Framing
+
+(defun set-process-framing (process kind &optional limit)
+  "Split PROCESS's output into frames of KIND before its filter sees it.
+KIND is `lines' (each frame a line, its newline left out),
+`content-length' (LSP's base protocol: headers, a blank line, then the
+body their Content-Length counts, in bytes), or nil to stop framing.
+LIMIT, a byte count or nil for none, bounds a frame: one longer is never
+held, and its place in the list is the symbol `over'.  A Content-Length
+header block that never ends is `malformed', and nothing after it is
+framed.
+
+The filter of a framed PROCESS is called once a read, with PROCESS and
+the list of frames the read completed, oldest first: each a string,
+decoded by PROCESS's coding system, the bytes as they came when that is
+`no-conversion' or `binary'.  A read that completes no frame calls
+nothing.  At end of file a last line with no newline is a frame; an
+unfinished body is dropped.  A process reading a pty cannot be framed:
+make it with `:connection-type' `pipe'.  An accepted connection takes
+its server's framing.  Set it before PROCESS's output is first read: right after
+making PROCESS, before any wait.  Setting the same KIND again changes
+only LIMIT; another KIND, or nil, gives the frame not yet complete back
+as the next output, but a frame being skipped as over its limit."
+  (romacs--proc-set-framing (romacs--get-process process) kind limit))
+
+(defun romacs--frame-as (server proc)
+  "Frame PROC, a connection SERVER accepted, as SERVER is framed; PROC."
+  (let ((framing (process-framing server)))
+    (if framing (set-process-framing proc (car framing) (cdr framing))))
+  proc)
+
+(defun process-framing (process)
+  "PROCESS's framing (`set-process-framing'): (KIND . LIMIT), or nil."
+  (romacs--proc-framing (romacs--get-process process)))
+
+(defun romacs-process-unsent-bytes (process)
+  "The bytes PROCESS holds unsent: written as its peer reads, whenever
+Romacs waits (`romacs-process-send-nowait').  Its own queue: records a
+TLS session has made of bytes already taken are not counted."
+  (romacs--proc-unsent (romacs--get-process process)))
 
 ;;;; Default filter and sentinel
 
@@ -891,7 +946,8 @@ the wait loop's end-of-file and error handling."
   (let* ((result (romacs--proc-read proc))
          (nread (car result))
          (text (cdr result)))
-    (if (and (>= nread 0) (stringp text))
+    ;; A framed process's TEXT is the list of frames the read completed.
+    (if (and (>= nread 0) (or (stringp text) (consp text)))
         (let ((odeactivate deactivate-mark))
           (save-current-buffer
             (romacs--dispose-process-output proc text))
@@ -900,16 +956,36 @@ the wait loop's end-of-file and error handling."
         (romacs--proc-read-done proc nread (if (< nread 0) text 0)))
     nread))
 
+(defvar romacs--process-dispatches nil
+  "How many filter and sentinel calls the waits may still make, or nil
+for no bound.  An owner's loop binds it (`romacs--isolate-run-between'),
+so a burst of output leaves its calls their turn; a call binds it nil
+again, so a wait inside a filter or a sentinel is bounded by nothing.
+Not in GNU.")
+
+(defun romacs--process-spent-p ()
+  "Whether no filter or sentinel call is left (`romacs--process-dispatches')."
+  (and romacs--process-dispatches (<= romacs--process-dispatches 0)))
+
+(defun romacs--process-dispatch (function args context)
+  "Call FUNCTION on ARGS as a filter or sentinel (`romacs--process-call'),
+one of `romacs--process-dispatches', with no bound inside it."
+  (when romacs--process-dispatches
+    (setq romacs--process-dispatches (1- romacs--process-dispatches)))
+  (let ((romacs--process-dispatches nil))
+    (romacs--process-call function args context)))
+
 (defun romacs--dispose-process-output (proc text)
   "read_and_dispose_of_process_output: call PROC's filter on TEXT with the
-caller's match data preserved."
+caller's match data preserved.  TEXT is a string, or a framed process's
+list of frames (`set-process-framing')."
   (let ((filter (process-filter proc))
         (match-data (match-data)))
     (let ((inhibit-quit t)
           (last-nonmenu-event t))
       (unwind-protect
-          (if (> (string-bytes text) 0)
-              (romacs--process-call filter (list proc text) "error in process filter: "))
+          (if (if (stringp text) (> (string-bytes text) 0) text)
+              (romacs--process-dispatch filter (list proc text) "error in process filter: "))
         (set-match-data match-data t)))))
 
 (defun romacs--exec-sentinel (proc reason)
@@ -920,32 +996,68 @@ caller's match data preserved."
       (let ((inhibit-quit t)
             (last-nonmenu-event t))
         (unwind-protect
-            (romacs--process-call (process-sentinel proc) (list proc reason)
-                                  "error in process sentinel: ")
+            (romacs--process-dispatch (process-sentinel proc) (list proc reason)
+                                      "error in process sentinel: ")
           (set-match-data match-data t))))
     (setq deactivate-mark odeactivate)))
 
 (defun romacs--status-notify (deleting wait-proc)
   "status_notify: run the sentinel of each process whose status changed,
-first reading what remains of its output.  GNU's got_some_output."
-  (let ((got -1))
+first reading what remains of its output.  GNU's got_some_output.  With
+no call left (`romacs--process-dispatches') it stops at the process it is
+on, which stays changed: a later one reads the rest of its output, then
+runs its sentinel.  A callback that leaves the pass leaves what
+`romacs--process-status-row' says: in a worker's bounded pass, every
+status not yet notified stays pending; in the master, GNU's loss."
+  (let ((got -1) (held nil) (stage 'between) (current nil) (procs (process-list)))
     (romacs--proc-ticks-acknowledge)
-    (dolist (proc (process-list))
-      (if (romacs--proc-changed proc)
-          (let ((more t))
-            (while (and more
-                        (not (eq (process-filter proc) t))
-                        (not (romacs--connecting-p proc))
-                        (not (eq (romacs--proc-get proc 'status) 'listen))
-                        (not (eq (process-command proc) t))
-                        (romacs--proc-get proc 'infd)
-                        (not (eq proc deleting)))
-              (let ((nread (romacs--read-process-output proc)))
-                (if (and (or (null wait-proc) (eq wait-proc proc)) (< got nread))
-                    (setq got nread))
-                (if (<= nread 0) (setq more nil))))
-            (romacs--exec-sentinel proc (romacs--proc-status-finish proc)))))
+    (unwind-protect
+        (progn
+          (while procs
+            (let ((proc (pop procs)))
+              (when (and (not held) (romacs--proc-changed proc))
+                (setq current proc stage 'draining)
+                (setq got (max got (romacs--status-drain proc deleting wait-proc)))
+                (if (romacs--process-spent-p)
+                    (progn (romacs--process-status-apply (romacs--process-status-row stage 'spent t nil t) proc)
+                           (setq held t))
+                  (setq stage 'sentinel)
+                  (romacs--exec-sentinel proc (romacs--proc-status-finish proc)))
+                (setq stage 'between current nil))))
+          (setq stage nil))
+      (when stage
+        (romacs--process-status-apply
+         (romacs--process-status-row stage 'exit (and romacs--process-dispatches t) (and procs t)
+                                     (and current (memq current (process-list)) t))
+         current)))
     got))
+
+(defun romacs--status-drain (proc deleting wait-proc)
+  "Read what remains of PROC's output for `romacs--status-notify', while
+filter calls are left: the most read at once, as got_some_output counts
+it for WAIT-PROC (any process when nil), or -1.  DELETING is not read."
+  (let ((more t) (got -1))
+    (while (and more
+                (not (romacs--process-spent-p))
+                (not (eq (process-filter proc) t))
+                (not (romacs--connecting-p proc))
+                (not (eq (romacs--proc-get proc 'status) 'listen))
+                (not (eq (process-command proc) t))
+                (romacs--proc-get proc 'infd)
+                (not (eq proc deleting)))
+      (let ((nread (romacs--read-process-output proc)))
+        (if (and (or (null wait-proc) (eq wait-proc proc)) (< got nread))
+            (setq got nread))
+        (if (<= nread 0) (setq more nil))))
+    got))
+
+(defun romacs--process-status-apply (effects proc)
+  "Carry out EFFECTS of `romacs--process-status-row' on PROC: `re-tick'
+keeps its status changed, `raise' the global tick so a later pass visits
+the processes this one did not."
+  (dolist (effect effects)
+    (cond ((eq (car effect) 're-tick) (romacs--proc-tick proc))
+          ((eq (car effect) 'raise) (romacs--proc-tick nil)))))
 
 ;;;; Timers
 
@@ -1027,7 +1139,7 @@ seconds until the next timer, or nil."
 
 ;;;; Waiting
 
-(defun romacs--wait-reading-process-output (limit wait-proc just-wait-proc &optional read-kbd)
+(defun romacs--wait-reading-process-output (limit wait-proc just-wait-proc &optional read-kbd send-proc)
   "process.c wait_reading_process_output, with no redisplay and no
 WAIT_FOR_CELL.  LIMIT is a positive number of seconds, `minimum' or
 `forever', or `idle': one round, which reads what is ready once and
@@ -1037,7 +1149,10 @@ due, so its caller checks those between reads.  JUST-WAIT-PROC is 0, 1
 GNU's READ_KBD -1 without a terminal: the wait ends once special
 events (file notification's among them) or requeued input wait for
 read_char, as it does on detect_input_pending, or once a timer ran, so the
-reader sees what the timer changed.  Return GNU's got_some_output."
+reader sees what the timer changed.  SEND-PROC, not in GNU, is the
+process the calling send writes (`romacs--sending-processes'): the wait
+is one round, which ends once it can take more or after what else was
+ready is handled, so the send writes again.  Return GNU's got_some_output."
   (let* ((wait (cond ((memq limit '(minimum forever idle)) limit) (t 'timeout)))
          (end-time (if (eq wait 'timeout) (+ (float-time) limit)))
          (got-some-output -1)
@@ -1059,9 +1174,11 @@ reader sees what the timer changed.  Return GNU's got_some_output."
         (if (and read-kbd (or unread-command-events romacs--special-events
                               (/= timers-run romacs--timers-run)))
             (setq done t))
+        ;; A status change never takes back output this wait delivered
+        ;; (a framed last line, read just before its end of file).
         (if (and (not done) (romacs--proc-ticks-pending)
                  (not (romacs--proc-input-pending)))
-            (setq got-some-output (romacs--status-notify nil wait-proc)))
+            (setq got-some-output (max got-some-output (romacs--status-notify nil wait-proc))))
         ;; Don't wait for output from a non-running process: read what it has.
         (if (and (not done) wait-proc
                  (not (eq (romacs--proc-get wait-proc 'status) 'run))
@@ -1076,7 +1193,8 @@ reader sees what the timer changed.  Return GNU's got_some_output."
                           (if (< got-some-output nread) (setq got-some-output nread))
                           (if (= nread 0) (setq more nil)))))))
               (setq done t)))
-        (if (not done)
+        ;; With no filter or sentinel call left, the pass ends before select.
+        (if (not (or done (and (romacs--process-spent-p) (setq done t))))
             (progn
               (if (and (> got-some-output 0) (> timeout 0.01))
                   (setq timeout 0.01))
@@ -1086,12 +1204,12 @@ reader sees what the timer changed.  Return GNU's got_some_output."
                         (setq got-output-end-time timeout-abs))
                     (setq timeout timer-delay))
                 (setq got-output-end-time nil))
-              (let ((ready (romacs--proc-select wait-proc (/= just-wait-proc 0) timeout read-kbd)))
+              (let ((ready (romacs--proc-select wait-proc (/= just-wait-proc 0) timeout read-kbd send-proc)))
                 (cond
-                 ((memq ready '(terminated input)) (setq done t))
+                 ((memq ready '(terminated input writable)) (setq done t))
                  ((null ready)
                   (if (romacs--proc-ticks-pending)
-                      (setq got-some-output (romacs--status-notify nil wait-proc)))
+                      (setq got-some-output (max got-some-output (romacs--status-notify nil wait-proc))))
                   (if (or (memq wait '(minimum idle))
                           (and wait-proc
                                (/= (romacs--proc-get wait-proc 'nbytes-read) prev-nbytes)))
@@ -1118,7 +1236,7 @@ reader sees what the timer changed.  Return GNU's got_some_output."
                         (setq got-some-output nread))
                     (if (and (> nread 0) (eq wait-proc ready))
                         (setq wait 'minimum)))))
-                (if (eq wait 'idle) (setq done t)))))))
+                (if (or (eq wait 'idle) send-proc) (setq done t)))))))
     (if (and wait-proc (/= (romacs--proc-get wait-proc 'nbytes-read) prev-nbytes))
         (setq got-some-output (- (romacs--proc-get wait-proc 'nbytes-read) prev-nbytes)))
     got-some-output))

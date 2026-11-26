@@ -439,9 +439,9 @@ fn proc_deactivate(cx, process: Value) {
 }}
 
 defsubr! { name = "romacs--proc-select", gnu = "process.c:5358", effect = Global,
-fn proc_select(cx, wait_proc: Value, just_this_one: Value, seconds: Value; optional read_kbd: Value) {
+fn proc_select(cx, wait_proc: Value, just_this_one: Value, seconds: Value; optional read_kbd: Value, send_proc: Value) {
     let seconds = if seconds == Value::NIL { None } else { Some(cx.float_value(seconds).or_else(|_| seconds.integer_value().map(|n| n as f64).ok_or_else(|| Fault::Wrong("numberp", seconds)))?) };
-    cx.process_select(wait_proc, just_this_one != Value::NIL, seconds, read_kbd != Value::NIL)
+    cx.process_select(wait_proc, just_this_one != Value::NIL, seconds, read_kbd != Value::NIL, send_proc)
 }}
 
 // How many waits on processes have found something to handle since startup (output,
@@ -475,9 +475,20 @@ fn proc_changed(cx, process: Value) {
 }}
 
 // Mark PROCESS's status as changed, as GNU's `p->tick = ++process_tick' does: the next
-// status notification reports it.  Returns nil.
+// status notification reports it.  With PROCESS nil, raise the global tick alone,
+// no process's own moved: the next notification visits every process whose status
+// it has not notified (a worker's bounded pass, `romacs--process-status-row').
+// Returns nil.
 defsubr! { name = "romacs--proc-tick", gnu = "romacs:process", effect = Global,
-fn proc_tick(cx, process: Value) { check_process(cx, process)?; cx.process_tick(process); Ok(Value::NIL) }}
+fn proc_tick(cx, process: Value) {
+    if process == Value::NIL {
+        cx.process_ticks_raise();
+    } else {
+        check_process(cx, process)?;
+        cx.process_tick(process);
+    }
+    Ok(Value::NIL)
+}}
 
 defsubr! { name = "romacs--proc-status-finish", gnu = "process.c:7889", effect = Global,
 fn proc_status_finish(cx, process: Value) { cx.process_status_finish(process) }}
@@ -493,6 +504,19 @@ fn proc_send(cx, process: Value, bytes: Value) {
     let bytes = if bytes == Value::NIL { None } else { Some(cx.string_view(bytes)?.bytes().to_vec()) };
     cx.process_send(process, bytes)
 }}
+
+// Frame PROCESS's output by KIND (lines, content-length or nil), each frame at most LIMIT
+// bytes (nil: none): its filter is then called with the list of whole frames a read completed.
+defsubr! { name = "romacs--proc-set-framing", gnu = "romacs:process", effect = Global,
+fn proc_set_framing(cx, process: Value, kind: Value, limit: Value) { cx.process_set_framing(process, kind, limit) }}
+
+// PROCESS's framing, (KIND . LIMIT), or nil.
+defsubr! { name = "romacs--proc-framing", gnu = "romacs:process", effect = Reads,
+fn proc_framing(cx, process: Value) { cx.process_framing(process) }}
+
+// The bytes PROCESS holds unsent, written as its peer reads.
+defsubr! { name = "romacs--proc-unsent", gnu = "romacs:process", effect = Reads,
+fn proc_unsent(cx, process: Value) { cx.process_unsent(process) }}
 
 defsubr! { name = "romacs--proc-send-eof", gnu = "process.c:7441", effect = Global,
 fn proc_send_eof(cx, process: Value) { cx.process_send_eof(process)?; Ok(process) }}

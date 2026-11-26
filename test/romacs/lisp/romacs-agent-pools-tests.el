@@ -652,7 +652,7 @@ a time, `allow' marks it allowed."
           (to nil))
       (puthash "x" session romacs-agent--sessions)
       (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () "x"))
-                ((symbol-function 'romacs-agent-tools--handed-off) (lambda (_task provider &rest _) (setq to provider))))
+                ((symbol-function 'romacs-agent-switch-harness-soon) (lambda (_task provider &rest _) (setq to provider) 'now)))
         (romacs-agent-tools--switch (romacs-mcp--object "provider" "codex"))
         (should (eq to 'codex))))))
 
@@ -691,33 +691,29 @@ a time, `allow' marks it allowed."
                   ((symbol-function 'process-send-eof) #'ignore))
           ;; Fresh: asked at once, the token on curl's stdin.
           (funcall keep (+ (float-time) 3600))
-          (romacs-agent--claude-usage home (lambda (report) (setq got report)))
+          (romacs-agent--claude-usage home (lambda (report &optional _why) (setq got report)))
           (should (equal (car (car (car runs))) "curl"))
           (should-not (cl-find "sekrit" (car (car runs)) :test #'string-search))
           (should (equal sent '("Authorization: Bearer sekrit\n")))
           (funcall (cdr (car runs)) "{\"seven_day\":{\"utilization\":40.0,\"resets_at\":null}}\n200" 0)
           (should (= (plist-get got :used) 0.4))
-          ;; Refused: not known.
+          ;; Refused: not known, and why.
           (funcall (cdr (car runs)) "{}\n401" 0)
           (should-not got)
-          ;; Expired: Claude Code renews it in place first; still expired, not known.
-          (setq runs nil got 'none)
-          (funcall keep (- (float-time) 10))
-          (romacs-agent--claude-usage home (lambda (report) (setq got report)))
-          (should (equal (cdr (car (car runs))) '("auth" "status" "--json")))
-          (funcall (cdr (car runs)) "" 0)
-          (should-not got)
-          ;; Renewed meanwhile: asked.
-          (setq runs nil got 'none)
-          (romacs-agent--claude-usage home (lambda (report) (setq got report)))
-          (funcall keep (+ (float-time) 3600))
-          (funcall (cdr (car runs)) "" 0)
-          (should (equal (car (car (car runs))) "curl"))
+          ;; Expired, or about to: never renewed here (only Claude Code's own
+          ;; sessions renew a sign-in), nothing run, not known.
+          (dolist (expires (list (- (float-time) 10) (+ (float-time) 60)))
+            (setq runs nil got 'none)
+            (funcall keep expires)
+            (romacs-agent--claude-usage home (lambda (report &optional why) (setq got (or report why))))
+            (should-not runs)
+            (should (equal got (romacs-agent--claude-renew-due (romacs-agent--claude-token home)))))
           ;; No sign-in: not known, nothing run.
           (delete-file (expand-file-name ".credentials.json" home))
           (setq runs nil got 'none)
-          (romacs-agent--claude-usage home (lambda (report) (setq got report)))
-          (should-not (or runs got)))
+          (romacs-agent--claude-usage home (lambda (report &optional why) (setq got (or report why))))
+          (should-not runs)
+          (should (equal got "not signed in")))
       (delete-directory home t))))
 
 (ert-deftest romacs-agent-pools-a-spent-pool-is-asked-and-resumes-early ()

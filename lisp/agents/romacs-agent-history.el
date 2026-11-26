@@ -373,7 +373,6 @@ for SESSION: its end, from a prompt on."
   "e" #'undefined
   "u" #'undefined
   "D" #'undefined
-  "RET" #'romacs-agent-log-open
   "q" #'quit-window
   "r" #'romacs-agent-history-resume-this)
 
@@ -396,7 +395,7 @@ commands applies: \\[romacs-agent-history-resume-this] goes on with it.
 ;;;###autoload
 (defun romacs-agent-history-open (item &optional action)
   "Show the transcript ITEM (one of `romacs-agent-history-items') read-only,
-as `pop-to-buffer' does with ACTION."
+as `romacs-agent-display' does with ACTION."
   (let ((buffer (cl-find-if (lambda (buffer) (equal (plist-get (buffer-local-value 'romacs-agent-history--item buffer) :path)
                                                     (plist-get item :path)))
                             (buffer-list))))
@@ -415,11 +414,11 @@ as `pop-to-buffer' does with ACTION."
               romacs-agent-log--end (point-max-marker))
         (set-marker-insertion-type romacs-agent-log--end t))
       ;; Shown first: its rules fit its window.
-      (pop-to-buffer buffer action)
+      (romacs-agent-display buffer action)
       (with-current-buffer buffer
         (romacs-agent-history-draw romacs-agent-log--session (list :path (plist-get item :path)))
         (romacs-agent-log--header-show)))
-    (pop-to-buffer buffer action)
+    (romacs-agent-display buffer action)
     ;; On its last entry, its end in view: nothing here is typed at.
     (goto-char (point-max))
     (romacs-agent-log-previous 1)

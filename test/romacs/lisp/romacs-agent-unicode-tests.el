@@ -88,7 +88,16 @@
             (clrhash romacs-agent-tools--calls)
             (let ((record (gethash key (romacs-agent-tools--table session))))
               (should record)
-              (should (equal (gethash "result" record) "résultat 中")))))
+              (should (equal (gethash "result" record) "résultat 中")))
+            ;; A long run holds a bounded number: past twice what is kept,
+            ;; the table goes, read back from the log as its newest.
+            (let ((romacs-agent-tools--kept 4))
+              (dotimes (i 9) (romacs-agent-tools--note session (format "k%d" i) (romacs-mcp--object "state" "done")))
+              (let ((table (romacs-agent-tools--table session)))
+                (should (<= (hash-table-count table) (1+ (* 2 romacs-agent-tools--kept))))
+                (should (gethash "k8" table))
+                (should-not (gethash "k0" table))
+                (should (gethash :forgotten table))))))
       (delete-process peer)
       (delete-directory state t))))
 

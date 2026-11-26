@@ -8,16 +8,11 @@ executable.
 - A file here and the Rust that calls it are one contract: the helpers a
   primitive calls by name, the variables it reads, the arguments and values
   they pass.
-- An executable trusts the tree it runs over. A change here that needs
-  matching Rust (a helper added, renamed or removed, an argument list or a
-  value changed) raises `etc/romacs-runtime-epoch` in the same commit, so an
-  executable refuses a tree of another generation instead of calling into
-  Lisp that no longer fits it. Lisp that runs with the Rust as it is raises
-  nothing. `tools/dev-check` names a change of this directory beside
-  romacs-vm's Rust that leaves the epoch alone; it cannot tell which it is.
-- A raise ends above the trunk tip's epoch: two changes raised to one number
-  merge with no conflict. `tools/dev-check`, which the merge queue runs on
-  the merged tree, fails one that does not.
+- If a Lisp/Rust contract changes, add a file to
+  `etc/romacs-runtime-epoch.d` in the same commit. Use a unique
+  YYYY-MM-DD-change-name and one line giving the reason. The executable
+  and runtime tree identify their generation by the sorted fragment names.
+  Lisp that still runs with the existing Rust needs no fragment.
 
 ## Tests
 - `cargo test -p romacs-vm --test vm_lisp_from_tree`: an edited file here is

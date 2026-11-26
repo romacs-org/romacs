@@ -31,6 +31,7 @@ mod obarray;
 mod names;
 mod command_set;
 mod command;
+mod command_loop;
 mod interpreted_closure;
 use interpreted_closure::{CaptureBinding, CaptureLayout, CaptureSlot};
 mod cell_pairs;
@@ -38,6 +39,7 @@ mod oclosure;
 mod host_input;
 mod typing;
 pub use typing::{KeyOutcome, Outcome, SubmittedFrame, TypingPicture, Unattributed};
+pub use display::{DisplayAcceptance, Staleness};
 mod quit;
 mod gap_probe;
 pub use gc_mark::{forbid_threads as forbid_gc_threads, set_workers as set_gc_workers};
@@ -53,6 +55,7 @@ mod terminal_host;
 mod terminal_keys;
 mod process_jobs;
 mod subprocess;
+mod framing;
 mod tls;
 mod html;
 mod html_entities;
@@ -71,6 +74,7 @@ pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
+pub use owner::display::{OwnerDisplay, cursor_colour, placed_animations};
 pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, GlyphMetrics, ModelCreate, NO_MODELS, OpenedFont, OtfTable};
 pub use graphics::{ImageFacts, ImageQuery, ImageSource};
 pub use session_host::SessionHost;
@@ -149,10 +153,13 @@ mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
 mod frozen;
+mod function_codec;
 mod isolate;
+mod owner;
 mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
 pub use isolate::refuse as isolate_refuse;
+pub use isolate::set_build_id as isolate_set_build_id;
 mod request_code;
 mod macro_record;
 pub use gc::HeapStats;
@@ -176,6 +183,7 @@ mod let_forms;
 mod symkey;
 mod display;
 mod display_stats;
+pub use display_stats::TriggerBracket;
 mod fringe;
 mod tab_bar;
 mod overlay_order;
@@ -1297,6 +1305,7 @@ struct Slot {
     localness: Localness,
     /// Object-owned declaration flag for uninterned symbols.
     declared_special: bool,
+    written_since_restore: bool,
 }
 impl Slot {
     const fn new() -> Self {
@@ -1307,6 +1316,7 @@ impl Slot {
             plist: Value::NIL,
             localness: Localness::Never,
             declared_special: false,
+            written_since_restore: false,
         }
     }
 }
@@ -1522,6 +1532,9 @@ pub struct Vm {
     /// The slots of `debug-on-event' and of the user signal events, in
     /// host::USER_SIGNAL_NAMES's order (`Vm::debug_event_mask').
     debug_event_slots: [usize; 3],
+    /// `current-message' and `minibuffer-depth''s symbol slots, the symbols
+    /// Lisp read since startup calls (`Vm::echo_current').
+    echo_function_slots: [usize; 2],
     /// Counts keymap stores and parent changes, GNU's two flushes of the
     /// reverse-map cache `where-is-internal' keeps (keymap.c where_is_cache).
     keymap_generation: u64,
@@ -1585,6 +1598,13 @@ pub struct Vm {
     variable_redirects: Vec<Option<VariableRedirect>>,
     /// Storage of GNU's built-in (C) variables; collector roots (`gc.rs`).
     forwarded: forwarded::Forwarded,
+    /// The input streams (GNU's KBOARDs, `command_loop/stream.rs`), reached
+    /// through `streams` and `streams_mut`; collector roots.
+    streams: command_loop::Streams,
+    /// The key reads in progress and the reader's scratch
+    /// (`command_loop::Reads`): no image holds a read; collector roots.
+    #[snapshot(at_rest)]
+    reads: command_loop::Reads,
     fixnum_slots: [usize; 2],
     /// `char-property-alias-alist' and `default-text-properties', which
     /// textget reads for every property a character does not have.
@@ -1802,6 +1822,7 @@ impl Vm {
             quit_slots: [0; 3],
             face_keys: crate::prim::FaceKeys::EMPTY,
             debug_event_slots: [0; 3],
+            echo_function_slots: [0; 2],
             keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
@@ -1830,6 +1851,8 @@ impl Vm {
             defun_start_epoch: 0,
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
+            streams: command_loop::Streams::default(),
+            reads: command_loop::Reads::default(),
             fixnum_slots: [usize::MAX; 2],
             textget_slots: [usize::MAX; 2],
             gc_stats: HeapStats::default(),
@@ -1925,10 +1948,7 @@ impl Vm {
         // already-read forms compile their bindings dynamically.
         vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
             .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
-        vm.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| vm.slot(name));
-        vm.face_keys = crate::prim::FaceKeys::new(&mut vm);
-        let [usr2, usr1] = crate::host::USER_SIGNAL_NAMES;
-        vm.debug_event_slots = ["debug-on-event", usr2, usr1].map(|name| vm.slot(name));
+        vm.capture_symbol_slots();
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
@@ -1954,11 +1974,6 @@ impl Vm {
             "current-prefix-arg",
             "last-command-event",
             "command-history",
-            // keyboard.c this_command_keys, this_single_command_key_start
-            // and raw_keybuf (prims/keyboard.rs, lisp/vm/keyboard.el).
-            "romacs--command-keys",
-            "romacs--single-command-key-start",
-            "romacs--raw-command-keys",
             // minibuf.c / buffer.c DEFVARs read by call-interactively's
             // add-to-history fallback and `*' code. GNU's buffer-read-only
             // is per-buffer; VM2's is one global (DIVERGENCES VM2-CALLINT1).
@@ -2014,11 +2029,26 @@ impl Vm {
         for name in forwarded::Forwarded::names() {
             vm.specials.insert(name.into());
         }
+        vm.finish_initialization()
+    }
+
+    fn finish_initialization(mut self) -> Self {
         // Code-image loading reuses this constructor before replacing the
         // symbol catalog. Intrinsic redirects must therefore start cold too;
         // retaining Plain here would mask an image's already-interned plist.
-        vm.variable_redirects.clear();
-        vm
+        self.variable_redirects.clear();
+        self.slots.clear_written_since_restore();
+        self
+    }
+    /// The symbols the VM reads by slot from its first form on, interned in
+    /// this order: the quit polls', the face primitives', `debug-on-event''s
+    /// and the user signals', and the echo guard's public functions.
+    fn capture_symbol_slots(&mut self) {
+        self.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| self.slot(name));
+        self.face_keys = crate::prim::FaceKeys::new(self);
+        let [usr2, usr1] = crate::host::USER_SIGNAL_NAMES;
+        self.debug_event_slots = ["debug-on-event", usr2, usr1].map(|name| self.slot(name));
+        self.echo_function_slots = ["current-message", "minibuffer-depth"].map(|name| self.slot(name));
     }
     /// Publish a semantic function-cell write atomically with both invalidators.
     /// Slot stamps retain precise source-macro dependencies; the world epoch
@@ -3666,6 +3696,7 @@ impl Vm {
         let buffer = owner.index_if(0)? - 1;
         Some(crate::variable_runtime::LocalEntry { buffer, at: self.local_at(buffer, base)?.ok()? })
     }
+    // SMELL(long-function): an arm for each Object variant, each kind one decision a reader checks in place.
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
@@ -3826,6 +3857,7 @@ impl Vm {
                             | data::Object::Treesit(_)
                             | data::Object::Finalizer(_)
                             | data::Object::Thread
+                            | data::Object::Backing(_)
                             | data::Object::Process(_)
                             | data::Object::HashTable(_) => {
                                 return Err("sequence required".into());
@@ -3848,6 +3880,7 @@ impl Vm {
     pub(crate) fn display(&self, v: Value) -> Result<String> {
         self.display_depth(v, 0)
     }
+    // SMELL(long-function): an arm for each Object variant, each kind one decision a reader checks in place.
     fn display_depth(&self, v: Value, depth: usize) -> Result<String> {
         if depth > 100 {
             return Err("display depth exceeded".into());
@@ -3873,6 +3906,7 @@ impl Vm {
                 // print.c PVEC_FINALIZER.
                 data::Object::Finalizer(function) => Ok(if *function == Value::NIL { "#<finalizer used>" } else { "#<finalizer>" }.into()),
                 data::Object::Thread => Ok("#<thread>".into()),
+                data::Object::Backing(b) => Ok(format!("#<frozen-backing {} bytes>", b.len())),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
                 data::Object::Marker(_) => Ok(self.marker_text(v, false).unwrap_or_else(|| "#<marker>".into())),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),

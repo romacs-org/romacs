@@ -78,7 +78,7 @@ package_command() {
     fi
     case " $id $id_like " in
         *' arch '*)
-            echo 'pacman -S --needed fontconfig freetype2 zlib wayland libxkbcommon libxkbcommon-x11 libx11 libxcb libxi vulkan-icd-loader ttf-dejavu' ;;
+            echo 'pacman -S --needed fontconfig freetype2 zlib wayland libxkbcommon libxkbcommon-x11 libx11 libxcb libxi vulkan-icd-loader vulkan-swrast ttf-dejavu' ;;
         *' debian '* | *' ubuntu '*)
             echo 'apt-get install -y libfontconfig1 libfreetype6 zlib1g libwayland-client0 libxkbcommon0 libxkbcommon-x11-0 libx11-6 libx11-xcb1 libxcb1 libxi6 libvulkan1 mesa-vulkan-drivers fonts-dejavu-core' ;;
     esac
@@ -161,15 +161,24 @@ migrate_agents() {
         warn "some agent sessions could not be moved; they stay in their journals for the next install."
 }
 
+# True when a Vulkan driver other than Mesa's CPU one (lavapipe) is installed.
+gpu_vulkan_driver() {
+    local icd
+    for icd in /usr/share/vulkan/icd.d/*.json /etc/vulkan/icd.d/*.json; do
+        [ -e "$icd" ] || continue
+        case ${icd##*/} in lvp_icd.*) ;; *) return 0 ;; esac
+    done
+    return 1
+}
+
 report_session() {
     case :$PATH: in
         *":$bin:"*) ;;
         *) warn "$bin isn't on your PATH; add it to your shell's profile." ;;
     esac
     [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] || warn "set WAYLAND_DISPLAY or DISPLAY to open a Romacs window."
-    compgen -G '/usr/share/vulkan/icd.d/*.json' >/dev/null ||
-        compgen -G '/etc/vulkan/icd.d/*.json' >/dev/null ||
-        warn "no Vulkan driver found; install your GPU's (Arch: vulkan-radeon, vulkan-intel or nvidia-utils)."
+    gpu_vulkan_driver ||
+        warn "no Vulkan driver for your GPU found; Romacs draws with OpenGL, or on the CPU, slowly. Install your GPU's (Arch: vulkan-radeon, vulkan-intel or nvidia-utils)."
 }
 
 uninstall() {

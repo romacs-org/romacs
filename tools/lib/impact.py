@@ -113,8 +113,9 @@ HARNESSES = ('world', 'autoloads', 'completion', 'fontify', 'timers', 'popup', '
              'entry_prompts', 'requests', 'landing_anim', 'layout_journey', 'chrome', 'scaling', 'display_stages')
 # More harnesses, each for the paths only it drives end to end.
 HARNESS_RULES = (
-    # The agent client end to end (sessions, selections and restarts, relays, tools).
-    (re.compile(r'^(?:lisp/agents/romacs-(?:agent|mcp)[^/]*\.el|crates/romacs-mcp/'
+    # The agent client end to end (sessions, selections and restarts, relays, tools),
+    # its board a list (romacs-list.el).
+    (re.compile(r'^(?:lisp/agents/romacs-(?:agent|mcp)[^/]*\.el|lisp/ui/romacs-list\.el|crates/romacs-mcp/'
                 r'|crates/romacs-vm-gui/harness/(?:agent_live|fake_[a-z]+)\.py)'), 'agent'),
     # A startup that fails holds its screen until the window is closed: the evaluator's end
     # (main.rs, exit.rs), the screen (loading.rs) and the Lisp errors it shows (startup.rs).
@@ -130,6 +131,12 @@ HARNESS_RULES = (
                 r'|crates/romacs-display-protocol/src/text_animation\.rs'
                 r'|crates/romacs-display-runtime/src/render_thread/text_animations(?:\.rs|/)'
                 r'|crates/romacs-vm-gui/harness/working_live\.py)'), 'working'),
+    # Banners: every pattern drawn by the render thread while the main VM is busy.
+    (re.compile(r'^(?:lisp/ui/romacs-(?:banner|animate)\.el|crates/romacs-logo/src/banner\.rs'
+                r'|crates/romacs-vm/src/(?:prims/logo|display)\.rs'
+                r'|crates/romacs-display-protocol/src/text_animation\.rs'
+                r'|crates/romacs-display-runtime/src/render_thread/text_animations(?:\.rs|/)'
+                r'|crates/romacs-vm-gui/harness/banner_live\.py)'), 'banner'),
     # Lisp changed in a worktree loaded into a running session (romacs-live-update).
     (re.compile(r'^(?:lisp/session/romacs-live[^/]*\.el|crates/romacs-vm-gui/harness/live_update_live\.py)'),
      'live_update'),
@@ -267,6 +274,8 @@ def select(paths, root, metadata):
                     files.setdefault(f'{package}::{pathlib.PurePosixPath(user).stem}', f'includes {rest}')
                 if not users:
                     whole(package, f'{rest}: no test file names it')
+            elif rest == 'tests/all/standalone.txt' and package in test_modules.PACKAGES:
+                packages.setdefault(package, f'{rest} changed')
             else:
                 sources = sources or rust_sources(root, dirs)
                 name = pathlib.PurePosixPath(path).name

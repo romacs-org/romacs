@@ -353,6 +353,10 @@ impl Leaf<'_> {
     pub(crate) fn process_ticks_acknowledge(&mut self) {
         self.vm.subprocesses.update_tick = self.vm.subprocesses.tick;
     }
+    /// Make the global tick pending again, no process's own tick moved.
+    pub(crate) fn process_ticks_raise(&mut self) {
+        self.vm.subprocesses.tick += 1;
+    }
     /// status_notify after the drain: update the status, deactivate or
     /// remove a finished process, and return the sentinel's message.
     pub(crate) fn process_status_finish(&mut self, proc: Value) -> Out {
@@ -398,12 +402,14 @@ impl Leaf<'_> {
     /// One pass of wait_reading_process_output's select: reap, poll for at
     /// most SECONDS (nil: forever), flush queued writes, and return the
     /// process whose channel is readable (round robin), (connect PROC ERRNO
-    /// REMOTE LOCAL) for a finished :nowait connection, t when something
-    /// else woke the wait or a status changed, or nil on timeout.
+    /// REMOTE LOCAL) for a finished :nowait connection, `writable' when
+    /// SEND_PROC, the process the waiting send writes, can take more, t
+    /// when something else woke the wait or a status changed, or nil on
+    /// timeout.
     /// With READ_KBD, as wait_reading_process_output's READ_KBD, the
     /// keyboard's other sources wake it too: queued file notification
     /// events end it with `input', unread, for read_char to handle.
-    pub(crate) fn process_select(&mut self, wait_proc: Value, just_this: bool, seconds: Option<f64>, read_kbd: bool) -> Out {
+    pub(crate) fn process_select(&mut self, wait_proc: Value, just_this: bool, seconds: Option<f64>, read_kbd: bool, send_proc: Value) -> Out {
         // Reaping closes a child's pidfd and stops reading it, so nothing
         // would wake the poll for its status change: hand that change to
         // status_notify before blocking, as GNU's SIGCHLD wakeup does.
@@ -413,7 +419,7 @@ impl Leaf<'_> {
             self.vm.subprocesses.activity += 1;
             return Ok(Value::TRUE);
         }
-        let (mut fds, owners) = self.select_set(wait_proc, just_this);
+        let (mut fds, owners) = self.select_set(wait_proc, just_this, send_proc);
         let keyboard = read_kbd.then(|| self.vm.file_notify_fd()).flatten();
         fds.extend(keyboard.map(|fd| (fd, libc::POLLIN)));
         if wait_proc != Value::NIL && just_this && !self.process_infd(wait_proc) {
@@ -447,15 +453,27 @@ impl Leaf<'_> {
         }
         self.vm.subprocesses.activity += 1;
         self.reap_children();
+        self.process_select_woken(&revents, &owners)
+    }
+    /// What the poll's REVENTS woke for OWNERS: queued writes flushed, and
+    /// process_select's answer.  Output ready is read before the send's
+    /// process is answered `writable', as GNU's wait reads it while a send
+    /// waits: the send's last bytes are not written yet.  A :nowait
+    /// connection finished in the same poll is answered before both, and
+    /// its output can then come after the send returns (a known limit: no
+    /// caller relies on that order).
+    fn process_select_woken(&mut self, revents: &[i16], owners: &[(Value, Wake)]) -> Out {
+        let mut writable = false;
         let mut readable = Vec::new();
         let mut connected = Vec::new();
-        for (&r, &(proc, wake)) in revents.iter().zip(&owners) {
+        for (&r, &(proc, wake)) in revents.iter().zip(owners) {
             if r == 0 {
                 continue;
             }
             match wake {
                 Wake::Read => readable.push(proc),
-                Wake::Write => self.process_flush(proc)?,
+                Wake::Write => self.process_flush_waited(proc),
+                Wake::Writable => writable = true,
                 Wake::Connect => connected.push(proc),
                 Wake::Handshake => match self.gnutls_handshake_poll(proc) {
                     super::gnutls::Handshake::Pending => {}
@@ -468,6 +486,9 @@ impl Leaf<'_> {
                 Wake::Child => {}
             }
         }
+        if writable && readable.is_empty() {
+            return Ok(self.sym("writable"));
+        }
         self.process_select_ready(readable, connected)
     }
     /// (tls PROC RESULT): PROC's handshake ended, with gnutls_make_error's
@@ -478,11 +499,18 @@ impl Leaf<'_> {
     }
     /// The descriptors the wait selects on, with what each readiness means:
     /// WAIT_PROC's alone when JUST_THIS, else every process's.
-    fn select_set(&mut self, wait_proc: Value, just_this: bool) -> (Vec<(RawFd, i16)>, Vec<(Value, Wake)>) {
+    /// A process a synchronous send is writing (`romacs--sending-processes')
+    /// is left to that send: its queue is not the wait's to write, and only
+    /// the send's own wait, given it as SEND_PROC, polls it, to end once it
+    /// can take more.
+    fn select_set(&mut self, wait_proc: Value, just_this: bool, send_proc: Value) -> (Vec<(RawFd, i16)>, Vec<(Value, Wake)>) {
         let mut fds: Vec<(RawFd, i16)> = Vec::new();
         let mut owners: Vec<(Value, Wake)> = Vec::new();
         let candidates = if wait_proc != Value::NIL && just_this { vec![wait_proc] } else { self.process_values() };
+        let sending = self.intern("romacs--sending-processes");
+        let sending = self.variable_value(sending).ok().flatten().unwrap_or(Value::NIL);
         for proc in candidates {
+            let synchronous = self.list_has(sending, proc);
             let Some(channel) = self.channel(proc) else { continue };
             let connecting = channel.connecting.is_some();
             if connecting && let Some(fd) = &channel.infd {
@@ -499,9 +527,10 @@ impl Leaf<'_> {
                 owners.push((proc, Wake::Read));
             }
             let records = channel.tls.as_deref().is_some_and(|s| s.active && s.stage == crate::tls::stage::READY && s.wants_write());
-            if (!channel.pending.is_empty() || records) && let Some(fd) = &channel.outfd {
+            let wake = if !synchronous { Some(Wake::Write) } else { (proc == send_proc).then_some(Wake::Writable) };
+            if let Some(wake) = wake && (!channel.pending.is_empty() || records) && let Some(fd) = &channel.outfd {
                 fds.push((fd.as_raw_fd(), libc::POLLOUT));
-                owners.push((proc, Wake::Write));
+                owners.push((proc, wake));
             }
             if let Some(fd) = &channel.pidfd {
                 fds.push((fd.as_raw_fd(), libc::POLLIN));
@@ -509,6 +538,16 @@ impl Leaf<'_> {
             }
         }
         (fds, owners)
+    }
+    /// Whether LIST holds ITEM (`memq').
+    fn list_has(&self, mut list: Value, item: Value) -> bool {
+        while let Some((car, rest)) = self.pair(list) {
+            if car == item {
+                return true;
+            }
+            list = rest;
+        }
+        false
     }
     /// What the wait selected: a finished connection, else the readable
     /// process to read, chosen as wait_reading_process_output chooses.
@@ -592,6 +631,9 @@ impl Leaf<'_> {
             }
         };
         buf.truncate(nbytes);
+        if self.channel(proc).is_some_and(|c| c.framer.is_some()) {
+            return self.process_read_framed(proc, &buf);
+        }
         let channel = self.channel_mut(proc).expect("read channel");
         let mut bytes = std::mem::take(&mut channel.carryover);
         let carried = bytes.len();
@@ -632,7 +674,7 @@ impl Leaf<'_> {
         }
         Ok(text)
     }
-    fn coding_spec_checked(&mut self, coding: Value) -> Result<Value> {
+    pub(super) fn coding_spec_checked(&mut self, coding: Value) -> Result<Value> {
         let coding = if coding == Value::NIL { self.sym("no-conversion") } else { coding };
         let spec = self.coding_spec(coding)?;
         if spec == Value::NIL {
@@ -739,19 +781,19 @@ impl Leaf<'_> {
             return Err(Fault::Error(format!("Output file descriptor of {name} is closed")));
         };
         if let Some(bytes) = bytes {
-            channel.pending.extend_from_slice(&bytes);
+            channel.pending.extend(&bytes);
         }
         self.process_flush(proc)?;
         Ok(if self.channel(proc).is_some_and(|c| c.pending.is_empty()) { Value::TRUE } else { Value::NIL })
     }
-    fn process_flush(&mut self, proc: Value) -> Result<()> {
+    pub(super) fn process_flush(&mut self, proc: Value) -> Result<()> {
         let Some(channel) = self.channel_mut(proc) else { return Ok(()) };
         let Some(fd) = channel.outfd.as_ref().map(|f| f.as_fd()) else { return Ok(()) };
         if let Some(session) = channel.tls.as_deref_mut().filter(|s| s.active) {
             // emacs_gnutls_write: the session takes the bytes into records
             // and holds what the socket does not take yet; before READY it
             // takes nothing, and the bytes wait for the handshake.
-            let written = session.flush(fd).and_then(|()| if channel.pending.is_empty() { Ok(0) } else { session.write(fd, &channel.pending) });
+            let written = session.flush(fd).and_then(|()| if channel.pending.is_empty() { Ok(0) } else { session.write(fd, channel.pending.make_contiguous()) });
             return match written {
                 Ok(n) => { channel.pending.drain(..n); Ok(()) }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(()),
@@ -762,7 +804,7 @@ impl Leaf<'_> {
             };
         }
         while !channel.pending.is_empty() {
-            match sp::write(fd, &channel.pending) {
+            match sp::write(fd, channel.pending.as_slices().0) {
                 Ok(0) => break,
                 Ok(n) => { channel.pending.drain(..n); }
                 Err(error) if error.raw_os_error() == Some(libc::EPIPE) => {
@@ -1279,12 +1321,19 @@ impl Leaf<'_> {
 }
 
 impl Vm {
+    /// The descriptors of every process the wait selects on, each with the
+    /// poll events it waits for: what an owner's loop waits on beside its
+    /// spawner (`romacs--isolate-wait`).
+    pub(crate) fn process_fds(&mut self) -> Vec<(RawFd, i16)> {
+        Leaf::new(self).select_set(Value::NIL, false, Value::NIL).0
+    }
+
     /// The descriptors the command loop's idle wait watches with the
     /// keyboard, as wait_reading_process_output selects on every process's
     /// (process.c:5358), each with the poll events it waits for.  They stay
     /// open while the VM runs no Lisp.
     pub fn process_wait_fds(&mut self) -> Vec<(RawFd, i16)> {
-        let mut fds = Leaf::new(self).select_set(Value::NIL, false).0;
+        let mut fds = self.process_fds();
         // The isolates' sockets and workers' pidfds wake the same wait,
         // and so do file notification events, the keyboard's.
         fds.extend(self.isolate_fds());
@@ -1321,6 +1370,9 @@ fn inet_address(addr: std::net::SocketAddr) -> sp::Address {
 enum Wake {
     Read,
     Write,
+    /// A synchronous send's process can take more: its wait ends, for
+    /// the send to write (`romacs--sending-processes').
+    Writable,
     Connect,
     /// A non-blocking client's TLS handshake can go on.
     Handshake,

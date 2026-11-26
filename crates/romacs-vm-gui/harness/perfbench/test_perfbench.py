@@ -565,7 +565,8 @@ def installation(prefix, commit='c' * 40):
     for tree in ('lisp', 'etc', 'assets/fonts'):
         (share / tree).mkdir(parents=True)
     (share / 'lisp/bundled.json').write_text('{}')
-    (share / 'etc/romacs-runtime-epoch').write_text('4\n')
+    (share / 'etc/romacs-runtime-epoch.d').mkdir()
+    (share / 'etc/romacs-runtime-epoch.d/2026-11-26-perfbench-fixture').write_text('Fixture contract\n')
     (share / 'assets/fonts/a.ttf').write_text('font')
     (prefix / 'bin').mkdir()
     # Refuses as the binary does when a tree is not where it runs.

@@ -607,12 +607,23 @@ impl Vm {
         // A panic in a host wait drops its host, as it did when the wait
         // kept it on the native stack.
         self.host_wait = None;
+        // So does a panic inside a key read its activations (command_loop).
+        self.reads = crate::command_loop::Reads::default();
         // A collection the panic stopped may have left the generations
         // false: a minor makes the old entries it reads again young for its
         // length, and a sweep stopped part way leaves old, clean survivors
         // naming young entries it did not reach. With everything promoted
         // no such edge is left; nothing is freed.
         self.promote_all();
+    }
+    /// The runtime's own tables of Values, roots outside every value cell:
+    /// GNU's C globals and `buffer_defaults` (forwarded.rs; per-buffer
+    /// values are traced with their buffer), the input streams and the key
+    /// reads in progress (command_loop/stream.rs).
+    pub(super) fn visit_runtime_tables(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        self.forwarded.visit_values(visit);
+        self.streams.visit_values(visit);
+        self.reads.visit_values(visit);
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
         let base = self.mutator.external_roots.len();
@@ -818,6 +829,10 @@ impl Vm {
     pub(crate) fn set_job_budget(&mut self, bytes: usize) {
         let objects = (bytes / CONS_BYTES as usize).max(1);
         self.job_budget = Some((self.job_live(), objects));
+    }
+    /// An owner serves for the session, not one job: no budget ends it.
+    pub(crate) fn clear_job_budget(&mut self) {
+        self.job_budget = None;
     }
     /// What the last collection kept, in objects at the collector's charge:
     /// the retained objects and the payload allocation charged for them.
@@ -1066,7 +1081,7 @@ impl Vm {
                 data::Object::WindowConfiguration(c) => c.storage_bytes(),
                 data::Object::Sqlite(h) => h.storage_bytes(),
                 data::Object::Treesit(t) => t.storage_bytes(),
-                data::Object::Finalizer(_) | data::Object::Thread | data::Object::Free => 0,
+                data::Object::Finalizer(_) | data::Object::Thread | data::Object::Backing(_) | data::Object::Free => 0,
                 data::Object::Process(p) => p.storage_bytes(),
                 data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(false),
                 data::Object::Bytes(v) => v.len(),
@@ -1117,7 +1132,7 @@ impl Vm {
                     data::Object::WindowConfiguration(c) => c.storage_bytes(),
                     data::Object::Sqlite(h) => h.storage_bytes(),
                     data::Object::Treesit(t) => t.storage_bytes(),
-                    data::Object::Finalizer(_) | data::Object::Thread | data::Object::Free => 0,
+                    data::Object::Finalizer(_) | data::Object::Thread | data::Object::Backing(_) | data::Object::Free => 0,
                     data::Object::Process(p) => p.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(true),
                     data::Object::Bytes(v) => v.capacity(),
@@ -1517,7 +1532,7 @@ impl Vm {
             rewrite(&mut s.function);
             rewrite(&mut s.plist);
         }
-        self.forwarded.visit_values(&mut |v| rewrite(v));
+        self.visit_runtime_tables(&mut |v| rewrite(v));
         for v in &mut self.standard_case_tables { rewrite(v); }
         rewrite(&mut self.command_point.1);
         for v in self.finalizers.iter_mut().chain(self.doomed_finalizers.iter_mut()) { rewrite(v); }
@@ -1564,7 +1579,7 @@ impl Vm {
                     data::Object::Frame(f) => f.visit_values(&mut |v| rewrite(v)),
                     data::Object::Terminal(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| rewrite(v)),
-                    data::Object::Sqlite(_) | data::Object::Thread | data::Object::Free => {}
+                    data::Object::Sqlite(_) | data::Object::Thread | data::Object::Backing(_) | data::Object::Free => {}
                     data::Object::Treesit(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::Finalizer(function) => rewrite(function),
                     data::Object::Process(p) => p.visit_values(&mut |v| rewrite(v)),
@@ -2117,9 +2132,7 @@ impl Vm {
         }
         self.mutator.backtrace.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         self.profiler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
-        // GNU's C globals and `buffer_defaults`: roots outside every value
-        // cell (forwarded.rs). Per-buffer values are traced with their buffer.
-        self.forwarded.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        self.visit_runtime_tables(&mut |v| if keep(v) { pending.push(*v) });
         pending.extend_from_slice(&self.standard_case_tables);
         pending.push(self.command_point.1);
         self.charsets.trace(&mut pending);

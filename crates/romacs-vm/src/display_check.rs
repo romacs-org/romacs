@@ -78,7 +78,7 @@ fn differences(reused: &WindowSnapshot, rebuilt: &ShownText, faces: &[Face]) -> 
 
 impl Vm {
     /// Whether `romacs-display-check` is on: its value outside any buffer.
-    fn display_check(&mut self) -> bool {
+    pub(super) fn display_check(&mut self) -> bool {
         let slot = self.slot("romacs-display-check");
         !matches!(self.slots[slot].value, Value::NIL | Value::UNBOUND)
     }

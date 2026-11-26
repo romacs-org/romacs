@@ -1,6 +1,9 @@
 use sha2::{Digest, Sha256};
 use std::{env, fs, path::Path, process::Command};
 
+#[path = "runtime_epoch_build.rs"]
+mod runtime_epoch_build;
+
 fn sources(root: &Path, dir: &Path, hash: &mut Sha256) {
     let mut paths: Vec<_> = fs::read_dir(dir)
         .unwrap()
@@ -810,7 +813,7 @@ fn main() {
     name_build_tree(&root, &out);
     generate_primitives(&root, &out);
     generate_variable_sites(&root, &out);
-    let mut hash = Sha256::new();
+    let mut hash = runtime_epoch_build::build_hash(&root.join("../.."));
     println!("cargo:rerun-if-changed=src");
     sources(&root, &root.join("src"), &mut hash);
     for path in [

@@ -12,6 +12,7 @@
 use crate::Vm;
 use crate::display_host::{Display, DisplayHost};
 use crate::layout_host::LayoutHost;
+use crate::owner::display::OwnerUi;
 use crate::session_host::SessionHost;
 use crate::terminal_host::TerminalHost;
 use std::cell::RefCell;
@@ -27,12 +28,15 @@ pub(crate) struct Ui {
     /// The window system, closed until the session opens it.
     pub(crate) display: Option<Display>,
     pub(crate) terminal_host: Option<Box<dyn TerminalHost>>,
+    /// An owner's display and the windows it laid out (owner/display.rs).
+    pub(crate) owner: Option<OwnerUi>,
 }
 
 impl Ui {
     /// Whether no host is attached.
     fn is_empty(&self) -> bool {
         self.layout_host.is_none() && self.session_host.is_none() && self.display.is_none() && self.terminal_host.is_none()
+            && self.owner.is_none()
     }
 }
 

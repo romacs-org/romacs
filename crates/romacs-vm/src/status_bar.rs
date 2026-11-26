@@ -9,7 +9,7 @@ use crate::{data::Object, *};
 use romacs_layout_input::{BandMarks, Face, FaceHandle, FaceRun, Pill, Segment, StatusBarSnapshot, TextSlice};
 
 /// What the bar's expansion depends on (`Vm::bar_key').
-#[derive(Clone, PartialEq, Eq, romacs_snapshot::Snapshot)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct BarKey {
     epoch: u64, collections: u64, faces: (u64, u64), columns: usize, focused: bool,
     minibuffer: (u64, u64, u64),
@@ -17,10 +17,23 @@ pub(crate) struct BarKey {
 }
 
 /// What the owner's line depends on (`Vm::line_key').
-#[derive(Clone, PartialEq, Eq, romacs_snapshot::Snapshot)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct LineKey {
     id: u64, buffer: u64, name: Option<String>, format: u64, modiff: u64, modified: bool,
     point: i64, start: i64, size: (u32, u32), accessible: (usize, usize),
+}
+
+/// Where a frame's status bar goes and what it shows
+/// (`Vm::status_bar_plan'): the window whose line it is, whether that
+/// window has the focus, its width in columns, its place (x, y, width,
+/// height) and the key its line is expanded under.
+pub(crate) struct BarPlan {
+    owner: Value,
+    focused: bool,
+    window: u64,
+    columns: usize,
+    pub(crate) place: (u32, u32, u32, u32),
+    pub(crate) key: BarKey,
 }
 
 /// The corner radius of a segment's pill, in pixels.
@@ -67,24 +80,10 @@ impl Vm {
     /// Lisp.
     /// The frame is the top-level frame whose id is FRAME.
     pub(crate) fn status_bar_snapshot(&mut self, frame: u64) -> Result<Option<StatusBarSnapshot>> {
-        let top = self.frame_of_id(frame)?;
-        let native = self.top_geometry(top)?;
-        let reserved = native.status_reserved;
-        if !self.status_bar_wanted(top) { return Ok(None); }
-        let (owner, focused) = self.status_bar_owner(top)?;
-        let window = self.window(owner)?.id;
-        let [width, height] = native.text_area;
-        let columns = StatusBarSnapshot::columns(width, self.window_state.column);
-        let border = self.host_border(top);
-        // At the top the bar ends where the root window starts; at the
-        // bottom it starts above the mini-window.
-        let root = self.frame(top)?.root;
-        let y = if self.status_bar_top(top) { self.window(root)?.y.saturating_sub(reserved) }
-                else { height - native.mini_reserved - reserved };
-        let place = |bar: StatusBarSnapshot| StatusBarSnapshot { x: border, y: border + y, width, height: reserved, ..bar };
+        let Some(BarPlan { owner, focused, window, columns, place: (x, y, width, height), key }) = self.status_bar_plan(frame)? else { return Ok(None) };
+        let place = |bar: StatusBarSnapshot| StatusBarSnapshot { x, y, width, height, ..bar };
         // Expanded again only when GNU's redisplay would update the line
         // (`BarKey'); otherwise the last expansion is shown where the bar is now.
-        let key = self.bar_key(owner, focused, columns)?;
         if let Some((known, bar)) = &self.display_state.bar_cache && *known == key {
             return Ok(Some(place(bar.clone())));
         }
@@ -119,6 +118,31 @@ impl Vm {
             text: TextSlice { extends: vec![], utf8: text, face_runs, raw: vec![] }, face: FaceHandle(0), faces, window, focused, marks };
         self.display_state.bar_cache = Some((key, bar.clone()));
         Ok(Some(place(bar)))
+    }
+    /// Where top-level frame FRAME's status bar goes and what its line is
+    /// expanded under (`BarKey'); None when the frame wants none.
+    pub(crate) fn status_bar_plan(&mut self, frame: u64) -> Result<Option<BarPlan>> {
+        let top = self.frame_of_id(frame)?;
+        let native = self.top_geometry(top)?;
+        let reserved = native.status_reserved;
+        if !self.status_bar_wanted(top) { return Ok(None); }
+        let (owner, focused) = self.status_bar_owner(top)?;
+        let window = self.window(owner)?.id;
+        let [width, height] = native.text_area;
+        let columns = StatusBarSnapshot::columns(width, self.window_state.column);
+        let border = self.host_border(top);
+        // At the top the bar ends where the root window starts; at the
+        // bottom it starts above the mini-window.
+        let root = self.frame(top)?.root;
+        let y = if self.status_bar_top(top) { self.window(root)?.y.saturating_sub(reserved) }
+                else { height - native.mini_reserved - reserved };
+        let key = self.bar_key(owner, focused, columns)?;
+        Ok(Some(BarPlan { owner, focused, window, columns, place: (border, border + y, width, reserved), key }))
+    }
+    /// The key the status bar was last expanded under (`Vm::bar_key'):
+    /// after a redisplay, the one the bar it painted was.
+    pub(crate) fn status_bar_expanded(&self) -> Option<BarKey> {
+        self.display_state.bar_cache.as_ref().map(|(key, _)| key.clone())
     }
     /// The window title's format, and what a format of `%b' depends on
     /// (`romacs--title-format-static-p'): the selected window's buffer, its

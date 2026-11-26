@@ -74,20 +74,21 @@
     (puthash "remote" row (romacs-agent-client-rows client))
     (cons source (romacs-agent-remote--mirror source row))))
 
-(defun romacs-agent-summary-readers--board (&optional folded)
+(cl-defun romacs-agent-summary-readers--board (&optional folded (project "/p/one"))
   (with-temp-buffer
     (romacs-agent-board-mode)
+    (setq romacs-agent-board--project project)
     (setq romacs-agent-board--folds (make-hash-table :test #'equal))
     (puthash "parent" (if folded 'closed 'open) romacs-agent-board--folds)
     (romacs-agent-board--render (current-buffer) 100)
     (mapcar
      (lambda (row)
        (let ((id (plist-get row :id)))
-         (goto-char (romacs-agent-board--find id))
+         (goto-char (romacs-list--find id))
          (list id (plist-get row :key)
                (string-trim-right (buffer-substring-no-properties
                                    (line-beginning-position) (line-end-position))))))
-     (romacs-agent-board--shown-rows))))
+     (romacs-list-shown-rows))))
 
 (defun romacs-agent-summary-readers--labels ()
   (mapcar (lambda (label) (substring-no-properties (funcall label)))
@@ -115,7 +116,7 @@
     (funcall read)))
 
 (defconst romacs-agent-summary-readers--golden-board
-  '(("/p/one" nil "one  1 needs approval · 1 asks you · 1 failed · 1 working · 1 waiting on its workers · 1 waiting on…")
+  '(("/p/one" nil "▌ one  1 needs approval · 1 asks you · 1 failed · 1 working · 1 waiting on its workers · 1 waiting …")
     ("approval" approval "  Needs ap… approval                                                         claude · reported  now")
     ("question" question "  Asks you  question                                                         claude · reported  now")
     ("failed" failed "  Failed    failed                                                           claude · reported  now")
@@ -129,7 +130,7 @@
     ("selection" idle "            selection                                                        claude · reported  now")
     ("cancelled" ended "  Ended     cancelled                                                        claude · reported  now")))
 (defconst romacs-agent-summary-readers--golden-folded
-  '(("/p/one" nil "one  1 needs approval · 1 asks you · 1 failed · 1 working · 1 waiting on its workers · 1 waiting on…")
+  '(("/p/one" nil "▌ one  1 needs approval · 1 asks you · 1 failed · 1 working · 1 waiting on its workers · 1 waiting …")
     ("approval" approval "  Needs ap… approval                                                         claude · reported  now")
     ("question" question "  Asks you  question                                                         claude · reported  now")
     ("failed" failed "  Failed    failed                                                           claude · reported  now")
@@ -142,7 +143,7 @@
     ("selection" idle "            selection                                                        claude · reported  now")
     ("cancelled" ended "  Ended     cancelled                                                        claude · reported  now")))
 (defconst romacs-agent-summary-readers--golden-remote
-  '(("/remote/project" nil "project  /remote/project  1 working")
+  '(("/remote/project" nil "▌ project  /remote/project  1 working")
     ("remote" working "  Working   remote                                         Edit              codex · remote     15s")))
 (defconst romacs-agent-summary-readers--golden-annotations
   '("  Idle claude · reported one"
@@ -188,7 +189,8 @@
     (should (equal (romacs-agent-summary-readers--board) romacs-agent-summary-readers--golden-board))
     (should (equal (romacs-agent-summary-readers--board t) romacs-agent-summary-readers--golden-folded))
     (let ((romacs-agent-board-source (car (romacs-agent-summary-readers--remote))))
-      (should (equal (romacs-agent-summary-readers--board) romacs-agent-summary-readers--golden-remote)))
+      (should (equal (romacs-agent-summary-readers--board nil "/remote/project")
+                     romacs-agent-summary-readers--golden-remote)))
     (should-not (gethash "stored" romacs-agent--sessions))))
 
 (ert-deftest romacs-agent-summary-readers-golden-labels ()
@@ -262,7 +264,8 @@
                     (lambda () (romacs-agent-summary-readers--board t)))
                    romacs-agent-summary-readers--golden-folded))
     (let ((romacs-agent-board-source (car (romacs-agent-summary-readers--remote))))
-      (should (equal (romacs-agent-summary-readers--with-trap #'romacs-agent-summary-readers--board)
+      (should (equal (romacs-agent-summary-readers--with-trap
+                      (lambda () (romacs-agent-summary-readers--board nil "/remote/project")))
                      romacs-agent-summary-readers--golden-remote)))))
 
 (defun romacs-agent-summary-readers--check-trapped-views (read expected)
@@ -274,13 +277,21 @@
   (romacs-agent-summary-readers--with-fixtures
     (romacs-agent-summary-readers--check-trapped-views #'romacs-agent-summary-readers--labels
                                                       romacs-agent-summary-readers--golden-labels)
-    (romacs-agent-summary-readers--views
-     (gethash "parent" romacs-agent--sessions) romacs-agent-log-local
-     (lambda ()
-       (let* ((label (lambda () (romacs-agent-menu--worker-label 0)))
-              (expected (funcall label)))
-         (should (string-match-p "child" expected))
-         (should (equal (romacs-agent-summary-readers--with-trap label) expected)))))))
+    (let ((parent (gethash "parent" romacs-agent--sessions))
+          (worker (gethash "working" romacs-agent--sessions)))
+      (push (romacs-agent-ui--child-row worker) (romacs-agent-children-rows parent))
+      (romacs-agent--summary-stale "parent")
+      (romacs-agent-summary-readers--views
+       parent romacs-agent-log-local
+       (lambda ()
+         (let* ((label (lambda () (romacs-agent-menu--worker-label 0)))
+                (expected (funcall label)))
+           (should (string-match-p "working" expected))
+           (should (equal (romacs-agent-summary-readers--with-trap label) expected))
+           (should-not (romacs-agent-menu--worker-label 1))
+           (should (equal (mapcar (lambda (row) (list (plist-get row :id) (plist-get row :key)))
+                                  (romacs-agent-summary-readers--with-trap #'romacs-agent-menu--thread-rows))
+                          '(("working" working) ("child" idle))))))))))
 
 (ert-deftest romacs-agent-summary-readers-trap-switcher ()
   (romacs-agent-summary-readers--with-fixtures
@@ -323,15 +334,17 @@
     (let* ((parent (gethash "parent" romacs-agent--sessions))
            (child (gethash "child" romacs-agent--sessions))
            (other (gethash "working" romacs-agent--sessions))
-           (rows (romacs-agent-children-rows parent))
            (opened nil))
+      (setf (romacs-agent-state child) 'running)
+      (romacs-agent-ui--summarize-children parent)
       (romacs-agent-summary-readers--views
        parent romacs-agent-log-local
        (lambda ()
          (should (string-match-p "child" (romacs-agent-menu--worker-label 0)))
          (should (equal (aref (romacs-agent-menu--slots) 0) "child"))
-         (setf (romacs-agent-children-rows parent)
-               (cons (romacs-agent-ui--child-row other) rows))
+         (push (romacs-agent-ui--child-row other) (romacs-agent-children-rows parent))
+         (romacs-agent--summary-stale "parent")
+         (should (equal (romacs-agent-menu--workers) '("working" "child")))
          (cl-letf (((symbol-function 'romacs-agent-show)
                     (lambda (session &rest _) (setq opened (romacs-agent-id session)))))
            (let ((last-command-event ?1)) (romacs-agent-menu-open-worker)))))
@@ -364,8 +377,34 @@
          (cl-letf (((symbol-function 'romacs-agent-show)
                     (lambda (session &rest _) (romacs-agent-id session))))
            (should (equal (romacs-agent-summary-readers--completion
-                           '("working  working" "child  child") "child  child" #'romacs-agent-menu-workers)
+                           '("W working  Working  working" "I child  Idle  child") "I child  Idle  child"
+                           (lambda () (cl-letf (((symbol-function 'romacs-agent-glyph) (lambda (role) (if (eq role 'chip-working) "W" "I")))
+                                                ((symbol-function 'romacs-agent--short) #'identity))
+                                        (romacs-agent-menu-threads))))
                           "child"))))))))
+
+(ert-deftest romacs-agent-summary-readers-thread-menu-opens-a-settled-thread ()
+  (romacs-agent-summary-readers--with-fixtures
+    (let ((parent (gethash "parent" romacs-agent--sessions))
+          (child (gethash "child" romacs-agent--sessions))
+          (worker (gethash "working" romacs-agent--sessions))
+          shown)
+      (setf (romacs-agent-settled-seq child) (romacs-agent-done-seq child)
+            (romacs-agent-children-rows parent)
+            (mapcar #'romacs-agent-ui--child-row (list worker child)))
+      (romacs-agent--summary-stale "parent")
+      (romacs-agent-summary-readers--views
+       parent romacs-agent-log-local
+       (lambda ()
+         (let ((live (concat (romacs-agent-glyph 'chip-working) " working  Working  working"))
+               (settled (concat (romacs-agent-glyph 'completed) " child  Done  child"))
+               (command (lookup-key romacs-agent-menu-map (kbd "t"))))
+           (should (eq command 'romacs-agent-menu-threads))
+           (cl-letf (((symbol-function 'romacs-agent-show)
+                      (lambda (session &optional action) (push (list session action) shown))))
+             (romacs-agent-summary-readers--completion
+              (list live settled) settled (lambda () (call-interactively command)))))))
+      (should (equal shown (list (list child nil)))))))
 
 (ert-deftest romacs-agent-summary-readers-plain-effort-completion ()
   (should (equal (romacs-agent-summary-readers--completion

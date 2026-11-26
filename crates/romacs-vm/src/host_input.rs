@@ -195,11 +195,11 @@ impl Vm {
     /// prepare_menu_bars's call of `pre-redisplay-function', with the windows
     /// to redisplay. Lisp runs only when it would do something: never for
     /// nil or `ignore', nor for `simple.el''s default while no window's
-    /// buffer has work on `pre-redisplay-functions'.
-    pub(crate) fn run_pre_redisplay(&mut self) -> Result<()> {
-        let Some(windows) = self.pre_redisplay_call()? else { return Ok(()) };
+    /// buffer has work on `pre-redisplay-functions'. Whether Lisp ran.
+    pub(crate) fn run_pre_redisplay(&mut self) -> Result<bool> {
+        let Some(windows) = self.pre_redisplay_call()? else { return Ok(false) };
         self.call_prepared_source_propagating("(lambda (windows) (and (fboundp 'romacs--pre-redisplay) (romacs--pre-redisplay windows)))", &[windows])?;
-        Ok(())
+        Ok(true)
     }
     /// The windows argument `romacs--pre-redisplay' takes now, when it has
     /// anything to do.
@@ -298,6 +298,16 @@ impl Vm {
     pub fn redisplay_done(&mut self, took: std::time::Duration) {
         let conses = self.allocation.consed.conses;
         self.display_state.stats.end(conses);
+        self.redisplay_settled(took);
+    }
+    /// The redisplay trigger found the frame on screen current
+    /// (`Vm::display_stale`) in TOOK: a redisplay that had nothing to do,
+    /// as GNU's leaves early when nothing changed. It settles a
+    /// `romacs--redisplay-since-mark' mark as a cycle does.
+    pub fn redisplay_found_current(&mut self, took: std::time::Duration) {
+        self.redisplay_settled(took);
+    }
+    fn redisplay_settled(&mut self, took: std::time::Duration) {
         if self.redisplay_since_mark == Some(None) {
             self.redisplay_since_mark = Some(Some(u64::try_from(took.as_micros()).unwrap_or(u64::MAX)));
         }
@@ -312,6 +322,62 @@ impl Vm {
     pub(crate) fn redisplay_inhibited(&mut self) -> Result<bool> {
         let slot = self.slot("inhibit-redisplay");
         Ok(self.variable_value(slot)? != Value::NIL)
+    }
+
+    pub(crate) fn current_message(&mut self) -> Result<Value> {
+        // In batch, message writes to stderr and the echo area stays empty.
+        let noninteractive = self.slot("noninteractive");
+        if !matches!(self.variable_value(noninteractive)?, Value::NIL | Value::UNBOUND) {
+            return Ok(Value::NIL);
+        }
+        let message = self.slot(crate::prim::ECHO_AREA_MESSAGE);
+        Ok(match self.variable_value(message)? {
+            Value::UNBOUND => Value::NIL,
+            value => value,
+        })
+    }
+
+    /// Whether the stock echo sync has nothing to show.
+    ///
+    /// Rule: advice on public functions must still dispatch. The answer is
+    /// "current" only while the `current-message' and `minibuffer-depth'
+    /// symbols the echo Lisp calls hold their own primitives and are still
+    /// the ones their names read as; otherwise the wait takes its full path,
+    /// which calls them. That covers changes made after the built-in echo
+    /// Lisp is installed (advice, `fset', `unintern', aliasing); altering the
+    /// reader (including `read-symbol-shorthands'), the evaluator or core
+    /// macros before that install is outside this contract, as GC timing is.
+    /// A pending read may skip the private
+    /// `romacs--echo-sync' and `romacs--wait-state', advice included, and a
+    /// collection or `post-gc-hook' those calls would have caused may move.
+    pub(crate) fn echo_current(&mut self) -> bool {
+        if !self.echo_functions_original() {
+            return false;
+        }
+        if self.names.get("romacs--echo-sync").is_none_or(|&slot| self.function_void(slot)) {
+            return true;
+        }
+        let shown = self.slot("romacs--echo-shown");
+        let Ok(shown) = self.variable_value(shown) else { return false };
+        if shown == Value::UNBOUND {
+            return false;
+        }
+        let Ok(message) = self.current_message() else { return false };
+        let level = self.slot("romacs--minibuf-level");
+        message == shown || self.variable_value(level).ok()
+            .and_then(Value::integer_value).is_some_and(|depth| depth > 0)
+    }
+
+    fn echo_functions_original(&self) -> bool {
+        // Compiled Lisp calls the symbol it was read with, so the check reads
+        // the symbols captured at startup, not whatever the names read as now:
+        // an uninterned original may be advised while a namesake holds the
+        // primitive. A name that no longer reads as its captured symbol means
+        // Lisp read since may call another one, so that answers no as well.
+        // A subr Value indexes its unique descriptor, whichever symbol holds it.
+        ["current-message", "minibuffer-depth"].into_iter().zip(self.echo_function_slots).all(|(name, slot)| {
+            self.names.get(name) == Some(&slot) && crate::prim::name(self.slots[slot].function) == Some(name)
+        })
     }
 
     /// The event a keyboard read returns at once for a quit already
@@ -410,21 +476,16 @@ fn wait<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, display: bool) -> Result
         // echo area at once, input pending or not (xdisp.c
         // message3_nolog, echo_area_display): a message left during
         // this wait (a timer's) is shown, and painted, before the input
-        // that may clear it is read.
-        if redraw && !m.leaf((), |vm, ()| vm.redisplay_inhibited())? {
-            // The deadline was computed from the timers and the unread
-            // queues; the echo area's functions (a toast's expiry) or
-            // a redisplay's Lisp (a mode-line :eval) may change them,
-            // and then the wait ends for Lisp to compute it again.
-            let before = wait_state(m, gc.by_ref())?;
-            let echoed = threaded::call_source(m, gc.by_ref(), ECHO_SYNC, None, (), |_, (), echoed| echoed.map(|v| v != Value::NIL))?;
-            if echoed || !m.leaf((), |vm, ()| host(vm).input_pending()) {
-                threaded::redisplay(m, gc.by_ref(), (), |vm, (), (started, frame)| paint(vm, started, frame))?;
-                redraw = false;
-            }
-            if wait_state(m, gc.by_ref())? != before {
-                m.leaf((), |vm, ()| ended(vm, HostEvent::Timeout));
-                return Ok(());
+        // that may clear it is read. With input pending and the echo
+        // current there is nothing to show, so the block is skipped, as
+        // read_char skips redisplay (`Vm::echo_current').
+        if redraw && m.leaf((), |vm, ()| {
+            Ok::<_, String>(!vm.redisplay_inhibited()? && !(vm.echo_current() && host(vm).input_pending()))
+        })? {
+            match show_before_read(m, gc.by_ref())? {
+                BeforeRead::Painted => redraw = false,
+                BeforeRead::NotPainted => (),
+                BeforeRead::Ended => return Ok(()),
             }
         }
         // The paint sent a bounded share of new images: paint the rest
@@ -449,6 +510,24 @@ fn wait<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, display: bool) -> Result
             return Ok(());
         }
     }
+}
+
+enum BeforeRead { Painted, NotPainted, Ended }
+
+fn show_before_read<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>) -> Result<BeforeRead> {
+    // Echo and redisplay hooks can change the timers or unread queues the
+    // deadline depends on. Let Lisp compute the deadline again when they do.
+    let before = wait_state(m, gc.by_ref())?;
+    let echoed = threaded::call_source(m, gc.by_ref(), ECHO_SYNC, None, (), |_, (), echoed| echoed.map(|v| v != Value::NIL))?;
+    let paint_needed = echoed || !m.leaf((), |vm, ()| host(vm).input_pending());
+    if paint_needed {
+        threaded::redisplay(m, gc.by_ref(), (), |vm, (), (started, frame)| paint(vm, started, frame))?;
+    }
+    if wait_state(m, gc.by_ref())? != before {
+        m.leaf((), |vm, ()| ended(vm, HostEvent::Timeout));
+        return Ok(BeforeRead::Ended);
+    }
+    Ok(if paint_needed { BeforeRead::Painted } else { BeforeRead::NotPainted })
 }
 
 /// The wait-state probe's printed value (`WAIT_STATE`).
@@ -733,6 +812,51 @@ mod tests {
     }
     fn shown(vm: &mut Vm, source: &str) -> String {
         vm.eval_source(source).map_or_else(|e| format!("VM-ERROR {e}"), |v| v.display().unwrap())
+    }
+
+    #[test]
+    fn pending_input_with_current_echo_skips_the_display_calls() {
+        let mut vm = Vm::new();
+        vm.set_host_input(Some(Box::new(Keys(vec![120]))));
+        assert_eq!(shown(&mut vm, "(progn
+            (setq romacs--echo-shown (current-message) echo-calls 0 state-calls 0)
+            (defun romacs--wait-state () (setq state-calls (1+ state-calls)) nil)
+            (defun romacs--echo-sync () (setq echo-calls (1+ echo-calls)) nil)
+            (list (romacs--read-host-event) echo-calls state-calls))"), "(120 0 0)");
+    }
+
+    /// The stand-in exposes only the quit. The native events in HELD stay
+    /// outside both the readiness and event operations.
+    struct HeldKeys(
+        Vec<HostEvent>,
+        // CELL(Plain)
+        std::rc::Rc<std::cell::Cell<usize>>,
+    );
+
+    impl HostInput for HeldKeys {
+        fn input_pending(&mut self) -> bool { false }
+        fn redisplay(&mut self, _: HostFrame<'_>) -> std::result::Result<Vec<crate::WindowEnd>, String> {
+            self.1.set(self.1.get() + 1);
+            Ok(Vec::new())
+        }
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<HostEvent, String> {
+            assert_eq!(self.0.len(), 2);
+            assert_eq!(self.1.get(), 1, "paint before taking C-g");
+            Ok(HostEvent::Key(CommandEvent::Character(QUIT_CHAR)))
+        }
+    }
+
+    #[test]
+    fn hidden_keys_do_not_prevent_a_paint_before_quit() {
+        use romacs_display_protocol::frame_time::observe_platform_now;
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        let keys = [97, 98].map(|key| HostEvent::NativeKey(CommandEvent::Character(key), observe_platform_now()));
+        let paints = std::rc::Rc::new(std::cell::Cell::new(0));
+        vm.set_host_input(Some(Box::new(HeldKeys(keys.into(), paints.clone()))));
+        assert_eq!(shown(&mut vm, "(romacs--read-host-event)"), "7");
+        assert_eq!(paints.get(), 1);
+        assert!(vm.take_typing_outcomes().is_empty());
     }
 
     /// The wait's own Lisp (the wait-state probe, echo-sync) and a

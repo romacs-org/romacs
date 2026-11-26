@@ -89,6 +89,13 @@ pub(super) struct Window {
     /// How many times the window's buffer changed: what a record of its
     /// display compares, as a collection moves the buffer's Value.
     pub(crate) shows: u64,
+    /// For a window showing a stand-in, its view's picture revisions,
+    /// shared with the ownership receiver and the render thread
+    /// (`PaneRevisions`): one per window id, owner incarnation and view
+    /// generation, which ownership's view slot makes, a fresh one for a
+    /// new view or incarnation. None for any other window. The redisplay
+    /// trigger reads it (`Vm::display_stale').
+    pub(crate) pane_revisions: Option<std::sync::Arc<romacs_display_protocol::pane_revisions::PaneRevisions>>,
     pub force_start: bool,
 }
 impl Window {
@@ -143,6 +150,7 @@ impl Window {
             end_distance: 0,
             end_valid: false,
             shows: 0,
+            pane_revisions: None,
             force_start: false,
         }
     }
@@ -197,10 +205,13 @@ pub(super) struct WindowState {
     /// The display's device pixels per logical pixel (a HiDPI output's
     /// scale): images are decoded at it and laid out in logical pixels.
     pub device_scale: f32,
+    /// An owner's: its frames are laid out for its master's display, so
+    /// they show fringes with no display open here (owner/display.rs).
+    pub laid_for_display: bool,
 }
 impl Default for WindowState {
     fn default() -> Self {
-        Self { next: 1, select_count: 0, line: 20, column: 10, next_frame: 1, device_scale: 1.0 }
+        Self { next: 1, select_count: 0, line: 20, column: 10, next_frame: 1, device_scale: 1.0, laid_for_display: false }
     }
 }
 impl Vm {
@@ -1000,14 +1011,9 @@ impl Vm {
         self.resize_root_window(frame, width, height)?;
         let root = self.frame_of_id(frame)?;
         self.set_top_frame_geometry(root, width, height, self.window_state.line, self.window_state.column)?;
-        let mut ids = vec![];
-        self.window_leaf_ids(self.frame(root)?.root, &mut ids)?;
+        let ids = self.frame_window_ids(root)?;
         let mini = self.frame(root)?.minibuffer;
-        // A hosted mini-window is shown with its host's windows, and a
-        // borrowed one with its own frame's.
-        let host = self.minibuffer_host(root);
         let own = self.owns_minibuffer(root)?;
-        if host.is_none() && own { ids.push(self.window(mini)?.id); }
         // Redisplay sizes the mini-window to its display before laying out.
         if own && self.resize_mini_window(root, mini)? { self.refit_mini_window(root, width, height)?; }
         self.reconcile_terminal_geometry()?;
@@ -1020,10 +1026,10 @@ impl Vm {
     }
     /// GNU WINDOW_LEFT_FRINGE_WIDTH and WINDOW_RIGHT_FRINGE_WIDTH
     /// (window.h): V's own widths, else its frame's; none on a frame
-    /// without a window system.
+    /// without a window system (`fringes_shown`).
     /// The minibuffer window a child frame hosts has that frame's.
     pub(crate) fn window_fringe_widths(&self, v: Value) -> Result<[u32; 2]> {
-        if !self.window_system_open() { return Ok([0, 0]); }
+        if !self.fringes_shown() { return Ok([0, 0]); }
         let w = self.window(v)?;
         let shown_in = match self.minibuffer_host(self.top_frame(w.frame)) { Some(host) if w.mini => host, _ => w.frame };
         let frame = self.frame(shown_in).map_or([0, 0], |f| f.fringes);
@@ -1035,7 +1041,7 @@ impl Vm {
     /// PERSISTENT, when given, unless the widths failed. True when V
     /// changed. Nothing on a frame without a window system.
     pub(crate) fn set_window_fringes(&mut self, v: Value, widths: [Value; 2], outside: bool, persistent: Option<bool>) -> Result<bool> {
-        if !self.window_system_open() { return Ok(false); }
+        if !self.fringes_shown() { return Ok(false); }
         let new = widths.map(|width| width.integer_value().and_then(|n| u32::try_from(n).ok()));
         let frame = { let w = self.window(v)?; self.frame(w.frame).map_or([0, 0], |f| f.fringes) };
         let column = self.window_state.column;
@@ -1096,25 +1102,44 @@ impl Vm {
     /// The live windows IDS name, frozen and placed in their frame. Lisp
     /// run by one window's redisplay may delete a later one, or its own.
     pub(super) fn snapshot_leaves(&mut self, ids: Vec<u64>) -> Result<Vec<(u32, u32, romacs_layout_input::WindowSnapshot)>> {
-        // The kept window list, not a heap walk (live_window_index).
-        let live = |vm: &mut Self, id| vm.live_window_index(id).map(|i| Value::reference(i + 1, 0));
         let mut snapshots = vec![];
         for id in ids {
-            let Some(v) = live(self, id) else { continue };
-            let w = self.window(v)?;
-            // A hosting child frame's root window may have no lines.
-            if w.height == 0 { continue; }
-            let [left, right] = self.window_text_insets(v)?;
-            let [_, below] = self.window_dividers(v)?;
-            let w = self.window(v)?;
-            let (x, y, width, height) = (w.x + left, w.y, w.width.saturating_sub(left + right), w.height.saturating_sub(below));
+            let Some((v, (x, y, width, height))) = self.shown_leaf(id)? else { continue };
             match self.snapshot_window(v, width, height) {
                 Ok(snapshot) => snapshots.push((x, y, snapshot)),
-                Err(_) if live(self, id).is_none() => {}
+                Err(_) if self.live_window(id).is_none() => {}
                 Err(error) => return Err(error),
             }
         }
         Ok(snapshots)
+    }
+    /// The live window whose id is ID: the kept window list, not a heap
+    /// walk (`live_window_index').
+    pub(super) fn live_window(&mut self, id: u64) -> Option<Value> {
+        self.live_window_index(id).map(|i| Value::reference(i + 1, 0))
+    }
+    /// The live window ID as a frame snapshot shows it, with its text
+    /// area's box (x, y, width, height); None when it is gone or has no
+    /// lines (a hosting child frame's root window may have none).
+    pub(super) fn shown_leaf(&mut self, id: u64) -> Result<Option<(Value, (u32, u32, u32, u32))>> {
+        let Some(v) = self.live_window(id) else { return Ok(None) };
+        if self.window(v)?.height == 0 { return Ok(None); }
+        let [left, right] = self.window_text_insets(v)?;
+        let [_, below] = self.window_dividers(v)?;
+        let w = self.window(v)?;
+        Ok(Some((v, (w.x + left, w.y, w.width.saturating_sub(left + right), w.height.saturating_sub(below)))))
+    }
+    /// The ids of the windows top-level frame ROOT's snapshot shows of its
+    /// own, in its order: its leaves, then its mini-window unless a child
+    /// frame hosts it (shown with its host's windows) or another frame's
+    /// is borrowed.
+    pub(super) fn frame_window_ids(&mut self, root: Value) -> Result<Vec<u64>> {
+        let mut ids = vec![];
+        self.window_leaf_ids(self.frame(root)?.root, &mut ids)?;
+        if self.minibuffer_host(root).is_none() && self.owns_minibuffer(root)? {
+            ids.push(self.window(self.frame(root)?.minibuffer)?.id);
+        }
+        Ok(ids)
     }
     /// The leaf ids of window V's subtree, in tree order.
     pub(super) fn leaf_ids(&self, v: Value) -> Result<Vec<u64>> {
@@ -2368,7 +2393,7 @@ impl<'a> Windows<'a> {
         let (width, height) = self.frame_text_pixels(frame)?;
         let height = if self.is_child_frame(frame)? { height } else { height.saturating_sub(self.vm.tab_bar_lines(frame) * self.vm.window_state.line) };
         let ([left, right], _) = self.frame_chrome(frame)?;
-        Ok((if self.vm.window_system_open() { width.saturating_sub(left + right) } else { width }, height))
+        Ok((if self.vm.fringes_shown() { width.saturating_sub(left + right) } else { width }, height))
     }
     /// FRAME_COLS and FRAME_LINES of FRAME's text area.
     pub(crate) fn frame_text_size(&mut self, frame: Value) -> std::result::Result<(i64, i64), Fault> {
@@ -2381,6 +2406,7 @@ impl<'a> Windows<'a> {
     pub(crate) fn store_frame_parameter(&mut self, frame: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
         self.live_frame(frame)?;
         let frame = if frame == Value::NIL { self.frame() } else { frame };
+        self.vm.display_state.frame_revision += 1;
         let parameters = &mut self.vm.frame_mut(frame).map_err(internal)?.parameters;
         match parameters.iter_mut().find(|(k, _)| *k == key) {
             Some((_, v)) => *v = value,

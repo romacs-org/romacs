@@ -41,15 +41,13 @@ type SignalText = (String, String);
 /// request's value goes straight to a leaf.
 fn run_command_event<'b>(mut m: Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, event: Form) -> Result<Option<(String, Option<SignalText>)>> {
     let m = &mut m;
-    let set_event = call("setq", vec![
-        sym("last-command-event"),
-        quote(event.clone()),
-        sym(crate::prim::prims::keyboard::COMMAND_KEYS),
-        Form::Vector(vec![event.clone()]),
-        sym(crate::prim::prims::keyboard::SINGLE_KEY_START),
-        Form::Int(0),
-    ]);
-    threaded::eval_form(m, gc.by_ref(), &set_event, (), ignored)?;
+    // The event, which `setq` returns, is also this command's keys.
+    let set_event = call("setq", vec![sym("last-command-event"), quote(event.clone())]);
+    threaded::eval_form(m, gc.by_ref(), &set_event, (), |vm, (), event| -> Result<()> {
+        let event = event?;
+        vm.streams_mut().store(crate::command_loop::MAIN, crate::command_loop::Store::Keys(&[event], 0));
+        Ok(())
+    })?;
     // The GUI records the keys of a sequence it resolved itself.
     m.leaf(&event, |vm, event| {
         if !matches!(event, Form::Sym(name) if name == "romacs-gui-sequence") {

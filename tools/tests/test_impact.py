@@ -22,7 +22,7 @@ def workspace(root):
         'crates/romacs-vm/Cargo.toml': '[package]\nname = "romacs-vm"\nversion = "0.0.0"\nedition = "2021"\n',
         'crates/romacs-vm/src/lib.rs': '',
         'crates/romacs-vm/src/gc.rs': '',
-        'crates/romacs-vm/tests/all/standalone.txt': '',
+        'crates/romacs-vm/tests/all/standalone.txt': 'plain: runs in a child process\n',
         'crates/romacs-vm/tests/quit_async.rs': '',
         'crates/romacs-vm/tests/status_bar.rs': '#[path = "support/gui_probe.rs"]\nmod gui_probe;\n',
         'crates/romacs-vm/tests/support/gui_probe.rs': '#[path = "gnu_lisp.rs"]\nmod gnu_lisp;\n',
@@ -35,6 +35,12 @@ def workspace(root):
                                            '[dependencies]\nromacs-vm = { path = "../romacs-vm" }\n',
         'crates/romacs-vm-gui/src/main.rs': 'fn main() {}\n',
         'crates/romacs-vm-gui/tests/all/standalone.txt': '',
+        'crates/romacs-vm-test-build/Cargo.toml': '[package]\nname = "romacs-vm-test-build"\nversion = "0.0.0"\n'
+                                                '[lib]\nproc-macro = true\n',
+        'crates/romacs-vm-test-build/src/lib.rs': 'const LIST: &str = "standalone.txt";\n',
+        'crates/romacs-vm-gui-test-build/Cargo.toml': '[package]\nname = "romacs-vm-gui-test-build"\nversion = "0.0.0"\n'
+                                                    '[lib]\nproc-macro = true\n',
+        'crates/romacs-vm-gui-test-build/src/lib.rs': '//! Reads the standalone.txt list.\n',
         'crates/romacs-vm-gui/tests/scaling.rs': 'const H: &str = "harness/scaling_live.py";\n',
         'crates/romacs-vm-gui/tests/fixtures/sample.el': '',
         'crates/romacs-vm-gui/tests/samples.rs': 'const F: &str = "tests/fixtures/sample.el";\n',
@@ -100,6 +106,12 @@ class Select(unittest.TestCase):
                          'binary_id(romacs-vm-gui::samples) | ((binary_id(romacs-vm-gui::all)) & test(/^samples::/))')
         self.assertIn('binary_id(romacs-vm::gnu)', impact.test_file('romacs-vm::plain'))
         self.assertEqual(impact.test_file('romacs-display-runtime::x'), 'binary_id(romacs-display-runtime::x)')
+
+    def test_a_standalone_list_reaches_only_its_own_package(self):
+        found = self.select('crates/romacs-vm/tests/all/standalone.txt')
+        self.assertEqual(set(found['packages']), {'romacs-vm'})
+        runs = {package: flags for package, flags, _ in impact.runs(found, self.root)}
+        self.assertEqual(runs['romacs-vm'], ['--lib', '--bins', '--test', 'all', '--test', 'gnu', '--test', 'plain'])
 
     def test_a_support_file_reaches_the_tests_that_include_it_through_another(self):
         found = self.select('crates/romacs-vm/tests/support/gnu_lisp.rs')
@@ -193,6 +205,10 @@ class Select(unittest.TestCase):
         self.assertNotIn('startup_failed', self.select('crates/romacs-vm-gui/src/fonts.rs')['harnesses'])
         self.assertIn('live_update', self.select('lisp/session/romacs-live.el')['harnesses'])
         self.assertIn('live_update', self.select('crates/romacs-vm-gui/harness/live_update_live.py')['harnesses'])
+        self.assertIn('banner', self.select('crates/romacs-logo/src/banner.rs')['harnesses'])
+        self.assertIn('banner', self.select('lisp/ui/romacs-banner.el')['harnesses'])
+        self.assertIn('banner', self.select('crates/romacs-vm/src/display.rs')['harnesses'])
+        self.assertIn('agent', self.select('lisp/ui/romacs-list.el')['harnesses'])
 
     def test_documentation_reaches_only_the_structural_rules(self):
         found = self.select('doc/x.org', 'AGENTS.md', 'tools/tests/test_x.py')

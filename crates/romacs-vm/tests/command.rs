@@ -251,3 +251,14 @@ fn a_closure_binding_runs_as_the_command() {
                                     (eq last-command (car closure-ran)) (eq real-last-command last-command))"),
                "(t t t t)");
 }
+/// An embedder's command has its event as its keys, also when
+/// `last-command-event` is local to the buffer.
+#[test]
+fn a_command_event_is_its_own_key_with_a_local_last_command_event() {
+    let mut vm = Vm::new();
+    vm.eval_source("(progn (set-default 'last-command-event 'default) (set (make-local-variable 'last-command-event) 'local) \
+                    (defvar probe nil) (global-set-key [f7] (lambda () (interactive) (setq probe (this-command-keys-vector)))))")
+        .unwrap();
+    vm.command_event(CommandEvent::Named("f7".into())).unwrap();
+    assert_eq!(text(&mut vm, "probe"), "[f7]");
+}

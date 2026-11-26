@@ -456,3 +456,12 @@ fn a_box_over_the_limit_is_refused() {
         );
     }
 }
+
+/// A font id names the owner slot whose range it is in: what a dead
+/// owner's fonts are forgotten by.
+#[test]
+fn a_font_id_names_its_owner_slot() {
+    use crate::pane_picture::owner_font_slot;
+    assert_eq!(owner_font_slot((u32::from(SLOT) + 1) << 24), Some(SLOT));
+    assert_eq!(owner_font_slot(5), None, "a master font");
+}

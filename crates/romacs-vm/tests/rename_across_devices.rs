@@ -117,10 +117,11 @@ fn text(codes: &str) -> String {
 /// Run each of CASES (with A and B in them) in pinned GNU and here, each on
 /// a fresh fixture, and say how they differ.
 fn compare(name: &str, cases: &[&str]) -> Vec<String> {
+    // A world builder re-runs this test with a read-only temporary directory.
+    let mut vm = gnu_lisp::gnu_lisp(&[]);
     let (a, b) = roots(name);
     let fill = |case: &str| case.replace("A/", &format!("{}/", a.display())).replace("B/", &format!("{}/", b.display()));
     let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
-    let mut vm = gnu_lisp::gnu_lisp(&[]);
     let mut failures = Vec::new();
     for case in cases {
         let expression = fill(case);
@@ -215,8 +216,8 @@ fn a_backup_crosses_filesystems() {
 /// and loses its bytes (ledger/divergences/VM2-COPY-FILE-SAME-FILE.md).
 #[test]
 fn a_destination_aliasing_the_source_keeps_its_bytes() {
-    let (a, b) = roots("alias");
     let mut vm = gnu_lisp::gnu_lisp(&[]);
+    let (a, b) = roots("alias");
     for case in ["(rename-file \"A/f\" \"B/back\" t)", "(copy-file \"A/f\" \"B/back\" t)",
                  "(copy-file \"B/back\" \"A/f\" t)"] {
         fixture(&a, &b);
@@ -237,8 +238,8 @@ fn a_destination_aliasing_the_source_keeps_its_bytes() {
 /// destination (S2): the rename calls the primitives, as GNU's C does.
 #[test]
 fn advice_cannot_skip_the_copy_before_the_delete() {
-    let (a, b) = roots("advice");
     let mut vm = gnu_lisp::gnu_lisp(&[]);
+    let (a, b) = roots("advice");
     vm.eval_source("(progn (defun t-skip (&rest _) nil)
                            (advice-add 'copy-file :override #'t-skip)
                            (advice-add 'make-symbolic-link :override #'t-skip))").unwrap();
@@ -286,6 +287,7 @@ impl Drop for Reader {
 /// case within five seconds rather than hanging it (Sol r3 S6).
 #[test]
 fn copy_file_onto_a_fifo_writes_through_it() {
+    let mut vm = gnu_lisp::gnu_lisp(&[]);
     let dir = std::env::temp_dir().join(format!("romacs-copy-fifo-{}", std::process::id()));
     let run = |engine: &mut dyn FnMut(&str) -> String| {
         let _ = std::fs::remove_dir_all(&dir);
@@ -307,7 +309,6 @@ fn copy_file_onto_a_fifo_writes_through_it() {
         assert!(output.status.success(), "GNU: {}", String::from_utf8_lossy(&output.stderr));
         text(&String::from_utf8_lossy(&output.stdout))
     });
-    let mut vm = gnu_lisp::gnu_lisp(&[]);
     let romacs = run(&mut |expression| vm.eval_source(&wrapped(expression)).and_then(romacs_vm::Local::display).map(|v| text(&v)).unwrap_or_else(|e| e));
     assert_eq!(romacs, gnu);
     assert_eq!(romacs.1, "data\n");

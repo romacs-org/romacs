@@ -125,3 +125,65 @@ fn a_thread_is_placed_on_its_laid_row_and_never_over_other_text() {
     let still = TextAnimation { still: true, ..placed };
     assert_eq!(located(&frame, &still), None);
 }
+
+fn banner(pattern: romacs_logo::banner::Pattern, epoch: u64) -> TextAnimation {
+    TextAnimation { window: 1, top: 0, cols: 20, rows: 1, anchor: None, rise: None, fps: 30, moving: true, still: false,
+                    kind: TextAnimationKind::Banner { pattern, epoch, colours: vec![[0x10, 0x20, 0x30], [0xa0, 0xb0, 0xc0]] } }
+}
+
+#[test]
+fn a_banner_moves_in_its_stops_colours_and_keeps_its_motion_for_its_pattern_and_epoch() {
+    use romacs_display_protocol::text_animation::located;
+    use romacs_logo::banner::Pattern;
+    let mut animations = TextAnimations::default();
+    let start = Instant::now();
+    animations.replace(vec![(1, banner(Pattern::Wave, 3))]);
+    animations.tick(start);
+    let first = animations.running[&1].animation.cells(0.0);
+    for step in 1..=5 { animations.tick(start + Duration::from_millis(40 * step)); }
+    let moved = animations.running[&1].moved;
+    let cells = animations.running[&1].animation.cells(moved);
+    assert_ne!(cells, first, "the render thread alone moves it");
+    assert_eq!(cells.len(), 20);
+    assert!(cells.iter().all(|c| c.1.is_none_or(|rgb| rgb == 0x102030 || rgb == 0xa0b0c0)), "only its stops' colours");
+    // The same pattern and epoch go on; another of either starts over.
+    animations.replace(vec![(1, banner(Pattern::Wave, 3))]);
+    assert!((animations.running[&1].moved - moved).abs() < 1e-9);
+    animations.replace(vec![(1, banner(Pattern::Rain, 3))]);
+    assert_eq!(animations.running[&1].moved, 0.0);
+    // Cells, never a scene.
+    assert!(!banner(Pattern::Sweep, 0).kind.scened());
+}
+
+#[test]
+fn a_banner_is_placed_on_its_own_cells_and_never_over_other_text() {
+    use romacs_display_protocol::face::BoxVerticalEdges;
+    use romacs_display_protocol::frame_glyphs::GlyphRowRole;
+    use romacs_display_protocol::text_animation::located;
+    use romacs_display_protocol::types::{DisplayWindowId, FaceId};
+    use romacs_logo::banner::Pattern;
+    // Two rows of a still banner (braille and block shades), then a list row.
+    let lines = ["⠀⠔▒▓█⠀", "⡀⠀░⠀⠀⠂", "a row "];
+    let draw = |gutter: bool| {
+        let mut frame = FrameGlyphBuffer::new();
+        frame.char_width = 8.0;
+        frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+        for (row, line) in lines.iter().enumerate() {
+            let text = if gutter { format!("{} {line}", row + 1) } else { (*line).to_string() };
+            for (c, ch) in text.chars().enumerate() {
+                frame.add_char_on_row(ch, (c as f32 * 8.0, 100.0 + row as f32 * 16.0, row as u32), (8.0, 16.0, 12.0),
+                                      FaceId::new(0), BoxVerticalEdges::Both);
+            }
+        }
+        frame
+    };
+    let placed = TextAnimation { cols: 6, rows: 2, rise: Some((100.0, 16.0)), ..banner(Pattern::Sweep, 0) };
+    assert_eq!(located(&draw(false), &placed).map(|a| a.top), Some(0));
+    // A line-number gutter where the block would start: the still frame alone.
+    assert_eq!(located(&draw(true), &placed), None);
+    // A block taller than the banner's rows reaches the list's text: refused.
+    assert_eq!(located(&draw(false), &TextAnimation { rows: 3, ..placed.clone() }), None);
+    // Not placed by the host, or motion off: the still frame alone.
+    assert_eq!(located(&draw(false), &TextAnimation { rise: None, ..placed.clone() }), None);
+    assert_eq!(located(&draw(false), &TextAnimation { still: true, ..placed }), None);
+}

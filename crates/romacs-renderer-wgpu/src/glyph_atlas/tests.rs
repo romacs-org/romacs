@@ -1403,3 +1403,48 @@ fn color_variation_settings_prefer_resolved_coordinates() {
         vec![(tag(b"EDPT"), 42.5)]
     );
 }
+
+/// Forgetting fonts by predicate (a dead owner's slot) drops the ones it
+/// names and keeps the rest.
+#[cfg(unix)]
+#[test]
+fn forgotten_fonts_leave_the_atlas_and_the_others_stay() {
+    let (Some((_, _, mut atlas)), Some(font)) = (try_test_device_and_atlas(), resolved_test_font("Liberation Mono", 400, 14.0)) else {
+        return;
+    };
+    let other = ResolvedFont { id: ResolvedFontId(font.id.0 + 1), ..font.clone() };
+    let mut frame = romacs_display_protocol::FrameGlyphBuffer::default();
+    frame.fonts.insert(font.id, font.clone());
+    frame.fonts.insert(other.id, other.clone());
+    atlas.set_current_frame_fonts(frame.font_bindings());
+    assert!(atlas.resolved_font(font.id).is_some() && atlas.resolved_font(other.id).is_some());
+    atlas.forget_fonts(|id| id == font.id);
+    assert!(atlas.resolved_font(font.id).is_none());
+    assert!(atlas.resolved_font(other.id).is_some());
+}
+
+/// A font forgotten (a dead owner's slot) takes the glyph masks cached from
+/// it: a reused id with another outline rasterizes anew. Forgetting no
+/// installed font keeps them.
+#[cfg(unix)]
+#[test]
+fn forgetting_a_font_drops_the_masks_cached_from_it() {
+    let (Some((device, queue, mut atlas)), Some(font)) = (try_test_device_and_atlas(), resolved_test_font("Liberation Mono", 400, 16.0)) else {
+        return;
+    };
+    let mut frame = romacs_display_protocol::FrameGlyphBuffer::default();
+    frame.fonts.insert(font.id, font.clone());
+    atlas.set_current_frame_fonts(frame.font_bindings());
+    let mut face = Face::new(FaceId::new(11));
+    face.font_family = "Liberation Mono".to_owned();
+    face.font_size = 16.0;
+    face.default_resolved_font_id = Some(font.id);
+    let key = GlyphKey { charcode: u32::from('a'), face_id: FaceId::new(11), font_size_bits: 16.0f32.to_bits(), x_bin: SubpixelBin::Zero, y_bin: SubpixelBin::Zero };
+    atlas.get_or_create_atlas(&device, &queue, &key, Some(&face), SubpixelRequest::Disabled).expect("a mask");
+    assert_eq!(atlas.len(), 1);
+    atlas.forget_fonts(|id| id != font.id);
+    assert_eq!(atlas.len(), 1, "no installed font forgotten: the masks stay");
+    atlas.forget_fonts(|id| id == font.id);
+    assert_eq!(atlas.len(), 0, "the forgotten font's mask is gone");
+    assert!(atlas.resolved_font(font.id).is_none());
+}

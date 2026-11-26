@@ -340,17 +340,22 @@ started, or HANDLE finishes, with the plan or the first error."
   "Start the helper copying the INDEXth entry of HANDLE's plan."
   (let ((entry (aref (plist-get handle :entries) index))
         (output (generate-new-buffer " *romacs-attach-tool*" t)))
-    (plist-put handle :running (1+ (plist-get handle :running)))
-    (push (make-process
-           :name "romacs-attach-tool" :buffer output :noquery t :connection-type 'pipe
-           :command (cons (romacs-attach--program)
-                          (romacs-attach--arguments (car entry) (plist-get (cdr entry) :kind)
-                                                    (plist-get (cdr entry) :prep) (plist-get handle :directory)))
-           :stderr (get-buffer-create " *romacs-attach-tool-errors*")
-           :sentinel (lambda (process _event)
-                       (unless (process-live-p process)
-                         (romacs-attach--prepare-reply handle index entry process output))))
-          (plist-get handle :processes))))
+    (condition-case err
+        (let ((process
+               (make-process
+                :name "romacs-attach-tool" :buffer output :noquery t :connection-type 'pipe
+                :command (cons (romacs-attach--program)
+                               (romacs-attach--arguments (car entry) (plist-get (cdr entry) :kind)
+                                                         (plist-get (cdr entry) :prep) (plist-get handle :directory)))
+                :stderr (get-buffer-create " *romacs-attach-tool-errors*")
+                :sentinel (lambda (process _event)
+                            (unless (process-live-p process)
+                              (romacs-attach--prepare-reply handle index entry process output))))))
+          (push process (plist-get handle :processes))
+          (plist-put handle :running (1+ (plist-get handle :running))))
+      (error
+       (kill-buffer output)
+       (romacs-attach--prepare-finish handle (list :error (error-message-string err)))))))
 
 (defun romacs-attach--prepare-start (handle)
   "Start HANDLE's pending copies, `romacs-attach-jobs' at most running."

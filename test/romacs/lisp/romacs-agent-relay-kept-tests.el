@@ -126,7 +126,7 @@
           (should (equal (file-symlink-p route) old))
           (let ((connection (romacs-agent-connection session)))
             (process-put connection 'drain-timer t)
-            (romacs-agent--filter connection "{\"seq\":1}\n")
+            (romacs-agent--filter connection '("{\"seq\":1}"))
             (delete-process peer)
             (romacs-agent-relay-tests--wait (lambda () (process-get connection 'ended)))
             (should (eq (romacs-agent-connection session) connection))

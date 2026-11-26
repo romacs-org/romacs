@@ -31,6 +31,7 @@ use std::time::{Instant, SystemTime};
 pub use std::fs::OpenOptions;
 pub use sys::Passwd;
 
+mod runtime_epoch;
 mod sys;
 
 /// rustix's error, as std's.
@@ -650,11 +651,8 @@ pub fn own_arguments() -> Vec<OsString> {
     std::env::args_os().skip(1).collect()
 }
 
-/// The generation of runtime tree this executable was built for: the tree's own
-/// `etc/romacs-runtime-epoch`, read when the executable was compiled. It is
-/// raised when the tree's layout or its contract with the executable changes
-/// so that one cannot run on the other.
-const RUNTIME_EPOCH: &str = include_str!("../../../etc/romacs-runtime-epoch");
+/// SHA-256 of the sorted, NUL-terminated epoch fragment names at build time.
+pub(crate) const RUNTIME_EPOCH: &str = env!("ROMACS_RUNTIME_EPOCH");
 
 /// The file beside an executable that names its runtime tree, for one that
 /// was copied out of its build: one line, a directory, relative to the file's
@@ -717,9 +715,9 @@ fn found_runtime() -> Result<PathBuf, String> {
     static FOUND: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
     let root = FOUND.get_or_init(|| located_runtime().map(|root| true_tree(&root))).as_ref().map_err(String::clone)?;
     if building() {
-        host_fact("runtime-root", path_json(root));
-        if let Err(why) = runtime_tree(root) {
-            note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why}));
+        match runtime_tree(root) {
+            Ok(()) => host_fact("runtime-root", path_json(root)),
+            Err(why) => note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why})),
         }
     }
     Ok(root.clone())
@@ -809,15 +807,22 @@ fn in_build_target(exe: &Path, tree: &Path) -> bool {
 }
 
 /// Whether ROOT is a runtime tree of this executable's generation, or why not.
+/// The runtime-root fact is published only after this check passes. Recording
+/// the listing here would key that same fact to the directory's enumeration order.
 fn runtime_tree(root: &Path) -> Result<(), String> {
     if !probe(Probe::IsDir, root.join("lisp")) || !probe(Probe::IsDir, root.join("etc")) {
         return Err("is not a Romacs runtime tree (it has no lisp or no etc)".into());
     }
-    let wanted = RUNTIME_EPOCH.trim();
-    match read_to_string(root.join("etc/romacs-runtime-epoch")) {
-        Ok(found) if found.trim() == wanted => Ok(()),
-        Ok(found) => Err(format!("is a runtime tree of generation {}, and this executable was built for generation {wanted}", found.trim())),
-        Err(_) => Err(format!("is a runtime tree from before generations (no etc/romacs-runtime-epoch), and this executable was built for generation {wanted}")),
+    let wanted = RUNTIME_EPOCH;
+    let directory = root.join(runtime_epoch::DIRECTORY);
+    let generation = crate::flight::checked("runtime-epoch", || bytes(&directory), || {
+        std::fs::read_dir(&directory)
+            .and_then(|entries| runtime_epoch::digest(entries.map(|entry| entry.map(|entry| entry.file_name()))))
+    }, |result| crate::flight::outcome(result, |digest| crate::flight::digest(digest.as_bytes())));
+    match generation {
+        Ok(found) if found == wanted => Ok(()),
+        Ok(found) => Err(format!("is a runtime tree of generation {found}, and this executable was built for generation {wanted}")),
+        Err(error) => Err(format!("has no runtime generation ({}: {error}), and this executable was built for generation {wanted}", runtime_epoch::DIRECTORY)),
     }
 }
 
@@ -3010,9 +3015,35 @@ pub fn other_threads() -> io::Result<Vec<i32>> {
 /// its own with `forked_child_reset`.
 // HOST(acquisition): starts a child process (a spawn)
 pub fn fork_isolate() -> io::Result<i32> {
-    let pid = fork()?;
-    if pid == 0 { FORKED.store(true, std::sync::atomic::Ordering::SeqCst); }
-    Ok(pid)
+    // Every signal is blocked across the fork: the parent puts its mask back
+    // at once, the child only at the end of `forked_child_reset`, so a signal
+    // sent the child meanwhile (its spawner's held SIGTERM, at the fork
+    // report) waits in the kernel instead of being cleared with the zygote's.
+    let saved = sys::block_signals();
+    let pid = fork();
+    match pid {
+        Ok(0) => {
+            FORKED.store(true, std::sync::atomic::Ordering::SeqCst);
+            *FORK_MASK.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(saved);
+        }
+        _ => sys::restore_signals(&saved),
+    }
+    pid
+}
+
+/// In a child `fork_isolate` made: the signal mask to put back once its
+/// reset is done. Only the forking thread touches it, the child's only one.
+static FORK_MASK: std::sync::Mutex<Option<sys::SignalMask>> = std::sync::Mutex::new(None);
+
+/// The signal mask a forked child puts back when its reset ends, however
+/// it ends (`forked_child_reset`).
+struct RestoreForkMask(Option<sys::SignalMask>);
+
+impl Drop for RestoreForkMask {
+    // HOST(pure): this thread's own signal mask, which no other party observes, put back
+    fn drop(&mut self) {
+        if let Some(mask) = self.0.take() { sys::restore_signals(&mask); }
+    }
 }
 
 /// fork(2) from a process whose other threads run on (a mark twin's,
@@ -3053,10 +3084,20 @@ pub fn forked_child() -> bool {
 // HOST(acquisition): in a forked child: its own wake pipe and handlers, then its name and death signal
 pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
     use std::sync::atomic::Ordering;
+    // What was sent the child since the fork is its own: delivered once the
+    // reset is done, however it ends.
+    let _restore = RestoreForkMask(FORK_MASK.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take());
     set_process_name("romacs-worker")?;
+    // Every signal the zygote had pending is the zygote's, not the child's:
+    // its quits, its termination, its user signals (input the zygote never
+    // read), and an inspection asked of it.
     INTERRUPT.store(false, Ordering::SeqCst);
     TERMINATE.store(false, Ordering::SeqCst);
     TERMINATE_QUIT.store(false, Ordering::SeqCst);
+    TERMINATION.store(0, Ordering::SeqCst);
+    for count in &USER_SIGNALS { count.store(0, Ordering::SeqCst); }
+    USER_SIGNAL_ARRIVED.store(false, Ordering::SeqCst);
+    inspect_forget_inherited();
     for end in [WAKE_READ.swap(-1, Ordering::SeqCst), WAKE_WRITE.swap(-1, Ordering::SeqCst)] {
         if end >= 0 { let _ = sys::close(end); }
     }
@@ -3546,11 +3587,18 @@ mod tests {
         assert!(runtime_tree(&dir).unwrap_err().contains("not a Romacs runtime tree"));
         std::fs::create_dir_all(dir.join("lisp")).unwrap();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
-        assert!(runtime_tree(&dir).unwrap_err().contains("from before generations"));
-        std::fs::write(dir.join("etc/romacs-runtime-epoch"), "0\n").unwrap();
-        assert!(runtime_tree(&dir).unwrap_err().contains("generation 0"));
-        std::fs::write(dir.join("etc/romacs-runtime-epoch"), RUNTIME_EPOCH).unwrap();
+        assert!(runtime_tree(&dir).unwrap_err().contains("has no runtime generation"));
+        let fragments = dir.join(runtime_epoch::DIRECTORY);
+        std::fs::create_dir(&fragments).unwrap();
+        for entry in std::fs::read_dir(build_root().join(runtime_epoch::DIRECTORY)).unwrap() {
+            std::fs::write(fragments.join(entry.unwrap().file_name()), "Unrelated wording\n").unwrap();
+        }
         assert_eq!(runtime_tree(&dir), Ok(()));
+        std::fs::write(fragments.join("2026-11-26-extra-test-fragment"), "New contract\n").unwrap();
+        let found = runtime_epoch::digest(read_dir(fragments).unwrap().map(|entry| entry.map(|entry| entry.file_name()))).unwrap();
+        let reason = runtime_tree(&dir).unwrap_err();
+        assert!(reason.contains(&format!("generation {found}")), "{reason}");
+        assert!(reason.contains(&format!("generation {RUNTIME_EPOCH}")), "{reason}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
     /// The build tree is a directory name with no `..` in it, so the
@@ -3951,6 +3999,15 @@ pub fn inspect_watch() {
 }
 /// The stall watchdog asks for inspections (`inspect_watch').
 static INSPECT_WATCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// In a child just forked: no inspection is pending (one asked of the zygote
+/// is the zygote's), and none is listened or watched for, since the threads
+/// that did so are not in the child.
+fn inspect_forget_inherited() {
+    use std::sync::atomic::Ordering::SeqCst;
+    INSPECT_SERVED.store(INSPECT_REQUESTED.load(SeqCst), SeqCst);
+    INSPECT_ENABLED.store(false, SeqCst);
+    INSPECT_WATCHED.store(false, SeqCst);
+}
 /// Raise a request, as the stall watchdog does from its own thread, for
 /// the target's evaluator to answer at its next safe point: its generation.
 // HOST(pure): raises a request between this process's threads: no host access

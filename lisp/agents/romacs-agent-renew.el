@@ -155,7 +155,7 @@ none, its whole thread, an imported transcript's part with it."
                            when (eq (plist-get (car rest) :type) 'renewed) do (setq last rest)
                            finally return last)))
       (let ((brief (plist-get (car tail) :brief)))
-        (append (and (stringp brief) (list (list :role 'context :text (string-trim brief))))
+        (append (and (stringp brief) (not (string-blank-p brief)) (list (list :role 'context :text (string-trim brief))))
                 (romacs-agent-handoff-items (cdr tail))))
     (romacs-agent-handoff-items (romacs-agent-handoff-thread session events))))
 
@@ -169,16 +169,20 @@ none, its whole thread, an imported transcript's part with it."
                             (funcall then))))))
     (add-hook 'romacs-agent-event-functions waiter)))
 
-(defun romacs-agent-renew (session &optional why then continuation)
+(defun romacs-agent-renew (session &optional why then continuation target)
   "Go on with SESSION in a new conversation of its harness, its first
 message carrying a brief of this one; WHY says what for (journaled).
 CONTINUATION, when given, is the next prompt if no message is waiting.
-Call THEN, when given, with the outcome: (:done NATIVE), NATIVE the new
-conversation's id or nil until its harness names it, or (:error MESSAGE).
-Refused at once (`user-error') while SESSION is busy, held, or its
-harness cannot renew this conversation."
-  (romacs-agent-renew--check session)
-  (let* ((token (cons why continuation))
+TARGET, a plist (:harness :provider :model :effort), is another harness
+to go on in (`romacs-agent-switch-harness'); (:clear t), a conversation
+of its own harness with nothing carried over (`romacs-agent-clear-soon').
+Neither asks the harness for a note.  Call THEN, when given, with
+the outcome: (:done NATIVE), NATIVE the new conversation's id or nil
+until its harness names it, or (:error MESSAGE).  Refused at once
+\(`user-error') while SESSION is busy, held, or its harness cannot renew
+this conversation."
+  (if (plist-get target :harness) (romacs-agent-renew--check-switch session target) (romacs-agent-renew--check session))
+  (let* ((token (list why continuation target))
          (then (or then #'ignore))
          (fail (lambda (message)
                  (romacs-agent-renew--release session token)
@@ -195,7 +199,7 @@ harness cannot renew this conversation."
      (lambda (summary items)
        (when (eq (romacs-agent-renew--holder session) token)
          (romacs-agent-renew--with-note
-          session token summary
+          session token (if target (or summary 'none) summary)
           (lambda (note source)
             (condition-case err
                 (romacs-agent-renew--journal session token then items note source)
@@ -206,13 +210,19 @@ harness cannot renew this conversation."
   "Journal SESSION's renewal from ITEMS and NOTE, whose origin is SOURCE.
 Call THEN with the outcome while TOKEN still owns the handoff."
   (when (eq (romacs-agent-renew--holder session) token)
-    (romacs-agent-renew--check-obstacle session)
-    (let* ((from (romacs-agent--native-id session))
-           (brief (romacs-agent-handoff-brief
-                   (if note (cons (list :role 'context :text (concat romacs-agent-renew--note-head note)) items)
-                     items)
-                   from "" nil romacs-agent-renew--head))
-           (native (funcall (romacs-agent--harness-get session :renew) session)))
+    (let* ((target (nth 2 token))
+           (switch (plist-get target :harness))
+           (from (progn (unless switch (romacs-agent-renew--check-obstacle session))
+                        (romacs-agent--native-id session)))
+           ;; Cleared, the new conversation starts with nothing of this one.
+           (brief (if (plist-get target :clear) ""
+                    (romacs-agent-handoff-brief
+                     (if note (cons (list :role 'context :text (concat romacs-agent-renew--note-head note)) items)
+                       items)
+                     from "" nil romacs-agent-renew--head)))
+           (native (funcall (if switch (plist-get (romacs-agent--driver-of switch) :renew)
+                              (romacs-agent--harness-get session :renew))
+                            session)))
       (romacs-agent-renew--await
        session token
        (lambda ()
@@ -222,10 +232,105 @@ Call THEN with the outcome while TOKEN still owns the handoff."
              (progn (romacs-agent-renew--finish session native)
                     (funcall then (list :done native)))
            (error (funcall then (list :error (error-message-string err)))))))
-      (romacs-agent--note session (romacs-mcp--object "type" "renew" "from" from "to" (or native :null)
-                                                      "why" (or (car token) :null) "brief" brief "summary" source
-                                                      "continue" (or (cdr token) :null)
-                                                      "context" (or (romacs-agent-context-used session) :null))))))
+      (romacs-agent--note session (apply #'romacs-mcp--object "type" "renew" "from" from "to" (or native :null)
+                                         "why" (or (car token) :null) "brief" brief "summary" source
+                                         "continue" (or (nth 1 token) :null)
+                                         "context" (or (romacs-agent-context-used session) :null)
+                                         (and switch (romacs-agent-renew--target-fields target)))))))
+
+;;; Another harness
+
+(defun romacs-agent-renew--target-fields (target)
+  "TARGET (`romacs-agent-renew''s) as a renew note's fields."
+  (list "harness" (symbol-name (plist-get target :harness)) "provider" (plist-get target :provider)
+        "model" (or (plist-get target :model) :null) "effort" (or (plist-get target :effort) :null)))
+
+(defun romacs-agent-renew--target-of (record)
+  "The switch the renew note RECORD journals, as `romacs-agent-renew''s
+TARGET, or nil for a renewal in its own harness."
+  (let ((note (gethash "note" record)))
+    (when (stringp (gethash "harness" note))
+      (list :harness (intern (gethash "harness" note)) :provider (gethash "provider" note)
+            :model (romacs-agent--value (gethash "model" note)) :effort (romacs-agent--value (gethash "effort" note))))))
+
+(defun romacs-agent-renew--pending-target (session)
+  "The switch SESSION's last renewal journals and no run of it has made
+yet (`romacs-agent-renew--target-of'), or nil."
+  (when-let* ((record (romacs-agent-renew--last-note session))
+              (target (romacs-agent-renew--target-of record))
+              ((not (eq (plist-get target :harness) (romacs-agent-harness session)))))
+    target))
+
+(defun romacs-agent-renew--check-switch (session target)
+  "Refuse (`user-error') to switch SESSION to TARGET now: an instance of
+another harness, enabled, with no turn of SESSION's running.  A turn cut
+off at its limit is no obstacle: the new harness starts from the brief."
+  (let* ((provider (plist-get target :provider))
+         (instance (or (romacs-agent--configured provider) (user-error "No agent provider %s" provider))))
+    (when (eq (plist-get target :harness) (romacs-agent-harness session))
+      (user-error "%s runs %s already: move it instead" (romacs-agent-title session) (romacs-agent-harness session)))
+    (unless (plist-get instance :enabled) (user-error "Agent provider %s is disabled" provider))
+    ;; Its runs' harnesses are read from its records in SQLite.
+    (unless (romacs-agent-events-p session)
+      (user-error "Session %s's records are not in the agents' database yet: switch it once they are"
+                  (romacs-agent-title session)))
+    (romacs-agent--check-config-dir provider (romacs-agent--config-dir instance))
+    (unless (and (romacs-agent--harness-free-p session) (not (romacs-agent-startup-pending session))
+                 (not (eq (romacs-agent-state session) 'starting)))
+      (user-error "Session %s is busy: switch it when its turn ends" (romacs-agent-title session)))
+    (when (romacs-agent--held-p session)
+      (user-error "Session %s is renewing or rolling back already" (romacs-agent-title session)))))
+
+(defun romacs-agent-renew--commit-switch (session target)
+  "SESSION's manifest names TARGET's harness, instance and selection, and
+the harness its records began in; its next run is TARGET's."
+  (let* ((instance (romacs-agent--configured (plist-get target :provider)))
+         (options (romacs-agent--without (romacs-agent-options session) '(:model :effort)))
+         (options (append options (and (plist-get target :model) (list :model (plist-get target :model)))
+                          (and (plist-get target :effort) (list :effort (plist-get target :effort)))))
+         (imported (romacs-agent-imported session)))
+    (when (and imported (not (plist-get imported :harness)))
+      (setf (romacs-agent-imported session) (append imported (list :harness (romacs-agent-harness session)))))
+    (romacs-agent--manifest-put
+     session "harness" (symbol-name (plist-get target :harness)) "provider" (plist-get target :provider)
+     "configDir" (romacs-agent--config-dir instance)
+     ;; Records from the first are read under the harness they began in.
+     "startHarness" (symbol-name (romacs-agent--start-harness session))
+     "options" (romacs-agent--options-object options)
+     "imported" (if-let* ((imported (romacs-agent-imported session)))
+                    (romacs-mcp--object "path" (plist-get imported :path) "size" (plist-get imported :size)
+                                        "harness" (symbol-name (plist-get imported :harness)))
+                  :null)
+     ;; A selection asked of the old harness goes with it.
+     "switch" :null)
+    (romacs-agent--cancel-select session)
+    (setf (romacs-agent-options session) options (romacs-agent-pending-selection session) nil)))
+
+(defun romacs-agent-renew--switch-to (session target)
+  "SESSION runs TARGET's harness from here, its old run gone: the next
+run's note says so to every replay (`romacs-agent--run-note')."
+  (setf (romacs-agent-harness session) (plist-get target :harness)
+        (romacs-agent-provider session) (plist-get target :provider)
+        (romacs-agent-config-dir session) (romacs-agent--config-dir (romacs-agent--configured (plist-get target :provider)))
+        (romacs-agent-driver session) nil
+        (romacs-agent-limited session) nil
+        (romacs-agent-model session) (plist-get target :model))
+  (romacs-agent--changed session))
+
+(defun romacs-agent-switch-harness (session provider &optional model effort next then)
+  "Go on with SESSION under instance PROVIDER of another harness (a
+harness's symbol: the account its pool draws on,
+`romacs-agent-pool-pick'), on MODEL at EFFORT (nil: the harness's own):
+the same session, its id, chat,
+task, parent and records, in a new conversation of that harness briefed
+on this one (`romacs-agent-renew').  NEXT is its next prompt if no
+message waits; THEN is told the outcome as `romacs-agent-renew' says."
+  (let* ((instance (or (if (symbolp provider) (romacs-agent-pool-pick provider) (romacs-agent--configured provider))
+                       (user-error "No agent provider %s" provider)))
+         (provider (plist-get instance :name)))
+    (romacs-agent-renew session "switch" then (or next "Go on from where this thread left off.")
+                        (list :harness (plist-get instance :harness) :provider provider
+                              :model model :effort effort))))
 
 (defun romacs-agent-renew--read (session then fail)
   "Call THEN with what SESSION's renewal takes of its conversation: its
@@ -242,7 +347,7 @@ however long its journal, the editor reads none of them."
                                    :fresh t
                                    :require '(romacs-agent romacs-agent-claude romacs-agent-codex romacs-agent-events
                                                            romacs-agent-turns romacs-agent-renew)
-                                   :bindings (romacs-agent--fold-bindings (list (romacs-agent-harness session))))
+                                   :bindings (romacs-agent--fold-bindings (mapcar #'car romacs-agent--drivers)))
                   (error (funcall fail (error-message-string err)) nil))))
     (when future
       (isolate-on-done
@@ -375,6 +480,8 @@ SUMMARY, its harness's own compaction summary newer than its last turn
 note it writes in one more turn (Romacs's own: `romacs-agent--input');
 else none.  The turn failing, or its harness ending, gives none."
   (cond
+   ;; A switch asks nothing of the harness it leaves, which may be at its limit.
+   ((eq summary 'none) (funcall then nil "selection"))
    (summary (funcall then summary "compaction"))
    ((not (and (eq romacs-agent-renew-summary 'note)
               (romacs-agent--harness-live-p session) (romacs-agent--ready-p session)))
@@ -445,13 +552,16 @@ says so, and its harness runs anew on it.  Once: its new run's note ends it."
     ;; Failing before a run is under way: none is, and it may be tried again.
     (condition-case err
         (progn (romacs-agent-renew--commit session native)
+               (when-let* ((target (romacs-agent-renew--pending-target session)))
+                 (romacs-agent-renew--commit-switch session target))
                ;; What its harness was owed as turns of their own goes to
                ;; the new conversation first: its next run would lose it.
                (when-let* ((owed (or (romacs-agent-renew--owed-now session) (gethash session romacs-agent-renew--owed))))
                  (dolist (turn (reverse owed))
                    (romacs-agent--enqueue-first session (romacs-agent-item (car turn) :images (cadr turn) :kind 'next))))
                (remhash session romacs-agent-renew--owed)
-               (romacs-agent--relaunch session))
+               (let ((target (romacs-agent-renew--pending-target session)))
+                 (romacs-agent--relaunch session (and target (lambda () (romacs-agent-renew--switch-to session target))))))
       (error (remhash session romacs-agent-renew--finishing)
              (signal (car err) (cdr err))))))
 
@@ -485,6 +595,15 @@ for the next resume, which finishes it, and SESSION's view says so."
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-renew--restored)
 (add-hook 'romacs-agent-caught-up-functions #'romacs-agent-renew--unfinished)
+
+(defun romacs-agent-renew--loaded (session _manifest)
+  "A session loaded with no supervisor running it, by a restore, a worker's
+fold or when first asked for: a renewal it journaled is finished before
+anything resumes its old harness."
+  (unless (process-live-p (romacs-agent-connection session))
+    (romacs-agent-renew--unfinished session)))
+
+(add-hook 'romacs-agent-loaded-functions #'romacs-agent-renew--loaded)
 (add-hook 'romacs-agent-event-functions #'romacs-agent-renew--ran)
 
 (defun romacs-agent-renew--commit (session native)
@@ -500,7 +619,9 @@ names it), and it is no fork now: its next run begins the new one."
 ;;; At its turn's end
 
 (defvar romacs-agent-renew--wanted (make-hash-table :test #'eq :weakness 'key)
-  "Sessions to renew once their turn ends: to WHY.")
+  "Sessions to renew once their turn ends: to WHY, to (:switch PROVIDER
+MODEL EFFORT NEXT) for a switch (`romacs-agent-switch-harness-soon'), or
+to (:clear) to clear (`romacs-agent-clear-soon').")
 
 (defun romacs-agent-renew-soon (session &optional why)
   "Renew SESSION now when it is idle, else once its running turn ends.
@@ -512,6 +633,56 @@ Return `now' or `soon'."
       (progn (romacs-agent-renew session why) 'now)
     (puthash session (or why "asked") romacs-agent-renew--wanted)
     'soon))
+
+(defun romacs-agent-switch-harness-soon (session provider &optional model effort next)
+  "Switch SESSION to PROVIDER, another harness, on MODEL at EFFORT, told
+NEXT (`romacs-agent-switch-harness'): now when it is idle, else once its
+running turn ends.  Return `now' or `soon'."
+  (let ((instance (or (if (symbolp provider) (romacs-agent-pool-pick provider) (romacs-agent--configured provider))
+                      (user-error "No agent provider %s" provider))))
+    (when (eq (plist-get instance :harness) (romacs-agent-harness session))
+      (user-error "%s runs %s already: move it instead" (romacs-agent-title session) (romacs-agent-harness session))))
+  (if (and (romacs-agent--harness-free-p session) (not (romacs-agent--held-p session)))
+      (progn (romacs-agent-switch-harness session provider model effort next) 'now)
+    (puthash session (list :switch provider model effort next) romacs-agent-renew--wanted)
+    'soon))
+
+(defun romacs-agent-clear-soon (session)
+  "Clear SESSION's conversation: go on in a new one of its harness with
+nothing of this one carried over, its id, chat and task the same
+\(`romacs-agent-renew'): now when it is idle, else once its running turn
+ends.  Return `now' or `soon'."
+  (when (romacs-agent--per-turn-p session)
+    (user-error "%s starts each turn on its own: send its next message to go on" (romacs-agent-title session)))
+  ;; Its records folded first: whether its conversation must stay is theirs.
+  (when (romacs-agent--folding-p session)
+    (user-error "Session %s is still loading: clear it in a moment" (romacs-agent-title session)))
+  (romacs-agent-renew--check-obstacle session)
+  (cond ((or (romacs-agent--held-p session) (romacs-agent-startup-pending session)
+             (eq (romacs-agent-state session) 'starting))
+         (user-error "Session %s is starting, renewing or rolling back: clear it after"
+                     (romacs-agent-title session)))
+        ;; Only a turn's end is waited for: it comes.
+        ((memq (romacs-agent-state session) '(running waiting-approval))
+         (puthash session (list :clear) romacs-agent-renew--wanted)
+         'soon)
+        ((romacs-agent--harness-free-p session)
+         (romacs-agent-renew session "clear" (romacs-agent-renew--told session "Clear") nil '(:clear t))
+         'now)
+        (t (user-error "Session %s is busy: clear it after" (romacs-agent-title session)))))
+
+(defun romacs-agent-renew--told (session what)
+  "A renewal's THEN for SESSION: its failure said in its chat as WHAT's."
+  (lambda (outcome)
+    (when (eq (car outcome) :error)
+      (romacs-agent--raise session (list :type 'error :text (format "%s failed: %s" what (cadr outcome)))))))
+
+(romacs-agent-define-slash-command
+ "clear" "Start a new conversation in this session, nothing of this one carried over."
+ (lambda (session _args)
+   (pcase (romacs-agent-clear-soon session)
+     ('now "Clearing: the next message starts a new conversation")
+     (_ "Clears once this turn ends"))))
 
 (defvar romacs-agent-renew--automatic (make-hash-table :test #'eq :weakness 'key)
   "Sessions to the conversation (native id) they last renewed by
@@ -556,11 +727,27 @@ full (`romacs-agent-renew--full'), once a conversation; else nil."
 
 (defun romacs-agent-renew--at-end (session event)
   "Renew SESSION at EVENT, its turn's end, when it was wanted or its
-context is full."
+context is full.  Its harness ending instead drops a clear asked for:
+it was for the turn that ran."
+  (when (and (eq (plist-get event :type) 'exit)
+             (equal (gethash session romacs-agent-renew--wanted) '(:clear)))
+    (remhash session romacs-agent-renew--wanted)
+    (romacs-agent--raise session (list :type 'status :text "clear dropped: the harness ended")))
   (when (and (eq (plist-get event :type) 'done)
              (romacs-agent--live-p session)
              (not (romacs-agent--held-p session)))
-    (when-let* ((why (romacs-agent-renew--why-now session)))
+    (when-let* ((why (romacs-agent-renew--why-now session))
+                ((not (and (eq (car-safe why) :clear)
+                           (progn (remhash session romacs-agent-renew--wanted)
+                                  (condition-case err (romacs-agent-renew session "clear" (romacs-agent-renew--told session "Clear")
+                                                                          nil '(:clear t))
+                                    (user-error (romacs-agent--raise session (list :type 'error :text (error-message-string err)))))
+                                  t))))
+                ((not (and (eq (car-safe why) :switch)
+                           (progn (remhash session romacs-agent-renew--wanted)
+                                  (condition-case err (apply #'romacs-agent-switch-harness session (cdr why))
+                                    (user-error (romacs-agent--raise session (list :type 'error :text (error-message-string err)))))
+                                  t)))))
       ;; Now, the event folded: held before the messages that waited for
       ;; this end are sent (they go to the new conversation).  The work
       ;; itself comes after (`romacs-agent-renew').

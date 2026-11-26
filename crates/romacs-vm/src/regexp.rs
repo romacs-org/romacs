@@ -252,6 +252,8 @@ struct SearchSlots {
     scan: Places<{ SCAN_VARIABLES.len() }>,
     /// `forward-comment-function`, which replaces `forward-comment`.
     forward_comment: Places<1>,
+    /// `romacs-inhibit-syntax-summaries` and `romacs-syntax-summaries-check`.
+    summaries: Places<2>,
 }
 /// The variables a syntax scan obeys, in the order [`Vm::scan_variables`]
 /// gives their values: six flags, then how far `syntax-propertize` has
@@ -832,16 +834,17 @@ impl Vm {
     }
     /// A run of the buffer at object INDEX that holds the bytes NEED and
     /// lies within its accessible bytes, readable contiguously: for a
-    /// multibyte buffer, the window its text gives (`search_window').
+    /// multibyte buffer, the window its text gives (`search_window`), read
+    /// through `&` while the flat text serves it.
     fn regexp_buffer_window(&mut self, index: usize, need: Range<usize>) -> Range<usize> {
-        match self.objects.entry_mut(index) {
-            Object::Buffer(t) => {
-                let r = t.accessible();
-                t.search_window(need, r.start.0..r.end.0)
-            }
-            Object::ByteBuffer(t) => t.restriction.start.0..t.restriction.end.0,
+        let (t, bounds) = match &self.objects[index] {
+            Object::Buffer(t) => { let r = t.accessible(); (t, r.start.0..r.end.0) }
+            Object::ByteBuffer(t) => return t.restriction.start.0..t.restriction.end.0,
             _ => unreachable!("buffer_index validates"),
-        }
+        };
+        if let Some(window) = t.flat_search_window(&bounds) { return window; }
+        let Object::Buffer(t) = self.objects.entry_mut(index) else { unreachable!("buffer_index validates") };
+        t.search_window(need, bounds)
     }
     /// WINDOW of the buffer at object INDEX, for one search.
     fn regexp_buffer_input(&self, index: usize, window: Range<usize>) -> BufferInput<'_> {
@@ -897,6 +900,7 @@ impl Vm {
                 lookup_properties: Places::new([self.slot("parse-sexp-lookup-properties")]),
                 scan: Places::new(SCAN_VARIABLES.map(|name| self.slot(name))),
                 forward_comment: Places::new([self.slot("forward-comment-function")]),
+                summaries: Places::new([self.slot("romacs-inhibit-syntax-summaries"), self.slot("romacs-syntax-summaries-check")]),
             });
         }
         self.mutator_rest.regexp_cache.slots.as_mut().expect("found above")
@@ -919,6 +923,13 @@ impl Vm {
     /// `forward-comment-function` in the current buffer.
     pub(crate) fn forward_comment_function(&mut self) -> Result<Value> {
         self.search_values(|slots| &mut slots.forward_comment).map(|[function]| function)
+    }
+    /// Whether the current buffer's syntax scans leave the summaries
+    /// alone (`romacs-inhibit-syntax-summaries`), and whether they check
+    /// them against the scanner (`romacs-syntax-summaries-check`).
+    pub(crate) fn summary_variables(&mut self) -> Result<[bool; 2]> {
+        let set = |value: Value| value != Value::NIL && value != Value::UNBOUND;
+        self.search_values(|slots| &mut slots.summaries).map(|values| values.map(set))
     }
     /// The symbol `syntax-table`.
     pub(crate) fn syntax_table_symbol(&mut self) -> Value {

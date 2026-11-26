@@ -56,7 +56,7 @@ string, an overlay."
            (with-current-buffer chat
              (romacs-agent-log-mode)
              (setq romacs-agent-log--session session romacs-agent-ui--session session
-                   romacs-agent-log--end (point-min-marker))
+                   romacs-agent-log--end (point-min-marker) romacs-agent-log--input (point-min-marker))
              (set-marker-insertion-type romacs-agent-log--end t)
              (puthash romacs-agent-header-tests--id chat romacs-agent-log--chats)
              (romacs-agent-ui--header-refresh session)

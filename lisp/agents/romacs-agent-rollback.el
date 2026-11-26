@@ -41,7 +41,8 @@ an error when git fails."
 first) does to the files, from CHECKPOINTS (`romacs-agent-diff--checkpoints')
 and NOW, the project's tree now: (:root ROOT :start TREE :touched NAMES
 :clobbered NAMES), the files the turns changed and those of them changed
-by anything else, between them or since.  Nil when the first turn has
+by anything else, between them or since; a turn's, when it has no end
+checkpoint, all among the clobbered.  Nil when the first turn has
 no start checkpoint."
   (let ((edges (make-hash-table :test #'equal)))
     ;; Each turn's edges by (TURN . KIND), once: no scan per turn.
@@ -54,9 +55,15 @@ no start checkpoint."
           (let* ((start (edge (car tail) 'start))
                  (next (and (cdr tail) (edge (cadr tail) 'start)))
                  ;; A turn its harness cut short has no end: the next start's, else now.
-                 (end (or (edge (car tail) 'end) next now)))
-            (when start (setq touched (append (romacs-agent-rollback--changed root start end) touched)))
+                 (end (or (edge (car tail) 'end) next now))
+                 (changed (and start (romacs-agent-rollback--changed root start end))))
+            (setq touched (append changed touched))
             (setq outside (append (romacs-agent-rollback--changed root end (or next now)) outside))
+            ;; No checkpoint of its end (cut short, or its snapshot failed):
+            ;; what changed from its start to the next one, or to now, may
+            ;; be the user's as well, so each counts as changed by
+            ;; something else, restored only when asked (:force).
+            (unless (edge (car tail) 'end) (setq outside (append changed outside)))
             (setq tail (cdr tail))))
         (setq touched (delete-dups touched))
         (let ((elsewhere (make-hash-table :test #'equal)))
@@ -112,8 +119,11 @@ TURNS), when SESSION can roll back to REQUEST with OPTIONS now; else a
          (turns (romacs-agent-rollback--turns records request)))
     (unless (cdr turns) (user-error "That prompt is no longer this session's conversation"))
     ;; A renewed conversation's first prompt carried its brief: going back
-    ;; before it would leave the conversation without one.
+    ;; before it would leave the conversation without one.  A cleared one
+    ;; carried none.
     (when (and (romacs-agent--note-p (car records) "renew")
+               (let ((brief (gethash "brief" (gethash "note" (car records)))))
+                 (and (stringp brief) (not (string-empty-p brief))))
                (equal request (cl-some #'romacs-agent--record-request records)))
       (user-error "That prompt began this renewed conversation: roll back to a later one"))
     ;; With no snapshot pending, the checkpoints are all there: refuse now.

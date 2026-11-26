@@ -15,7 +15,7 @@ pub(super) use signal_handlers::SignalHandler;
 use signal_handlers::{prepare_signal, release_control, speculative, DEBUGGER_HELPER};
 #[path = "threaded_lend.rs"]
 mod lend;
-pub(crate) use lend::{bind_from, call_frame, call_source, compile_form, eval_form, eval_text, expand_form, redisplay, resize, run_function, toplevel, unbind_to, unwind_to, write_from};
+pub(crate) use lend::{bind_from, call_frame, call_frame_keeping_escape, call_source, compile_form, eval_form, eval_text, expand_form, redisplay, resize, run_function, toplevel, unbind_to, unwind_to, write_from};
 #[cfg(test)]
 pub(crate) use lend::test_requests::collect_now;
 use crate::brand::{orchestrate, Gc, Plain};
@@ -1619,17 +1619,27 @@ impl Vm {
         };
         // A leaf's Lisp comes here, by pending variables, `safe_call' and
         // watchers: it sees the leaf's frame, whichever way it came.
+        self.leaf_lisp(|vm| {
+            vm.mutator.propagate_next = true;
+            let result = execute_args(vm, trampoline, &registers);
+            vm.mutator.propagate_next = false;
+            result
+        })
+    }
+    /// RUN, which runs Lisp for the leaf a site is running: the caller's
+    /// register stack set aside meanwhile (traced, its allocation unmoved),
+    /// with no escape pending from before, so what RUN's Lisp signals is
+    /// the one `propagated_escape` holds after it. RUN sees the leaf's frame.
+    pub(crate) fn leaf_lisp<T>(&mut self, run: impl FnOnce(&mut Self) -> T) -> T {
         self.with_site_leaf(|vm| {
             vm.suspend_stack();
             vm.mutator.propagated_escape = None;
             vm.mutator.propagated_escape_hooked = false;
             vm.mutator.propagated_eval_depth = None;
-            vm.mutator.propagate_next = true;
-            let result = execute_args(vm, trampoline, &registers);
-            vm.mutator.propagate_next = false;
+            let out = run(vm);
             vm.resume_stack();
             vm.end_nested_execution();
-            result
+            out
         })
     }
     /// BODY, with the activation recorded of any leaf a site is running with
@@ -5436,10 +5446,14 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
     if v == Value::NIL || !v.tag_is(0) {
         return None;
     }
-    let Some(data::Object::Buffer(t)) = vm.objects.get_entry_mut(v.payload() as usize - 1) else {
+    let index = v.payload() as usize - 1;
+    let kind = (target.0 >> 3) as usize;
+    if kind == Primitive::GotoChar as usize {
+        return buffer_goto_char(vm, index, x);
+    }
+    let Some(data::Object::Buffer(t)) = vm.objects.get(index) else {
         return None;
     };
-    let kind = (target.0 >> 3) as usize;
     let accessible = t.accessible();
     let number = if kind == Primitive::CharAfter as usize {
         if x != Value::NIL
@@ -5464,16 +5478,6 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
         } else {
             None
         }
-    } else if kind == Primitive::GotoChar as usize {
-        if !x.tag_is(1) {
-            return None;
-        }
-        let c = (x.0 as i64 >> 2).saturating_sub(1).max(0) as usize;
-        t.point = t
-            .byte_of_char(coordinates::CharOffset(c.min(t.len_chars())))
-            .unwrap()
-            .clamp(accessible.start, accessible.end);
-        Some(x.0 as i64 >> 2)
     } else if kind == Primitive::Point as usize {
         Some((t.char_of_byte(t.point).unwrap().0 + 1) as i64)
     } else if kind == Primitive::PointMin as usize {
@@ -5484,6 +5488,24 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
         Some(t.len_chars() as i64)
     };
     Some(number.map(|n| Value::fixnum(n).unwrap()).unwrap_or(Value::NIL))
+}
+/// The fixnum `goto-char` X of `buffer_read_value`, in the buffer at object
+/// INDEX: its one store, so the only branch that takes the entry `&mut`.
+fn buffer_goto_char(vm: &mut Vm, index: usize, x: Value) -> Option<Value> {
+    // A shared look first: a unibyte buffer falls back unmarked.
+    if !x.tag_is(1) || !matches!(vm.objects.get(index), Some(data::Object::Buffer(_))) {
+        return None;
+    }
+    let Some(data::Object::Buffer(t)) = vm.objects.get_entry_mut(index) else {
+        return None;
+    };
+    let accessible = t.accessible();
+    let c = (x.0 as i64 >> 2).saturating_sub(1).max(0) as usize;
+    t.point = t
+        .byte_of_char(coordinates::CharOffset(c.min(t.len_chars())))
+        .unwrap()
+        .clamp(accessible.start, accessible.end);
+    Some(x)
 }
 /// A type predicate kernel: BODY maps the argument to a bool with no
 /// fallback, as GNU's `Bconsp` and friends do.

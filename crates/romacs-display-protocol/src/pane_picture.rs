@@ -44,6 +44,12 @@ pub fn owner_slot_base(slot: u8) -> Option<u32> {
     (slot <= LAST_OWNER_SLOT).then(|| (u32::from(slot) + 1) << SLOT_SHIFT)
 }
 
+/// The owner slot whose font range ID is in; None for a master font.
+#[must_use]
+pub fn owner_font_slot(id: u32) -> Option<u8> {
+    u8::try_from((id >> SLOT_SHIFT).checked_sub(1)?).ok().filter(|&slot| slot <= LAST_OWNER_SLOT)
+}
+
 /// Whether font ID is one of owner slot SLOT's.
 fn in_slot(id: u32, slot: u8) -> bool {
     id >> SLOT_SHIFT == u32::from(slot) + 1
@@ -265,7 +271,13 @@ impl PanePicture {
     ///
     /// `Unencodable` when Postcard cannot write it.
     pub fn encode(&self) -> Result<Vec<u8>, PictureError> {
-        postcard::to_extend(self, PANE_PICTURE_FORMAT.to_le_bytes().to_vec()).map_err(PictureError::Unencodable)
+        // Postcard's Vec writer, not its generic `Extend` one, which takes
+        // each byte through an iterator.
+        let body = postcard::to_allocvec(self).map_err(PictureError::Unencodable)?;
+        let mut bytes = Vec::with_capacity(2 + body.len());
+        bytes.extend_from_slice(&PANE_PICTURE_FORMAT.to_le_bytes());
+        bytes.extend_from_slice(&body);
+        Ok(bytes)
     }
 
     /// The picture BYTES encode, as owner slot SLOT's receiver takes it.
@@ -387,7 +399,7 @@ fn relabel_submitted(receipt: SubmittedWindow, own: u64, master: u64) -> Submitt
 
 /// V logical px as a box's whole px.
 #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a frame's box is whole px far below `u32::MAX`; a negative or NaN one saturates to 0")]
-fn whole_px(v: f32) -> u32 {
+pub(crate) fn whole_px(v: f32) -> u32 {
     v.round() as u32
 }
 
