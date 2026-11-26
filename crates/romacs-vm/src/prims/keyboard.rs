@@ -179,8 +179,8 @@ fn read_char_exclusive(call; optional prompt: Value, inherit_input_method: Value
 }}
 
 /// This command's keys, `this_command_keys[0 .. this_command_key_count]'.
-fn command_keys(cx: &mut Leaf<'_>) -> std::result::Result<Vec<Value>, Fault> {
-    Ok(cx.command_keys().to_vec())
+fn command_keys(cx: &Leaf<'_>) -> Vec<Value> {
+    cx.command_keys().to_vec()
 }
 
 const CHAR_META: i64 = 0x800_0000;
@@ -201,19 +201,19 @@ pub(crate) fn event_array(cx: &mut Leaf<'_>, events: &[Value]) -> Value {
 
 defsubr! { name = "this-command-keys", gnu = "keyboard.c:12244", effect = Reads,
 fn this_command_keys(cx) {
-    let keys = command_keys(cx)?;
+    let keys = command_keys(cx);
     Ok(event_array(cx, &keys))
 }}
 
 defsubr! { name = "this-command-keys-vector", gnu = "keyboard.c:12290", effect = Reads,
 fn this_command_keys_vector(cx) {
-    let keys = command_keys(cx)?;
+    let keys = command_keys(cx);
     Ok(cx.vector(&keys))
 }}
 
 defsubr! { name = "this-single-command-keys", gnu = "keyboard.c:12302", effect = Reads,
 fn this_single_command_keys(cx) {
-    let keys = command_keys(cx)?;
+    let keys = command_keys(cx);
     let start = cx.single_command_key_start();
     Ok(cx.vector(&keys[start..]))
 }}
