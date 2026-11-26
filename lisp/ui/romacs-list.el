@@ -325,7 +325,11 @@ its start, or once drawn first, the row the draw put point on."
           (set-window-point window (romacs-list--back at))
           (set-window-start window (save-excursion (goto-char (romacs-list--back start)) (line-beginning-position))
                             t)))
-      (if windows (with-selected-window (car windows) (romacs-list-highlight)) (romacs-list-highlight))
+      ;; A sticky highlight is drawn in the first window showing the list;
+      ;; one that follows the selected window is left to it.
+      (if (and windows (bound-and-true-p hl-line-sticky-flag))
+          (with-selected-window (car windows) (romacs-list-highlight))
+        (romacs-list-highlight))
       (when (and windows (not romacs-list--ticker)
                  (text-property-not-all (point-min) (point-max) 'romacs-list-live nil))
         (setq romacs-list--ticker (run-at-time 1 1 #'romacs-list--tick buffer))))))
