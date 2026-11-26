@@ -93,3 +93,20 @@ fn escapes_pop_every_frame() {
     assert_eq!(vm.reads.depth(super::MAIN), 0, "every read's frame popped");
     assert!(vm.reads.walks.is_empty(), "no walk left at a filter");
 }
+
+/// GNU's third point: when the current buffer changes while `read_char`
+/// waits (here a watcher of `last-input-event`, which the reader sets as the
+/// Lisp port did), the sequence is replayed with the new buffer's maps.
+#[test]
+fn a_buffer_change_in_the_wait_replays_the_sequence() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude_raw().unwrap();
+    let got = shown(&mut vm, "(let ((a (get-buffer-create \"a\")) (b (get-buffer-create \"b\")))
+       (set-buffer b) (use-local-map (make-sparse-keymap)) (define-key (current-local-map) [f5 f6] 'in-b)
+       (set-buffer a) (use-local-map (make-sparse-keymap)) (define-key (current-local-map) [f5 f6] 'in-a)
+       (add-variable-watcher 'last-input-event (lambda (_ value _ _) (if (eq value 'f6) (set-buffer b))))
+       (let ((unread-command-events (list 'f5 'f6)))
+         (list (romacs--read-key-sequence nil t nil) romacs--key-sequence-command (buffer-name)
+               (this-command-keys-vector))))");
+    assert_eq!(got, "([f5 f6] in-b \"b\" [f5 f6])");
+}
