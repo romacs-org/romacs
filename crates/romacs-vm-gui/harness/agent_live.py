@@ -580,7 +580,7 @@ def providers(args, base):
         # their project's threads.
         hovers = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-board)) (with-temp-buffer (romacs-agent-board-mode) '
                                               f'(setq romacs-agent-board--project (romacs-agent-board--project {lisp(a.work)})) '
-                                              '(romacs-agent-board--draw (romacs-agent-board-rows (romacs-agent-summary nil) '
+                                              '(romacs-list-draw (romacs-agent-board-rows (romacs-agent-summary nil) '
                                               'nil (romacs-agent-board--view)) 120) '
                                               '(let ((pos (point-min)) (found nil)) '
                                               '(while (setq pos (next-single-property-change pos (quote help-echo))) '
@@ -3512,7 +3512,7 @@ def history(args, base):
         a.providers(setting)
         text = lambda form: parity_live.read_sexp(a.eval(form))
         board = lambda project: text(f'(progn (save-window-excursion (romacs-agents)) (with-current-buffer "*romacs-agents*" '
-                                     f'(romacs-agent-board--enter {project}) '
+                                     f'(romacs-list-enter {project}) '
                                      '(buffer-substring-no-properties (point-min) (point-max))))')
         # The home board lists the project; choosing it lists its transcripts.
         home = board('nil')
@@ -4088,10 +4088,10 @@ def board_keys(args, base):
             a.keys('-M', 'ctrl', '-k', 'x', '-k', 'a', '-m', 'ctrl', '-k', 'a')
             until(lambda: shown() == 't', 15, 'board shown')
             def moved():
-                before = a.log().count('"native_command":"romacs-agent-board-next"')
+                before = a.log().count('"native_command":"romacs-list-next"')
                 a.keys('-k', 'n')
                 time.sleep(.3)
-                return a.log().count('"native_command":"romacs-agent-board-next"') > before
+                return a.log().count('"native_command":"romacs-list-next"') > before
             until(moved, 30, 'keys reach the board')
 
         def ret_on(regexp):
@@ -4171,14 +4171,14 @@ def board_keys(args, base):
         steps['after_gone'] = settled(showing, sids[0])
         open_board()
         thread = lisp_text(sids[0])
-        project_row = ('(romacs-agent-board--find (romacs-agent-board--project '
+        project_row = ('(romacs-list--find (romacs-agent-board--project '
                        f'(romacs-agent-cwd (romacs-agent-get {thread}))))')
 
         def thread_row():
-            return a.eval(f'(with-selected-window {board} (and (romacs-agent-board--find {thread}) t))')
+            return a.eval(f'(with-selected-window {board} (and (romacs-list--find {thread}) t))')
 
         def settle_thread(want):
-            a.eval(f'(with-selected-window {board} (goto-char (romacs-agent-board--find {thread})) t)')
+            a.eval(f'(with-selected-window {board} (goto-char (romacs-list--find {thread})) t)')
             a.keys('-k', 's')
             return settled(thread_row, want)
 

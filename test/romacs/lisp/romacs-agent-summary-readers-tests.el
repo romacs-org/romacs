@@ -84,11 +84,11 @@
     (mapcar
      (lambda (row)
        (let ((id (plist-get row :id)))
-         (goto-char (romacs-agent-board--find id))
+         (goto-char (romacs-list--find id))
          (list id (plist-get row :key)
                (string-trim-right (buffer-substring-no-properties
                                    (line-beginning-position) (line-end-position))))))
-     (romacs-agent-board--shown-rows))))
+     (romacs-list-shown-rows))))
 
 (defun romacs-agent-summary-readers--labels ()
   (mapcar (lambda (label) (substring-no-properties (funcall label)))

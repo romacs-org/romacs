@@ -705,7 +705,7 @@ a state root of its own, and a service of its own on `socket'."
                 (with-current-buffer (romacs-agent-board--buffer)
                   (romacs-agent-board--render (current-buffer) 100)
                   (goto-char (point-min))
-                  (romacs-agent-board-next 2)
+                  (romacs-list-next 2)
                   (should-error (romacs-agent-board-settle) :type 'user-error)
                   (should-error (romacs-agent-board-settle-finished) :type 'user-error)))
               (with-current-buffer (romacs-agent-board--buffer)

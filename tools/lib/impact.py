@@ -113,8 +113,9 @@ HARNESSES = ('world', 'autoloads', 'completion', 'fontify', 'timers', 'popup', '
              'entry_prompts', 'requests', 'landing_anim', 'layout_journey', 'chrome', 'scaling', 'display_stages')
 # More harnesses, each for the paths only it drives end to end.
 HARNESS_RULES = (
-    # The agent client end to end (sessions, selections and restarts, relays, tools).
-    (re.compile(r'^(?:lisp/agents/romacs-(?:agent|mcp)[^/]*\.el|crates/romacs-mcp/'
+    # The agent client end to end (sessions, selections and restarts, relays, tools),
+    # its board a list (romacs-list.el).
+    (re.compile(r'^(?:lisp/agents/romacs-(?:agent|mcp)[^/]*\.el|lisp/ui/romacs-list\.el|crates/romacs-mcp/'
                 r'|crates/romacs-vm-gui/harness/(?:agent_live|fake_[a-z]+)\.py)'), 'agent'),
     # A startup that fails holds its screen until the window is closed: the evaluator's end
     # (main.rs, exit.rs), the screen (loading.rs) and the Lisp errors it shows (startup.rs).
