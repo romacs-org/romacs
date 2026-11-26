@@ -604,6 +604,9 @@ step waits inside its change, running a timer or a redisplay there,
 which would count its waiting as its work. Improvements pass against the
 committed bars. A new metric passes with a `no bar yet` line.
 `--write-bars FILE` requires branch `beta` or `FORGE_TRUNK_JOB=1`.
+The nightly jobs run `tools/record-stage-bars display` and
+`tools/record-stage-bars render` with the pinned toolchain, compositor and
+`CARGO_TARGET_DIR`. A successful run publishes new figures and tighter limits.
 `--record` adds a call graph of each scenario's steps (a frame-pointer build).
 
 ```sh
