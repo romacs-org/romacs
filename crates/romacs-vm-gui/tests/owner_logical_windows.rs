@@ -672,3 +672,6 @@ fn d1_frame_iteration() {
         assert_eq!(result, r#"(t t t t (" *owner-root*"))"#);
     });
 }
+
+#[path = "support/owner_window_regressions.rs"]
+mod regressions;

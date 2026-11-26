@@ -445,3 +445,40 @@ fn an_owner_with_no_display_takes_window_calls_as_nothing() {
     assert_eq!(out, "(nil nil nil nil)");
     eval(&mut vm, "(isolate-kill-all)");
 }
+
+#[test]
+fn headless_window_calls_ignore_invalid_arguments() {
+    let mut vm = vm();
+    let out = eval(
+        &mut vm,
+        r"(let ((owner (owner--spawn)))
+             (isolate-await
+              (owner-call owner
+               '(lambda ()
+                  (let ((frame (selected-frame))
+                        (action (and (boundp 'display-buffer-overriding-action)
+                                     display-buffer-overriding-action)))
+                    (list
+                     (condition-case err (owner-window--start 255) (error (car err)))
+                     (condition-case err (owner-window-request :window nil) (error (car err)))
+                     (and (eq (selected-frame) frame) (equal (frame-list) (list frame)))
+                     (eq action (and (boundp 'display-buffer-overriding-action)
+                                     display-buffer-overriding-action))))))
+              60))",
+    );
+    eval(&mut vm, "(isolate-kill-all)");
+    assert_eq!(out, "(nil nil t t)");
+}
+
+#[test]
+fn an_oversized_owner_cell_signals_instead_of_panicking() {
+    let mut vm = vm();
+    assert_eq!(
+        eval(
+            &mut vm,
+            "(condition-case nil (romacs--owner-set-cell 2147483648 10)
+               (error 'refused))"
+        ),
+        "refused"
+    );
+}
