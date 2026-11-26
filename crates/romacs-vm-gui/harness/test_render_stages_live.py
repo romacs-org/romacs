@@ -82,22 +82,32 @@ class Bars(unittest.TestCase):
         self.assertEqual((self.bars['own_instructions'], self.bars['glyphs_walked'], self.bars['extra_frames']), (660, 3300, 0))
         self.assertEqual((r.ceiling('own_instructions', 5_234_567), r.ceiling('rows_tessellated', 46), r.ceiling('bytes_uploaded', 0)), (5_760_000, 46, 0))
 
-    def test_a_row_count_off_its_bar_fails_either_way_and_a_cheaper_cost_passes(self):
+    def test_more_reuse_and_less_tessellation_pass(self):
         more = r.verdict(TYPED, self.text, 2, {'typed': {**self.bars, 'rows_tessellated': 1}})
         self.assertEqual((more['status'], more['reason']), ('FAIL', 'rows_tessellated 46, over 1'))
         fewer = r.verdict(TYPED, self.text, 2, {'typed': {**self.bars, 'rows_reused': 45}})
         self.assertEqual(fewer['reason'], 'rows_reused 0, under 45')
-        cheaper = {**self.bars, 'own_instructions': 10**6, 'glyphs_walked': 10**6, 'extra_frames': 5}
-        self.assertEqual(r.verdict(TYPED, self.text, 2, {'typed': cheaper})['status'], 'PASS')
+        frames = stderr(*[frame(rows_tessellated=0, rows_reused=46)] * 2)
+        cheaper = r.verdict(TYPED, frames, 2, {'typed': self.bars})
+        self.assertEqual((cheaper['status'], cheaper['off']), ('PASS', []))
+
+    def test_missing_cursor_work_fails(self):
+        frames = stderr(*[frame(cursor_rows=0)] * 2)
+        row = r.verdict(TYPED, frames, 2, {'typed': self.bars})
+        self.assertEqual((row['status'], row['reason']), ('FAIL', 'cursor_rows 0, under 1'))
 
     def test_a_cost_over_its_bar_fails_by_name(self):
         row = r.verdict(TYPED, self.text, 2, {'typed': {**self.bars, 'own_instructions': 599}})
         self.assertEqual(row['reason'], 'own_instructions 600, over 599')
 
-    def test_a_scenario_or_figure_without_a_bar_fails(self):
-        self.assertIn('no bars', r.verdict(TYPED, self.text, 2, {})['reason'])
+    def test_a_scenario_or_figure_without_a_bar_passes_and_is_reported(self):
+        new = r.verdict(TYPED, self.text, 2, {})
+        self.assertEqual((new['status'], new['off']), ('PASS', []))
+        self.assertIn(('font_identities', 6000), new['unbarred'])
         partial = {k: v for k, v in self.bars.items() if k != 'font_identities'}
-        self.assertEqual(r.verdict(TYPED, self.text, 2, {'typed': partial})['reason'], 'font_identities 6000, no bar')
+        row = r.verdict(TYPED, self.text, 2, {'typed': partial})
+        self.assertEqual((row['status'], row['unbarred']), ('PASS', [('font_identities', 6000)]))
+        self.assertIn('typed · font_identities 6000, no bar yet', r.table([row]))
 
     def test_a_refused_measurement_fails_and_has_no_figures(self):
         row = r.verdict(TYPED, stderr(frame()), 2, {'typed': self.bars})

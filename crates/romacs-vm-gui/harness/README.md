@@ -590,10 +590,9 @@ echo area's sync after a message, which no scenario sets work for;
 collections fall where allocating makes them due, as the host's idle
 collection is off), the windows rebuilt, the
 bands expanded, the layouts asked of the layout host and the frames
-submitted. `display_stages_bars.json` holds each scenario's figures:
-instructions and conses under a ceiling, the counts exactly, so a step
-that no longer does its change fails too; a figure whose bar is `"report"`
-is reported and holds nothing (a collection's whole step, which moves with
+submitted. `display_stages_bars.json` sets ceilings for each scenario's
+costs and work counts. A figure whose bar is `"report"` is measured for
+information only (a collection's whole step, which moves with
 what the session ran before: romacs#403).  A scenario with a `:baseline`
 measures a collection in its session before its `:setup`, and holds
 `above_instructions`, what its steps' collections ran above that; each
@@ -602,9 +601,10 @@ files it loaded, by name in report.json. So does a scenario more than a
 tenth of whose steps run more or fewer redisplays than the others, or
 paint when they change nothing, or do not when they do, and one whose
 step waits inside its change, running a timer or a redisplay there,
-which would count its waiting as its work. Work that removes cost lowers the bars in the same change:
-`--write-bars FILE` writes the ones a run would pass. `--record` adds a
-call graph of each scenario's steps (a frame-pointer build).
+which would count its waiting as its work. Improvements pass against the
+committed bars. A new metric passes with a `no bar yet` line.
+`--write-bars FILE` requires branch `beta` or `FORGE_TRUNK_JOB=1`.
+`--record` adds a call graph of each scenario's steps (a frame-pointer build).
 
 ```sh
 python3 -B crates/romacs-vm-gui/harness/display_stages_live.py --binary BIN --output DIR \
@@ -627,7 +627,9 @@ does, and takes medians over the frames that carried a new scene: its own
 instructions are a frame's less the driver's part. Frames drawn with no
 new scene (an animation's) are counted apart, per ten steps.
 `render_stages_bars.json` holds each scenario's figures, measured on a
-software adapter: the rows exactly, every cost under a ceiling. The
+software adapter. Costs and tessellated rows have ceilings, reused rows
+have a floor, and cursor rows are held exactly. New metrics and bar writing
+follow the display stages rules. The
 compositor, and so Romacs, runs on the host's GPU when
 `ROMACS_HARNESS_WLR_ENV` gives it one; a GPU draws the animations a
 software adapter is spared, so a GPU run takes its own `--bars`.
