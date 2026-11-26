@@ -1,0 +1,1 @@
+GTK builds only; version.el and erc.el read it under (featurep 'gtk), which Romacs does not provide

@@ -1,0 +1,1 @@
+textconv.c; input-method text conversion builds only; void in pinned GNU, read only by its event handler

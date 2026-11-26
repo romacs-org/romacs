@@ -13,6 +13,10 @@ host side.
   compiler diagnostics on trunk. The tree check reports recovered files
   and fails new or changed errors. The recorder runs the same test with
   ROMACS_RECORD_LISP_COMPILE_FAILURES=1 on beta or under FORGE_TRUNK_JOB=1.
+- The GUI world derives its missing GNU functions and variables at check
+  time. Each gap has a reason in a file named for the symbol in
+  `ledger/defun-gaps` or `ledger/defvar-gaps`. Remove the file when the
+  symbol becomes available.
 
 ## Traps
 - A key a test types is the event `native::translate` makes of a host key,

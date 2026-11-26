@@ -5,7 +5,7 @@
 pinned commit's Git objects; `check` (run by tools/check-derived) fails when
 the committed fixture differs. The GUI's DEFVAR census
 (crates/romacs-vm-gui/src/defun_census.rs) checks that each is bound in the
-loadup world or listed in ledger/defvar-census.tsv.
+loadup world or has a reason under ledger/defvar-gaps/.
 """
 import argparse
 import json

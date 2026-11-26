@@ -1,0 +1,1 @@
+platform: Android and Haiku and MS-Windows and X11 builds only (Romacs frames are Wayland, pgtk-style)

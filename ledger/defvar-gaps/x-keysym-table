@@ -1,0 +1,1 @@
+platform: X11 build only (Romacs frames are Wayland, pgtk-style)
