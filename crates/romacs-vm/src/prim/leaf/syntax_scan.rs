@@ -57,6 +57,11 @@ struct View<'a> {
     /// countdown's first end (`Listing`): 0 off, 1 armed, 2 handed over.
     // CELL(Plain)
     handover: std::cell::Cell<u8>,
+    /// Holds a summary's scan has asked for (`hold_polls`): while any is
+    /// open, no probe is asked, the bulk pass's and the self-counting
+    /// loops' included.
+    // CELL(Plain)
+    held: std::cell::Cell<u8>,
 }
 
 /// The UTF-8 width of the character whose first byte is LEAD.
@@ -99,7 +104,7 @@ impl<'a> View<'a> {
             self.handover.set(2);
             return true;
         }
-        self.stop && self.vm.native_stop_due()
+        self.stop && self.held.get() == 0 && self.vm.native_stop_due()
     }
     #[inline]
     fn new(vm: &'a Vm, index: usize, table: Value, properties: bool, stop: bool) -> Self {
@@ -122,6 +127,7 @@ impl<'a> View<'a> {
             stop,
             countdown: std::cell::Cell::new(if stop { super::quit_poll::POLL_STEPS } else { u32::MAX }),
             handover: std::cell::Cell::new(0),
+            held: std::cell::Cell::new(0),
         }
     }
     /// The bytes from BYTE to the end of its chunk, the window moved
@@ -166,12 +172,16 @@ impl<'a> View<'a> {
 
 impl scan::Text for View<'_> {
     fn stop_uncounted(&self) -> bool {
-        self.stop && self.vm.native_stop_due()
+        // A summary's scan holds every poll (`hold_polls`), the loops that
+        // count their own steps included.
+        self.stop && self.held.get() == 0 && self.vm.native_stop_due()
     }
     fn hold_polls(&self) -> u32 {
+        self.held.set(self.held.get() + 1);
         self.countdown.replace(u32::MAX)
     }
     fn release_polls(&self, held: u32) {
+        self.held.set(self.held.get().saturating_sub(1));
         // A pass that met a pending quit asked for the next step's poll.
         if self.countdown.get() != 1 {
             self.countdown.set(held);
@@ -295,8 +305,9 @@ impl scan::Text for View<'_> {
                 break;
             }
             // A run over many chunks stops for the quit probe, which the
-            // scan's next step then answers (`stop_due`).
-            if self.stop && self.vm.native_stop_due() {
+            // scan's next step then answers (`stop_due`), unless a summary's
+            // scan holds the polls (`hold_polls`).
+            if self.stop && self.held.get() == 0 && self.vm.native_stop_due() {
                 self.countdown.set(1);
                 break;
             }
@@ -388,16 +399,15 @@ impl ListCall {
     /// The run over VIEW: folded over its summaries where LISTING serves
     /// it (`indexed_lists'), else the scanner's alone, which a first run
     /// LISTING arms stops at the quit probe's first countdown to hand over.
-    /// A scan's start first asks for a pending quit, GNU's maybe_quit
-    /// before scan_lists' setup: every list scan asks, short ones too, so
-    /// the probe is the two loads of `Vm::quit_due' before the full one.
+    /// A plain scan's start first asks for a pending stop, GNU's maybe_quit
+    /// before scan_lists' setup (an indexed one asks on its own entry, and
+    /// counts it): every list scan asks, short ones too, so the probe is
+    /// `Vm::entry_stop_due`'s few loads before the full one.
     fn run(&self, view: &View<'_>, scanner: &mut Scanner<'_, View<'_>>, listing: &mut Listing) -> ListRun {
-        if self.resume.is_none() && view.stop && view.vm.quit_due() && view.vm.native_stop_due() {
-            return Err(Halt::Poll.into());
-        }
         let Listing { served, handover, left, fired, mismatch } = listing;
         match served {
             Some(served) => indexed_lists(view, scanner, served, self, mismatch),
+            None if self.resume.is_none() && view.stop && view.vm.entry_stop_due() => Err(Halt::Poll.into()),
             None => {
                 if *handover {
                     view.handover.set(1);
