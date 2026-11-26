@@ -251,4 +251,13 @@ level, that colour's alone."
           (kill-buffer one)
           (kill-buffer two))))))
 
+(ert-deftest romacs-list-highlights-unless-its-mode-hook-says-not ()
+  (with-temp-buffer
+    (romacs-list-tests-mode)
+    (should hl-line-mode))
+  (let ((romacs-list-tests-mode-hook (list (lambda () (hl-line-mode -1)))))
+    (with-temp-buffer
+      (romacs-list-tests-mode)
+      (should-not hl-line-mode))))
+
 ;;; romacs-list-tests.el ends here
