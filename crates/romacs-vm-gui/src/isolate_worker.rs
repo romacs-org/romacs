@@ -88,6 +88,9 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             }
         };
         vm.eval_source(&format!("(setq isolate-boot '{name})"))?;
+        // An owner forked from this worker lays its master's windows out
+        // with it (`owner-window--start`).
+        vm.set_owner_display(Some(Box::new(romacs_vm_gui::owner_display::OwnerDisplay::default())));
         vm.serve_isolate(socket, name)?;
         vm.shutdown_background_processes()
     })?.join().map_err(|_| "isolate worker panicked".to_owned())?

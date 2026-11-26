@@ -427,3 +427,58 @@ fn a_reported_job_of_a_refused_zygote_settles_with_the_refusal() {
     eval(&mut vm, "(isolate-kill-all)");
     assert_eq!(out, "(t isolate-refused (isolate-refused t) 0)");
 }
+
+/// An owner whose worker attached no owner display (this bare worker, a
+/// headless owner) has no window side: starting it, a request, a delete
+/// and a picture each answer nil, and none signals.
+#[test]
+fn an_owner_with_no_display_takes_window_calls_as_nothing() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let ((owner (owner--spawn)))
+                               (mapcar (lambda (call) (isolate-await (apply #'owner-call owner call) 60))
+                                       '((owner-window--start 3)
+                                         (owner-window-request :window 9001 :view 11 :buffer \"*scratch*\" :revision 1
+                                                               :box (400 . 120) :fringes (0 . 0) :cell (20 . 10)
+                                                               :catalog 13 :scale 1.0 :selected t :bar nil)
+                                         (owner-window-delete :window 9001)
+                                         (owner--picture 9001))))");
+    assert_eq!(out, "(nil nil nil nil)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn headless_window_calls_ignore_invalid_arguments() {
+    let mut vm = vm();
+    let out = eval(
+        &mut vm,
+        r"(let ((owner (owner--spawn)))
+             (isolate-await
+              (owner-call owner
+               '(lambda ()
+                  (let ((frame (selected-frame))
+                        (action (and (boundp 'display-buffer-overriding-action)
+                                     display-buffer-overriding-action)))
+                    (list
+                     (condition-case err (owner-window--start 255) (error (car err)))
+                     (condition-case err (owner-window-request :window nil) (error (car err)))
+                     (and (eq (selected-frame) frame) (equal (frame-list) (list frame)))
+                     (eq action (and (boundp 'display-buffer-overriding-action)
+                                     display-buffer-overriding-action))))))
+              60))",
+    );
+    eval(&mut vm, "(isolate-kill-all)");
+    assert_eq!(out, "(nil nil t t)");
+}
+
+#[test]
+fn an_oversized_owner_cell_signals_instead_of_panicking() {
+    let mut vm = vm();
+    assert_eq!(
+        eval(
+            &mut vm,
+            "(condition-case nil (romacs--owner-set-cell 2147483648 10)
+               (error 'refused))"
+        ),
+        "refused"
+    );
+}

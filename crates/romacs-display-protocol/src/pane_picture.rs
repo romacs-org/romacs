@@ -271,7 +271,13 @@ impl PanePicture {
     ///
     /// `Unencodable` when Postcard cannot write it.
     pub fn encode(&self) -> Result<Vec<u8>, PictureError> {
-        postcard::to_extend(self, PANE_PICTURE_FORMAT.to_le_bytes().to_vec()).map_err(PictureError::Unencodable)
+        // Postcard's Vec writer, not its generic `Extend` one, which takes
+        // each byte through an iterator.
+        let body = postcard::to_allocvec(self).map_err(PictureError::Unencodable)?;
+        let mut bytes = Vec::with_capacity(2 + body.len());
+        bytes.extend_from_slice(&PANE_PICTURE_FORMAT.to_le_bytes());
+        bytes.extend_from_slice(&body);
+        Ok(bytes)
     }
 
     /// The picture BYTES encode, as owner slot SLOT's receiver takes it.

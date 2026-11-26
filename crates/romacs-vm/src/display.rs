@@ -961,7 +961,7 @@ impl Vm {
     /// The Lisp a redisplay runs before it reads the windows, in
     /// redisplay_internal's order: prepare_menu_bars, then the window
     /// change functions. Each runs only when it has something to do.
-    fn prepare_redisplay(&mut self) -> Result<()> {
+    pub(crate) fn prepare_redisplay(&mut self) -> Result<()> {
         if self.redisplay_inhibited()? { return Ok(()); }
         if self.treesit_deferred.is_none() {
             self.run_pre_redisplay()?;
@@ -975,7 +975,7 @@ impl Vm {
     /// `romacs-pane-border' faces' foregrounds: the window with the focus edge
     /// is the one the status bar shows (`status_bar_owner'), whether or
     /// not the frame shows one (VM2-PANE-CHROME).
-    fn pane_chrome(&mut self, frame: Value) -> Result<romacs_layout_input::FrameChrome> {
+    pub(crate) fn pane_chrome(&mut self, frame: Value) -> Result<romacs_layout_input::FrameChrome> {
         let radius = self.frame_parameter_of(frame, "romacs-pane-radius")?
             .and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0);
         let dim = match self.frame_parameter_of(frame, "romacs-pane-dim")? {

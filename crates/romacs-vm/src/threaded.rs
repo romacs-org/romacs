@@ -1619,17 +1619,27 @@ impl Vm {
         };
         // A leaf's Lisp comes here, by pending variables, `safe_call' and
         // watchers: it sees the leaf's frame, whichever way it came.
+        self.leaf_lisp(|vm| {
+            vm.mutator.propagate_next = true;
+            let result = execute_args(vm, trampoline, &registers);
+            vm.mutator.propagate_next = false;
+            result
+        })
+    }
+    /// RUN, which runs Lisp for the leaf a site is running: the caller's
+    /// register stack set aside meanwhile (traced, its allocation unmoved),
+    /// with no escape pending from before, so what RUN's Lisp signals is
+    /// the one `propagated_escape` holds after it. RUN sees the leaf's frame.
+    pub(crate) fn leaf_lisp<T>(&mut self, run: impl FnOnce(&mut Self) -> T) -> T {
         self.with_site_leaf(|vm| {
             vm.suspend_stack();
             vm.mutator.propagated_escape = None;
             vm.mutator.propagated_escape_hooked = false;
             vm.mutator.propagated_eval_depth = None;
-            vm.mutator.propagate_next = true;
-            let result = execute_args(vm, trampoline, &registers);
-            vm.mutator.propagate_next = false;
+            let out = run(vm);
             vm.resume_stack();
             vm.end_nested_execution();
-            result
+            out
         })
     }
     /// BODY, with the activation recorded of any leaf a site is running with

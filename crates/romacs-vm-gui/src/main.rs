@@ -4,7 +4,7 @@ use romacs_display_protocol::submission::{SubmissionReceipt, SubmittedWindow};
 use romacs_display_runtime::paint_host::{PaintHost, PaintSender};
 use romacs_display_runtime::render_thread::DisplaySelection;
 use romacs_display_runtime::thread_comm::InputEvent;
-use romacs_vm::Vm;
+use romacs_vm::{Vm, cursor_colour, placed_animations};
 use serde_json::{Value as Json, json};
 use std::io::{BufRead, Write};
 use std::time::Instant;
@@ -1374,25 +1374,6 @@ fn steady_cursors(frame: &mut romacs_display_protocol::FrameGlyphBuffer, childre
 /// Lay out and submit a frame for a prompt waiting inside a command
 /// (prompt.rs). The same cursor policy as `paint`; no VM access, because the
 /// evaluator is suspended in Lisp and redisplay already ran in its own engine.
-/// The cursor's colour: the frame's `cursor-color', which SNAPSHOT carries.
-fn cursor_colour(snapshot: &romacs_layout_input::FrameSnapshot) -> romacs_display_protocol::Color {
-    let [r, g, b] = snapshot.chrome.cursor.unwrap_or_default();
-    romacs_display_protocol::Color::from_pixel(u32::from_be_bytes([0, r, g, b]))
-}
-
-/// ANIMATIONS on the rows ENDS laid their windows out in: an anchored one
-/// (a working thread) on the row its anchor is laid on, and dropped where
-/// no laid row shows it; any other as it is.
-fn placed_animations(animations: &[(u64, romacs_display_protocol::text_animation::TextAnimation)],
-                     ends: &[romacs_vm::WindowEnd]) -> Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)> {
-    animations.iter().filter_map(|(id, animation)| {
-        if animation.anchor.is_none() { return Some((*id, animation.clone())); }
-        let end = ends.iter().find(|end| end.id == animation.window)?;
-        let rows: Vec<(usize, f32, f32)> = end.rows.iter().map(|row| (row.start, row.y, row.height)).collect();
-        animation.placed(&rows, end.end, end.origin_y).map(|placed| (*id, placed))
-    }).collect()
-}
-
 fn paint_prompt(
     engine: &mut romacs_layout::LayoutEngine,
     sender: &PaintSender,

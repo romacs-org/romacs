@@ -13,7 +13,11 @@
 //! every earlier one, and pings go on while one is unanswered, so a lost
 //! ping or pong costs half a delay, never a wedge for good. Until the
 //! publication socket (O1a-3b) both frames ride the control socket.
+//!
+//! The windows an owner lays out for its master are `display`'s.
 use super::{Result, Vm};
+
+pub(crate) mod display;
 use std::collections::VecDeque;
 use std::time::Duration;
 

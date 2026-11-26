@@ -1,7 +1,8 @@
 # crates/romacs-vm/src/owner
 Owners: zygote children in the role `owner` that serve for the session,
 holding processes whose filters run in their own loop. This module keeps
-their liveness (the ping) and an owner's own flag.
+their liveness (the ping), an owner's own flag, and the windows it lays
+out for its master (`display.rs`, under `lisp/vm/owner-window.el`).
 
 ## Boundary
 - The frames (`Kind::Ping`, `Kind::Pong`), the control socket and the
@@ -41,10 +42,13 @@ their liveness (the ping) and an owner's own flag.
 - A quit or error a filter, sentinel or timer lets out between calls ends
   that turn, never the owner (`romacs--isolate-run-turns`).
 
+- Window layouts live with the host's display (`crates/romacs-vm/src/ui.rs`).
+
 ## Tests
 - `python3 tools/dev-loop romacs-vm --profile gate -E 'test(/owner|isolate|quit_reach/)'`
   and the same with `--test all`: one process a test, since
   `crates/romacs-vm/tests/isolate_interrupt.rs` signals its own process.
+- Windows and pictures: `romacs-vm-gui` test `all`, `owner_logical_windows`.
 
 ## Traps
 - An owner dies with its zygote (its death signal). A termination quits

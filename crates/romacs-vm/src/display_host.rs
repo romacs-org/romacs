@@ -252,6 +252,12 @@ impl Vm {
     pub(crate) fn window_system_host(&mut self) -> Option<&mut (dyn DisplayHost + 'static)> {
         match self.display.as_mut() { Some(display) if display.open => Some(display.host.as_mut()), _ => None }
     }
+    /// Whether frames show fringes: on an open display, and in an owner,
+    /// whose frames are laid out for its master's display with none open
+    /// here (`WindowState::laid_for_display`).
+    pub(crate) fn fringes_shown(&self) -> bool {
+        self.window_system_open() || self.window_state.laid_for_display
+    }
     /// Whether the frame is on an open display: GNU's FRAME_WINDOW_P.
     pub(crate) fn window_system_open(&self) -> bool {
         self.display.as_ref().is_some_and(|display| display.open)
