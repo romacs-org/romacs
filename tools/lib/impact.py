@@ -130,6 +130,12 @@ HARNESS_RULES = (
                 r'|crates/romacs-display-protocol/src/text_animation\.rs'
                 r'|crates/romacs-display-runtime/src/render_thread/text_animations(?:\.rs|/)'
                 r'|crates/romacs-vm-gui/harness/working_live\.py)'), 'working'),
+    # Banners: every pattern drawn by the render thread while the main VM is busy.
+    (re.compile(r'^(?:lisp/ui/romacs-(?:banner|animate)\.el|crates/romacs-logo/src/banner\.rs'
+                r'|crates/romacs-vm/src/(?:prims/logo|display)\.rs'
+                r'|crates/romacs-display-protocol/src/text_animation\.rs'
+                r'|crates/romacs-display-runtime/src/render_thread/text_animations(?:\.rs|/)'
+                r'|crates/romacs-vm-gui/harness/banner_live\.py)'), 'banner'),
     # Lisp changed in a worktree loaded into a running session (romacs-live-update).
     (re.compile(r'^(?:lisp/session/romacs-live[^/]*\.el|crates/romacs-vm-gui/harness/live_update_live\.py)'),
      'live_update'),
