@@ -485,11 +485,11 @@ its account refused a request of the turn
               ;; Refused at a usage limit: its instance's, or its model's
               ;; alone (one that needs usage credits the account has spent;
               ;; its other models still run).
-              ;; A turn that says no API error, a compaction's, ends at
-              ;; the limit its account's report said it was refused at.
-              :limit (pcase (gethash "api_error" line)
+              ;; A turn that says no API error at all, a compaction's, ends
+              ;; at the limit its account's report said it was refused at.
+              :limit (pcase (romacs-agent--value (gethash "api_error" line))
                        ("usage_limit_reached" t) ("model_requires_usage_credits" 'model)
-                       (_ (and refused t)))
+                       ('nil (and refused (not api-error) t)))
               :reason (romacs-agent--claude-reason line)
               :duration (let ((ms (gethash "duration_ms" line))) (and (numberp ms) (/ ms 1000.0)))
               :context-window (let ((usage (gethash "modelUsage" line)) (window nil))
@@ -811,8 +811,9 @@ EFFORT.  Neither can be cleared in a live harness: `restart' then."
   (pcase (gethash "type" line)
     ("user" (list (list :type 'input :text (romacs-agent--text-of (gethash "content" (gethash "message" line)))
                         :images (append (gethash "images" line) nil))
-                  ;; Spoken to before any initialize: a run of before, ready as it is.
-                  (list :type 'handshake :state (list :spoken t))))
+                  ;; Spoken to before any initialize: a run of before, ready as
+                  ;; it is.  A refusal reported before it was another turn's.
+                  (list :type 'handshake :state (list :spoken t :refused nil))))
     ("control_request"
      (pcase (gethash "subtype" (gethash "request" line))
        ("initialize" (list (list :type 'handshake :state (list :initialize (gethash "request_id" line)))))

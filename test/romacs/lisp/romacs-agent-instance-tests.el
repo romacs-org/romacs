@@ -174,7 +174,24 @@ conversation is in `one'; `told' collects what a task is told."
         (romacs-agent--raise session event))
       (should-not (plist-get (car (last (romacs-agent--claude-events
                                          session (romacs-mcp--object "type" "result" "is_error" :false "result" "")))) :limit))
-      (should-not (plist-get (turn session "seven_day_overage_included") :limit)))))
+      (should-not (plist-get (turn session "seven_day_overage_included") :limit))
+      ;; Another error decides: a refusal is no usage limit then.
+      (turn session "seven_day")
+      (should-not (plist-get (car (last (romacs-agent--claude-events
+                                         session (romacs-mcp--object "type" "result" "is_error" t
+                                                                     "api_error" "authentication_failed" "result" ""))))
+                             :limit))
+      ;; A refusal reported between turns is not the next turn's.
+      (dolist (event (romacs-agent--claude-events
+                      session (romacs-mcp--object "type" "rate_limit_event"
+                                                  "rate_limit_info" (romacs-mcp--object "status" "rejected" "rateLimitType" "seven_day"))))
+        (romacs-agent--raise session event))
+      (dolist (event (romacs-agent--decode-driver-record
+                      session 'in (romacs-mcp--object "type" "user" "message" (romacs-mcp--object "role" "user" "content" "go on"))))
+        (romacs-agent--raise session event))
+      (should-not (plist-get (car (last (romacs-agent--claude-events
+                                         session (romacs-mcp--object "type" "result" "is_error" :false "result" "done"))))
+                             :limit)))))
 
 (ert-deftest romacs-agent-instance-a-model-limit ()
   ;; A model that needs usage credits the account has spent: its overage
