@@ -183,13 +183,15 @@ impl Vm {
     }
 
     /// Whether a native loop's entry should stop before it starts, as
-    /// GNU's maybe_quit: `quit_due`, or a user signal arrived that
-    /// `debug-on-event' may name (a safepoint that has looked since took
-    /// it), then the full [`Self::native_stop_due`]. A few loads where
-    /// nothing is pending: every short scan asks.
+    /// GNU's maybe_quit: `quit_due`, or a user signal still queued that
+    /// `debug-on-event' may name, then the full [`Self::native_stop_due`].
+    /// The queue, not the arrival flag: a safepoint that looked while
+    /// `debug-on-event' named another event cleared the flag and left the
+    /// signal counted. A few loads where nothing is pending: every short
+    /// scan asks.
     #[inline(always)]
     pub(crate) fn entry_stop_due(&self) -> bool {
-        (self.quit_due() || crate::host::user_signal_arrived()) && self.native_stop_due()
+        (self.quit_due() || crate::host::user_signal_waiting(u8::MAX)) && self.native_stop_due()
     }
 
     /// The engine's periodic safepoint also polls inside `while-no-input',

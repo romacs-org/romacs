@@ -264,12 +264,14 @@ pub(crate) struct SyntaxIndex {
     contexts: [Option<(Context, u64)>; CONTEXTS],
     tick: u64,
     current: Option<u8>,
+    /// Whether a served parse has cut the whole tree since it was made.
+    cut_whole: bool,
     pub(crate) stats: Stats,
 }
 impl Default for SyntaxIndex {
     fn default() -> Self {
         Self { leaf: LEAF, root: None, contexts: Default::default(), tick: 0, current: None,
-               stats: Stats::default() }
+               cut_whole: false, stats: Stats::default() }
     }
 }
 #[cfg(test)]
@@ -277,7 +279,7 @@ impl SyntaxIndex {
     /// A copy with its summaries, which `Clone` does not keep.
     pub(crate) fn clone_for_test(&self) -> Self {
         Self { leaf: self.leaf, root: self.root.clone(), contexts: self.contexts.clone(), tick: self.tick, current: self.current,
-               stats: self.stats }
+               cut_whole: self.cut_whole, stats: self.stats }
     }
 }
 impl Clone for SyntaxIndex {
@@ -326,6 +328,7 @@ impl SyntaxIndex {
         if self.root.as_ref().is_none_or(|root| root.chars != chars) {
             // Cut where scans reach (`partition`), not all at once.
             self.root = Some(Node::raw(chars));
+            self.cut_whole = false;
         }
         slot
     }
@@ -526,10 +529,13 @@ impl SyntaxIndex {
         let context = self.prepare(chars, context);
         let bit = 1 << context;
         // A served parse is long (`pays'), and parses come back over the
-        // whole text (`syntax-ppss', font-lock): the text is cut and checked
-        // whole once, as the first one's cost, not leaf by leaf as later
-        // ones reach them.
-        self.ready(scanner, context, (0, chars));
+        // whole text (`syntax-ppss', font-lock): a fresh tree is cut and
+        // checked whole, as the first one's cost, not leaf by leaf as later
+        // ones reach them. A cut tree checks a context's leaf ends over the
+        // parse's own range: a second context must not check every leaf.
+        let range = if self.cut_whole { (offset(from), offset(to.max(from))) } else { (0, chars) };
+        self.ready(scanner, context, range);
+        self.cut_whole = true;
         let Self { root: Some(root), stats, .. } = self else { unreachable!("built above") };
         let (first_end, _) = safe_end(root, offset(from), bit);
         let (last_start, ..) = locate(root, offset((to - 1).max(from)), bit);
