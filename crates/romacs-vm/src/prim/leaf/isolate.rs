@@ -91,15 +91,11 @@ impl Leaf<'_> {
     pub(crate) fn isolate_hello_check(&mut self, text: Value) -> Out {
         let view = self.string_view(text)?;
         let theirs = String::from_utf8_lossy(view.bytes());
-        let mut lines = theirs.splitn(4, '\n');
-        let expected = crate::isolate::PROTOCOL.to_string();
+        let mut lines = theirs.splitn(3, '\n');
         let ours = crate::isolate::build_id();
         let reason = match (lines.next(), lines.next(), lines.next()) {
-            (Some("romacs-isolate"), Some(version), _) if version != expected => {
-                format!("Isolate protocol mismatch: expected {expected}, got {version}")
-            }
-            (Some("romacs-isolate"), Some(_), Some(build)) if build == ours => return Ok(Value::NIL),
-            (Some("romacs-isolate"), Some(_), Some(build)) => format!("worker is another build: expected {ours}, got {build}"),
+            (Some("romacs-isolate"), Some(build), Some(_)) if build == ours => return Ok(Value::NIL),
+            (Some("romacs-isolate"), Some(build), Some(_)) => format!("worker is another build: expected {ours}, got {build}"),
             _ => "worker is not a Romacs isolate".into(),
         };
         Ok(self.vm.make_lisp_string(reason.into_bytes(), true))

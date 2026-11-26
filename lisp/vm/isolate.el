@@ -1146,12 +1146,11 @@ could not adopt its world, is refused without waiting for it
                (aset zygote 15 (romacs--isolate-hello-build text))))))))
 
 (defun romacs--isolate-hello-build (text)
-  "The build a worker's hello TEXT names, its third line: its binary
+  "The build a worker's hello TEXT names, its second line: its binary
 identity (`romacs--isolate-hello-check' held it to this process's)."
   (let* ((first (string-search "\n" text))
-         (second (and first (string-search "\n" text (1+ first))))
-         (third (and second (string-search "\n" text (1+ second)))))
-    (and second (substring text (1+ second) third))))
+         (second (and first (string-search "\n" text (1+ first)))))
+    (and second (substring text (1+ first) second))))
 
 (defun romacs--isolate-dispatch ()
   "Deliver every frame that has arrived from every worker."

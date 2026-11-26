@@ -26,7 +26,6 @@ use crate::frozen::{Backing, INLINE_LIMIT};
 use std::collections::VecDeque;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
-pub(crate) const PROTOCOL: u32 = 5;
 const HEADER: usize = 10;
 /// A packet buffer: the header, an inline frozen encoding, and slack for
 /// hello.
@@ -439,9 +438,9 @@ pub(crate) fn build_id() -> &'static str {
     BUILD_ID.get().map_or(env!("VM2_COMPILER_ID"), String::as_str)
 }
 
-/// The hello a worker sends first: protocol, binary identity, boot.
+/// The hello a worker sends first: binary identity and boot.
 pub(crate) fn hello(boot: &str) -> String {
-    format!("romacs-isolate\n{PROTOCOL}\n{}\n{boot}", build_id())
+    format!("romacs-isolate\n{}\n{boot}", build_id())
 }
 
 /// The worker's parent socket, for what runs off the VM: the reports of the
@@ -1171,7 +1170,7 @@ const REFUSED: &str = "unavailable";
 /// The reason a worker's hello TEXT gives for refusing to boot as asked
 /// (`refuse`), or None for a worker that booted.
 pub(crate) fn refusal(text: &str) -> Option<&str> {
-    let mut lines = text.splitn(5, '\n').skip(3);
+    let mut lines = text.splitn(4, '\n').skip(2);
     (lines.next() == Some(REFUSED)).then(|| lines.next().unwrap_or(""))
 }
 

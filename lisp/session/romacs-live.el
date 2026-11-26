@@ -39,6 +39,7 @@
 (require 'subr-x)
 (require 'romacs-live-forms)
 
+(declare-function romacs-runtime-epoch "crates/romacs-vm/src/prims/sysname.rs" ())
 (declare-function isolate-spawn "isolate" (function &rest args))
 (declare-function isolate-on-done "isolate" (future callback))
 (declare-function isolate-await "isolate" (future &optional timeout))
@@ -131,14 +132,15 @@ FILES; or with nil when that cannot be known.  nil: never known.")
         (getenv "ROMACS_RUNTIME_ROOT"))))
 
 (defun romacs-live-build ()
-  "This session's build: a plist of `:commit', `:tree' and `:root', the
-commit nil when the runtime root has no build.json."
+  "This session's build as a plist with `:commit', `:tree', `:root' and `:epoch'.
+The commit is nil when the runtime root has no build.json."
   (let* ((root (romacs-live--runtime-root))
          (file (and root (expand-file-name "build.json" root)))
          (record (and file (file-readable-p file)
                       (ignore-errors (with-temp-buffer (insert-file-contents file)
                                                        (json-parse-buffer :object-type 'plist :null-object nil))))))
-    (list :commit (plist-get record :commit) :tree (plist-get record :tree) :root root)))
+    (list :commit (plist-get record :commit) :tree (plist-get record :tree) :root root
+          :epoch (and (fboundp 'romacs-runtime-epoch) (romacs-runtime-epoch)))))
 
 (defun romacs-live--lisp-roots (root)
   "The directory names under which ROOT's Lisp tree is loaded from."
@@ -296,24 +298,56 @@ when a session image cannot be read.  The deleted directories."
     (let ((coding-system-for-read 'no-conversion)) (insert-file-contents-literally file))
     (buffer-string)))
 
+(defconst romacs-live--epoch-directory "etc/romacs-runtime-epoch.d")
+
+(defun romacs-live--tree-p (directory)
+  "Whether DIRECTORY holds a Romacs runtime generation."
+  (or (file-directory-p (expand-file-name romacs-live--epoch-directory directory))
+      (file-regular-p (expand-file-name "etc/romacs-runtime-epoch" directory))))
+
 (defun romacs-live--tree-of (file)
-  "The Romacs tree FILE is in: the directory holding
-etc/romacs-runtime-epoch whose lisp/ has FILE, or nil."
-  (when-let* ((dir (locate-dominating-file file "etc/romacs-runtime-epoch")))
+  "The Romacs tree whose lisp/ contains FILE, or nil."
+  (when-let* ((dir (locate-dominating-file file #'romacs-live--tree-p)))
     (and (string-prefix-p (expand-file-name "lisp/" dir) (expand-file-name file)) (expand-file-name dir))))
+
+(defun romacs-live--epoch-digest (names)
+  "The runtime generation recorded by fragment NAMES, or nil."
+  (when names
+    (secure-hash 'sha256 (mapconcat (lambda (name) (concat name "\0")) (sort names #'string<) ""))))
+
+(defun romacs-live--tree-epoch (tree)
+  "Read the fragment names from TREE and return their runtime generation."
+  (let ((dir (expand-file-name romacs-live--epoch-directory tree)))
+    (when (file-directory-p dir)
+      (romacs-live--epoch-digest (directory-files dir nil directory-files-no-dot-files-regexp t)))))
+
+(defun romacs-live--revision-epoch (repo sha)
+  "Read the fragment names from SHA in REPO and return their generation."
+  (let ((dir (concat romacs-live--epoch-directory "/")))
+    (romacs-live--epoch-digest
+     (mapcar (lambda (path) (substring path (length dir)))
+             (romacs-live--z (romacs-live--git repo "ls-tree" "-rz" "--name-only" sha "--" dir))))))
+
+(defun romacs-live--epoch-refusals (epochs expected)
+  "Why the source EPOCHS cannot load in a build of generation EXPECTED."
+  (cl-loop for epoch in (delete-dups epochs)
+           unless (and expected (equal epoch expected))
+           collect (format "The runtime epoch is %s and this executable was built for %s. It needs an install"
+                           (or epoch "unavailable") (or expected "an unknown generation"))))
 
 (defun romacs-live--short (rev) (substring rev 0 (min 9 (length rev))))
 
 (defun romacs-live--candidates (source commit)
-  "What SOURCE has that may differ from the build at COMMIT: (LABEL NAMES
-. READ), NAMES the paths that differ and READ a function of a path giving
-\(BLOB . BYTES), nil for a file the source does not have."
+  "Candidates from SOURCE compared to COMMIT as (LABEL NAMES EPOCHS READ).
+NAMES are changed paths.  EPOCHS are the source runtime generations.
+READ returns (BLOB . BYTES) for a path, or nil if absent."
   (pcase (plist-get source :kind)
     ('rev
      (let* ((repo (plist-get source :repository))
             (sha (string-trim (romacs-live--git repo "rev-parse" "--verify" (concat (plist-get source :rev) "^{commit}")))))
        (list (format "%s@%s" (plist-get source :rev) (romacs-live--short sha))
              (romacs-live--z (romacs-live--git repo "diff" "--name-only" "-z" commit sha))
+             (list (romacs-live--revision-epoch repo sha))
              (lambda (path)
                (let ((line (romacs-live--git repo "ls-tree" sha "--" path)))
                  (when (string-match "\\`[0-9]+ blob \\([0-9a-f]+\\)\t" line)
@@ -327,17 +361,20 @@ etc/romacs-runtime-epoch whose lisp/ has FILE, or nil."
                      (if dirty "+dirty" ""))
              (delete-dups (append (romacs-live--z (romacs-live--git tree "diff" "--name-only" "-z" commit))
                                   (romacs-live--z (romacs-live--git tree "ls-files" "-z" "--others" "--exclude-standard" "--" "lisp"))))
+             (list (romacs-live--tree-epoch tree))
              (lambda (path) (romacs-live--read-file (expand-file-name path tree))))))))
 
 (defun romacs-live--files-candidates (files)
-  "Explicit FILES as candidates: (LABEL NAMES . READ), each path lisp/...
-when the file is in a Romacs tree."
-  (let ((paths (mapcar (lambda (file)
-                         (let* ((file (expand-file-name file)) (tree (romacs-live--tree-of file)))
-                           (cons (if tree (file-relative-name file tree) file) file)))
-                       files)))
+  "Candidates from explicit FILES as (LABEL NAMES EPOCHS READ)."
+  (let (paths epochs)
+    (dolist (file files)
+      (let* ((file (expand-file-name file))
+             (tree (romacs-live--tree-of file)))
+        (when tree
+          (push (romacs-live--tree-epoch tree) epochs))
+        (push (cons (if tree (file-relative-name file tree) file) file) paths)))
     (list (if (cdr files) (format "%d files" (length files)) (file-name-nondirectory (car files)))
-          (mapcar #'car paths)
+          (mapcar #'car (nreverse paths)) epochs
           (lambda (path) (romacs-live--read-file (cdr (assoc path paths)))))))
 
 (defun romacs-live--text (bytes)
@@ -364,14 +401,13 @@ REQUEST is a plist: `:source' (`:kind' `rev' with `:repository' and
             refusals))
     (if refusals
         (list :label nil :files nil :refusals refusals :warnings nil)
-      (pcase-let* ((`(,label ,names ,read) (if (eq (plist-get source :kind) 'files)
+      (pcase-let* ((`(,label ,names ,epochs ,read) (if (eq (plist-get source :kind) 'files)
                                                  (romacs-live--files-candidates (plist-get source :files))
                                                (romacs-live--candidates source commit)))
                    (lisp nil) (rust 0))
+        (setq refusals (romacs-live--epoch-refusals epochs (plist-get build :epoch)))
         (dolist (name names)
-          (cond ((member name '("etc/romacs-runtime-epoch"))
-                 (push "The runtime epoch differs from the build's: it needs an install" refusals))
-                ((or (string-prefix-p "lisp/vm/" name) (equal name "lisp/bundled.json"))
+          (cond ((or (string-prefix-p "lisp/vm/" name) (equal name "lisp/bundled.json"))
                  (push (format "%s is read by the VM itself: it needs an install" name) refusals))
                 ((and (string-suffix-p ".el" name)
                       (or (string-prefix-p "lisp/" name) (eq (plist-get source :kind) 'files)))
@@ -990,7 +1026,7 @@ loads) and `:unbind-gone' (as `romacs-live-apply')."
 (defun romacs-live--repository ()
   "The repository a branch or commit comes from."
   (or romacs-live-repository
-      (when-let* ((top (locate-dominating-file default-directory "etc/romacs-runtime-epoch")))
+      (when-let* ((top (locate-dominating-file default-directory #'romacs-live--tree-p)))
         (expand-file-name top))
       (user-error "No repository: set `romacs-live-repository' or update from a worktree")))
 
@@ -998,7 +1034,7 @@ loads) and `:unbind-gone' (as `romacs-live-apply')."
   "The source TEXT names: an existing directory is a worktree, an existing
 file a file, anything else a branch or commit of REPOSITORY."
   (let ((file (expand-file-name text)))
-    (cond ((and (file-directory-p file) (file-exists-p (expand-file-name "etc/romacs-runtime-epoch" file)))
+    (cond ((and (file-directory-p file) (romacs-live--tree-p file))
            (list :kind 'worktree :directory file))
           ((file-regular-p file) (list :kind 'files :files (list file)))
           (t (list :kind 'rev :rev text :repository (or repository (romacs-live--repository)))))))

@@ -85,5 +85,11 @@ fn invocation_name(cx) { copied_variable(cx, "invocation-name") }}
 defsubr! { name = "invocation-directory", gnu = "emacs.c:666", effect = Reads,
 fn invocation_directory(cx) { copied_variable(cx, "invocation-directory") }}
 
+// (romacs-runtime-epoch): the generation of the runtime tree this executable was built for.
+defsubr! { name = "romacs-runtime-epoch", gnu = "romacs:runtime-epoch", effect = Reads,
+fn romacs_runtime_epoch(cx) {
+    Ok(cx.string(crate::host::RUNTIME_EPOCH))
+}}
+
 defsubr! { name = "byteorder", gnu = "data.c:3695", effect = Pure,
 fn byteorder(_cx) { Ok(Value::integer(if cfg!(target_endian = "little") { 108 } else { 66 }).unwrap()) }}

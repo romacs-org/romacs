@@ -31,6 +31,7 @@ use std::time::{Instant, SystemTime};
 pub use std::fs::OpenOptions;
 pub use sys::Passwd;
 
+mod runtime_epoch;
 mod sys;
 
 /// rustix's error, as std's.
@@ -650,11 +651,8 @@ pub fn own_arguments() -> Vec<OsString> {
     std::env::args_os().skip(1).collect()
 }
 
-/// The generation of runtime tree this executable was built for: the tree's own
-/// `etc/romacs-runtime-epoch`, read when the executable was compiled. It is
-/// raised when the tree's layout or its contract with the executable changes
-/// so that one cannot run on the other.
-const RUNTIME_EPOCH: &str = include_str!("../../../etc/romacs-runtime-epoch");
+/// SHA-256 of the sorted, NUL-terminated epoch fragment names at build time.
+pub(crate) const RUNTIME_EPOCH: &str = env!("ROMACS_RUNTIME_EPOCH");
 
 /// The file beside an executable that names its runtime tree, for one that
 /// was copied out of its build: one line, a directory, relative to the file's
@@ -717,9 +715,9 @@ fn found_runtime() -> Result<PathBuf, String> {
     static FOUND: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
     let root = FOUND.get_or_init(|| located_runtime().map(|root| true_tree(&root))).as_ref().map_err(String::clone)?;
     if building() {
-        host_fact("runtime-root", path_json(root));
-        if let Err(why) = runtime_tree(root) {
-            note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why}));
+        match runtime_tree(root) {
+            Ok(()) => host_fact("runtime-root", path_json(root)),
+            Err(why) => note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why})),
         }
     }
     Ok(root.clone())
@@ -809,15 +807,22 @@ fn in_build_target(exe: &Path, tree: &Path) -> bool {
 }
 
 /// Whether ROOT is a runtime tree of this executable's generation, or why not.
+/// The runtime-root fact is published only after this check passes. Recording
+/// the listing here would key that same fact to the directory's enumeration order.
 fn runtime_tree(root: &Path) -> Result<(), String> {
     if !probe(Probe::IsDir, root.join("lisp")) || !probe(Probe::IsDir, root.join("etc")) {
         return Err("is not a Romacs runtime tree (it has no lisp or no etc)".into());
     }
-    let wanted = RUNTIME_EPOCH.trim();
-    match read_to_string(root.join("etc/romacs-runtime-epoch")) {
-        Ok(found) if found.trim() == wanted => Ok(()),
-        Ok(found) => Err(format!("is a runtime tree of generation {}, and this executable was built for generation {wanted}", found.trim())),
-        Err(_) => Err(format!("is a runtime tree from before generations (no etc/romacs-runtime-epoch), and this executable was built for generation {wanted}")),
+    let wanted = RUNTIME_EPOCH;
+    let directory = root.join(runtime_epoch::DIRECTORY);
+    let generation = crate::flight::checked("runtime-epoch", || bytes(&directory), || {
+        std::fs::read_dir(&directory)
+            .and_then(|entries| runtime_epoch::digest(entries.map(|entry| entry.map(|entry| entry.file_name()))))
+    }, |result| crate::flight::outcome(result, |digest| crate::flight::digest(digest.as_bytes())));
+    match generation {
+        Ok(found) if found == wanted => Ok(()),
+        Ok(found) => Err(format!("is a runtime tree of generation {found}, and this executable was built for generation {wanted}")),
+        Err(error) => Err(format!("has no runtime generation ({}: {error}), and this executable was built for generation {wanted}", runtime_epoch::DIRECTORY)),
     }
 }
 
@@ -3582,11 +3587,18 @@ mod tests {
         assert!(runtime_tree(&dir).unwrap_err().contains("not a Romacs runtime tree"));
         std::fs::create_dir_all(dir.join("lisp")).unwrap();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
-        assert!(runtime_tree(&dir).unwrap_err().contains("from before generations"));
-        std::fs::write(dir.join("etc/romacs-runtime-epoch"), "0\n").unwrap();
-        assert!(runtime_tree(&dir).unwrap_err().contains("generation 0"));
-        std::fs::write(dir.join("etc/romacs-runtime-epoch"), RUNTIME_EPOCH).unwrap();
+        assert!(runtime_tree(&dir).unwrap_err().contains("has no runtime generation"));
+        let fragments = dir.join(runtime_epoch::DIRECTORY);
+        std::fs::create_dir(&fragments).unwrap();
+        for entry in std::fs::read_dir(build_root().join(runtime_epoch::DIRECTORY)).unwrap() {
+            std::fs::write(fragments.join(entry.unwrap().file_name()), "Unrelated wording\n").unwrap();
+        }
         assert_eq!(runtime_tree(&dir), Ok(()));
+        std::fs::write(fragments.join("2026-11-26-extra-test-fragment"), "New contract\n").unwrap();
+        let found = runtime_epoch::digest(read_dir(fragments).unwrap().map(|entry| entry.map(|entry| entry.file_name()))).unwrap();
+        let reason = runtime_tree(&dir).unwrap_err();
+        assert!(reason.contains(&format!("generation {found}")), "{reason}");
+        assert!(reason.contains(&format!("generation {RUNTIME_EPOCH}")), "{reason}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
     /// The build tree is a directory name with no `..` in it, so the
