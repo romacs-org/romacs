@@ -46,6 +46,14 @@
          (unwind-protect (progn ,@body)
            (clear-this-command-keys t))))))
 
+(defun command-loop-tests--install-reader ()
+  "Install the reader's Lisp half now, as a VM's first read does, so an
+override of one of its functions made after it is not undone by that read."
+  (unless (fboundp 'romacs--clear-echo)
+    (let ((unread-command-events (list ?z)))
+      (read-event))
+    (clear-this-command-keys)))
+
 (defun command-loop-tests--queues ()
   "Return the remaining events in read priority order."
   (list unread-post-input-method-events unread-command-events
@@ -1225,6 +1233,7 @@ after it undone, then and in the next read."
   "A taken prefix help key restores the command keys as they were, a read
 the help function made in between included."
   (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--install-reader)
   (command-loop-tests--with-input nil
     (local-set-key [24 97] #'ignore)
     (let* ((queue (list 24 8 97))
@@ -1268,6 +1277,7 @@ then starts its own."
 echo area is cleared for it, and puts them back after.  The message shows
 from the watcher of the queue's pop, the write just before the method."
   (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--install-reader)
   (command-loop-tests--with-input nil
     (set--this-command-keys "x")
     (setq unread-command-events (list (cons t ?a)))
@@ -1294,6 +1304,7 @@ from the watcher of the queue's pop, the write just before the method."
   "A host event clears the echo area as it shows after the write of
 `input-method-previous-message', whose watcher may show a message."
   (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--install-reader)
   (command-loop-tests--with-input nil
     (let* ((noninteractive nil)
            (seen nil)
