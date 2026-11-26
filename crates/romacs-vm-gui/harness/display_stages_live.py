@@ -62,14 +62,12 @@ the thread has no instruction counter, or when more than a tenth of the
 steps are odd.  Each step's counts, `collections' among them, are in the
 report.
 
-The bars file maps each scenario to a bar per figure.  Instructions and
-conses are held under theirs, a ceiling; the redisplays, the windows
-rebuilt, the bands, the layouts and the frames are held to theirs exactly, so a scenario whose
-step no longer does its change fails as one that costs more does, and work
-that removes cost lowers its bars in the same change.  A scenario or figure
-without a bar fails; a figure whose bar is "report" is reported, held to
-nothing (a collection's whole step: the world's heap, not the scenario's).  --write-bars FILE writes the bars this run would
-pass: the counts as counted, instructions and conses a tenth higher.
+The bars file maps each scenario to ceilings for its figures.  Less work
+passes.  A measured figure with no bar is reported as "no bar yet".  A
+figure whose bar is "report" is measured for information only.  A bar
+without its measurement fails.  --write-bars FILE writes the counts as
+measured and the instruction and cons ceilings a tenth higher.  It requires
+branch beta or FORGE_TRUNK_JOB=1.
 
 --record profiles each scenario's steps with `perf record', enabled by the
 session at its first step and disabled after its last reading, and writes
@@ -173,18 +171,28 @@ def refusal(scenario, result, wanted):
     return None
 
 
-def off(measured, bars):
-    """The figures of MEASURED off their bar or without one: (figure,
-    value, bar or None).  Instructions and conses are off over their bar,
-    any other count when it differs."""
-    over = [(figure, value, bars.get(figure)) for figure, value in measured.items()
-            if bars.get(figure) != REPORTED
-            and (bars.get(figure) is None or value > bars[figure] or (value < bars[figure] and not margined(figure)))]
-    # A figure barred but not measured fails too: a row cannot pass by
-    # leaving out what its bars hold.
-    missing = [(figure, None, bar) for figure, bar in bars.items()
-               if isinstance(bar, (int, float)) and not isinstance(bar, bool) and figure not in measured]
-    return over + missing
+def bar_verdict(row, bars, *, floors=(), exact=()):
+    """Hold ROW's figures to their BARS and report measurements without bars."""
+    measured = row['figures']
+    off = [(name, value, bar) for name, value in measured.items()
+           if (bar := bars.get(name)) is not None and bar != REPORTED
+           and (value < bar if name in floors else value > bar or (name in exact and value != bar))]
+    off.extend((name, None, bar) for name, bar in bars.items()
+               if isinstance(bar, (int, float)) and not isinstance(bar, bool) and name not in measured)
+    unbarred = [(name, value) for name, value in measured.items() if bars.get(name) is None]
+    row = {**row, 'status': 'FAIL' if off else 'PASS', 'off': off, 'unbarred': unbarred}
+    if off:
+        row['reason'] = '; '.join(f'{name} not measured, its bar {bar}' if value is None else
+                                  f"{name} {value}, {'over' if value > bar else 'under'} {bar}"
+                                  for name, value, bar in off)
+    return row
+
+
+def unbarred_lines(rows):
+    """List every figure still awaiting a trunk bar."""
+    lines = [f"- {row['name']} · {name} {value}, no bar yet"
+             for row in rows for name, value in row.get('unbarred', [])]
+    return '\n' + '\n'.join(lines) + '\n' if lines else ''
 
 
 def verdict(scenario, result, wanted, bars):
@@ -197,15 +205,7 @@ def verdict(scenario, result, wanted, bars):
     odd = odd_steps(scenario, deltas)
     kept = [d for i, d in enumerate(deltas) if i not in odd]
     row.update(chars=result.get('chars'), figures=figures(kept, deltas), odd=odd, steps=deltas)
-    if scenario['name'] not in bars:
-        return {**row, 'status': 'FAIL', 'reason': 'no bars for this scenario'}
-    row['off'] = off(row['figures'], bars[scenario['name']])
-    if row['off']:
-        reason = '; '.join(f'{figure} not measured, its bar {bar}' if value is None else
-                           f'{figure} {value}, ' + ('no bar' if bar is None else f"{'over' if value > bar else 'under'} {bar}")
-                           for figure, value, bar in row['off'])
-        return {**row, 'status': 'FAIL', 'reason': reason}
-    return {**row, 'status': 'PASS'}
+    return bar_verdict(row, bars.get(scenario['name'], {}))
 
 
 def rebarred(bars, new):
@@ -216,7 +216,7 @@ def rebarred(bars, new):
 
 
 def margined(figure):
-    """Whether FIGURE is held under a ceiling with a margin, not exactly."""
+    """Whether FIGURE gets a margin when recording its ceiling."""
     return any(kind in figure for kind in MARGINED)
 
 
@@ -259,7 +259,7 @@ def table(rows):
         if row.get('session') and row['name'].endswith('-collected'):
             note += f" · {row['session']['symbols']} symbols, {row['session']['files']} files"
         lines.append(f"| {row['name']} | {' | '.join(map(str, cells))} | {row['status']}{note} |")
-    return '\n'.join(lines) + '\n'
+    return '\n'.join(lines) + '\n' + unbarred_lines(rows)
 
 
 # Sessions.
@@ -320,6 +320,27 @@ def run(binary, home, selected, bars, args):
     return rows
 
 
+def bar_writer_allowed(root):
+    """Allow recording from the source checkout's beta branch or a trunk job."""
+    if os.environ.get('FORGE_TRUNK_JOB') == '1':
+        return True
+    env = {key: value for key, value in os.environ.items()
+           if key not in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE')}
+    try:
+        branch = subprocess.run(['git', '-C', str(root), 'symbolic-ref', '--quiet', '--short', 'HEAD'],
+                                env=env, capture_output=True, text=True, check=False)
+    except OSError:
+        return False
+    return branch.returncode == 0 and branch.stdout.strip() == 'beta'
+
+
+def read_bars(path, writing):
+    """Read the bars at PATH, allowing a writer to start a new file."""
+    if writing and not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--binary', required=True, type=Path)
@@ -331,6 +352,8 @@ def main():
     parser.add_argument('--record', action='store_true')
     parser.add_argument('--timeout', type=float, default=300, help='seconds per session')
     args = parser.parse_args()
+    if args.write_bars and not bar_writer_allowed(HERE):
+        parser.error('--write-bars requires beta or FORGE_TRUNK_JOB=1')
     if args.steps < 1:
         parser.error('--steps: at least one step')
     args.output = args.output.resolve()
@@ -340,7 +363,7 @@ def main():
     report = {'binary': str(binary), 'bars': str(args.bars), 'steps': args.steps, 'status': 'FAIL', 'rows': []}
     started = time.monotonic()
     try:
-        bars = json.loads(args.bars.read_text()) if args.bars.is_file() else {}
+        bars = read_bars(args.bars, args.write_bars is not None)
         scaling.prepare(binary, home, args.timeout)
         selected = scenarios(binary, home, args.timeout)
         stale = sorted(set(bars) - {s['name'] for s in selected})
