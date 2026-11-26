@@ -172,9 +172,22 @@ fn invalid_utf8_from_a_peer_is_a_protocol_error() {
 }
 
 #[test]
-fn protocol_one_is_refused_at_hello_with_the_version_mismatch() {
-    let script = isolate_script("protocol-one", concat!(
-        "/usr/bin/printf '\\001\\000\\000\\000\\000\\000\\000\\000\\000\\000romacs-isolate\\n1\\n%s\\nbare' \"$0\" >&0\n",
+fn hello_names_the_build_and_boot() {
+    let mut vm = vm();
+    assert_eq!(eval(&mut vm, r#"
+        (let* ((text (romacs--isolate-hello 'bare))
+               (build (romacs--isolate-hello-build text)))
+          (list (equal text (concat "romacs-isolate\n" build "\nbare"))
+                (romacs--isolate-hello-check text)
+                (romacs--isolate-hello-refusal
+                 (concat (romacs--isolate-hello 'unavailable) "\nno world"))))
+        "#), r#"(t nil "no world")"#);
+}
+
+#[test]
+fn another_build_is_refused_at_hello() {
+    let script = isolate_script("foreign-build", concat!(
+        "/usr/bin/printf '\\001\\000\\000\\000\\000\\000\\000\\000\\000\\000romacs-isolate\\nforeign-build\\nbare' >&0\n",
         "exec sleep 15",
     ));
     let mut vm = vm();
@@ -188,7 +201,8 @@ fn protocol_one_is_refused_at_hello_with_the_version_mismatch() {
                (list (car e) (car (nth 2 e)) (isolate-list))))))"));
     eval(&mut vm, "(isolate-kill-all)");
     std::fs::remove_file(&script).unwrap();
-    assert_eq!(out, r#"(isolate-refused "Isolate protocol mismatch: expected 5, got 1" nil)"#);
+    assert!(out.starts_with(r#"(isolate-refused "worker is another build: expected "#), "{out}");
+    assert!(out.ends_with(r#", got foreign-build" nil)"#), "{out}");
 }
 
 #[test]

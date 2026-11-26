@@ -126,7 +126,7 @@ fn isolate_terminated_p(cx) {
 }}
 
 // (romacs--isolate-hello-check TEXT): why a worker's hello TEXT failed
-// validation, or nil if its protocol and its build (its binary identity) are
+// validation, or nil if its build (its binary identity) is
 // this process's own: a fork's is its zygote's, wherever its executable lies.
 defsubr! { name = "romacs--isolate-hello-check", gnu = "romacs:isolate", effect = Reads,
 fn isolate_hello_check(cx, text: Value) {
