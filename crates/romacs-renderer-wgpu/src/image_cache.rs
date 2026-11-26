@@ -1563,6 +1563,16 @@ impl ImageCache {
         }
     }
 
+    /// Retire every image OWNS names (a dead owner's slot), as `retire` does
+    /// one.
+    pub fn retire_where(&mut self, owns: impl Fn(ImageId) -> bool) {
+        let images: std::collections::HashSet<ImageId> =
+            self.states.keys().chain(self.textures.keys()).copied().filter(|&image| owns(image)).collect();
+        for image in images {
+            self.retire(image);
+        }
+    }
+
     /// Publish the complete presentation lifetime fence and release every
     /// retirement which has crossed it.
     pub fn synchronize_retained_images(&mut self, retained: RetainedImageSet) {

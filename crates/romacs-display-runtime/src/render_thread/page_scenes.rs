@@ -349,18 +349,22 @@ impl Resolve for Marks {
 impl super::RenderApp {
     /// Before shader surfaces render: free the scenes of animations that
     /// ended, and bring every GPU-drawn animation's scene of the primary
-    /// window to its motion time.
+    /// window and its panes to its motion time.
     pub(super) fn prepare_page_scenes(&mut self) {
         let gpu = self.render_policy.allows_dynamic_effects();
         let (Some(renderer), Some(window)) = (self.renderer.as_mut(), self.frame_windows.primary_window_mut()) else {
             return;
         };
         let compositor = &mut window.render.compositor;
-        for scene in compositor.text_animations.take_retired() {
+        for scene in compositor.text_animations.take_retired().into_iter().chain(compositor.pane_layers.take_retired()) {
             scene.free(renderer);
         }
         if let Some(frame) = compositor.current_frame.as_ref() {
             compositor.text_animations.prepare_scenes(frame, gpu, renderer);
+        }
+        // A pane's scenes are placed in its own frame, pane-local.
+        for shown in compositor.pane_layers.shown_all_mut() {
+            shown.animations.prepare_scenes(&shown.frame, gpu, renderer);
         }
     }
 
@@ -372,6 +376,9 @@ impl super::RenderApp {
         let compositor = &mut window.render.compositor;
         if let Some(atlas) = compositor.glyph_atlas.as_mut() {
             compositor.text_animations.draw_scenes(renderer, atlas);
+            for shown in compositor.pane_layers.shown_all_mut() {
+                shown.animations.draw_scenes(renderer, atlas);
+            }
         }
     }
 }

@@ -2867,3 +2867,22 @@ fn disabled_animation_policy_never_serves_a_warmed_computed_sequence() {
     assert_ne!(warmed.rgba, disabled_after.rgba);
     assert_eq!(cold_disabled.rgba, disabled_after.rgba);
 }
+
+/// Retirement by predicate (a dead owner's slot) retires the images it
+/// names and keeps the rest.
+#[test]
+fn images_retired_by_predicate_go_and_the_others_stay() {
+    let Some((device, _queue)) = crate::gpu_policy::test_gpu::device(&wgpu::DeviceDescriptor {
+        label: Some("image-cache-retire-where-test"),
+        ..Default::default()
+    }) else {
+        return;
+    };
+    let mut cache = ImageCache::new(&device);
+    let (kept, retired) = (ImageId::new(7), ImageId::new(100));
+    cache.states.insert(kept, ImageState::Pending);
+    cache.states.insert(retired, ImageState::Pending);
+    cache.retire_where(|image| image.get() >= 100);
+    assert!(cache.get_state(retired).is_none(), "a pending image without a texture goes at once");
+    assert!(cache.get_state(kept).is_some());
+}

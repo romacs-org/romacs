@@ -12,7 +12,7 @@ impl RenderApp {
         self.cancel_gpu_startup();
         self.frame_windows
             .reject_ready(frame, "Native window closed during GPU startup");
-        self.frame_windows.take_primary_window();
+        self.take_primary_window();
         self.frame_windows.clear_primary_mapping();
         if frame != 0 {
             self.comms

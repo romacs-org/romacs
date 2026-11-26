@@ -32,6 +32,7 @@ mod lifecycle;
 mod media;
 mod models;
 mod page_scenes;
+mod pane_layers;
 #[cfg(test)]
 #[path = "tests/modifier_policy_cooking_test.rs"]
 mod modifier_policy_cooking_test;

@@ -1019,6 +1019,9 @@ impl RenderApp {
         // The OS reclaims all GPU resources on process exit anyway.
         tracing::info!("Event loop exiting, cleaning up GPU resources");
 
+        // Every pane picture settled and every pane scene freed, while the
+        // renderer lives.
+        self.close_panes();
         self.window_icon.shutdown();
         self.presentation_observer.shutdown();
 

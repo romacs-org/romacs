@@ -34,6 +34,8 @@ pub(crate) struct FrameCompositor {
     pub current_frame: Option<std::sync::Arc<FrameGlyphBuffer>>,
     /// Text animations drawn over the current frame at every draw.
     pub(in crate::render_thread) text_animations: super::text_animations::TextAnimations,
+    /// Owners' pane pictures drawn over the current frame.
+    pub(in crate::render_thread) pane_layers: super::pane_layers::PaneLayers,
     /// Video identities present in the root or any accepted child
     /// presentation. Rebuilt only when editor presentation data changes, so
     /// decoder wakeups do not rescan every glyph at video frame rate.
@@ -177,6 +179,19 @@ pub(in crate::render_thread) type ScrollAnchorsByWindow = std::collections::Hash
 >;
 
 impl FrameCompositor {
+    /// Halt or resume the motion of the text animations, the panes' too,
+    /// as the window loses or regains focus.
+    pub(in crate::render_thread) fn focus_animations(&mut self, focused: bool) {
+        self.text_animations.focus(focused);
+        self.pane_layers.focus(focused);
+    }
+
+    /// The same, as the window is occluded or exposed.
+    pub(in crate::render_thread) fn occlude_animations(&mut self, occluded: bool) {
+        self.text_animations.occlude(occluded);
+        self.pane_layers.occlude(occluded);
+    }
+
     /// A compositor holding no scene yet.
     ///
     /// `glyph_atlas` is `None` before the wgpu device exists (and again after
@@ -186,6 +201,7 @@ impl FrameCompositor {
         Self {
             current_frame: None,
             text_animations: Default::default(),
+            pane_layers: Default::default(),
             current_scene_generation: 0,
             child_frames: ChildFrameManager::new(),
             hidden_child_frames: HashSet::new(),
