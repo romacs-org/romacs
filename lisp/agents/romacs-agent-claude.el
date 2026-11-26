@@ -599,11 +599,11 @@ seconds since the epoch, or nil."
   "Seconds before its expiry by which Claude Code may renew a sign-in: it
 renews minutes ahead, so one with less left is not touched.")
 
-(defun romacs-agent--claude-renew-due (home)
-  "Why the sign-in kept at HOME is not to be touched now, its renewal due
-\(`romacs-agent--claude-renew-margin'), or nil: none, or a fresh one."
-  (when-let* ((sign-in (romacs-agent--claude-token home))
-              ((< (cdr sign-in) (+ (float-time) romacs-agent--claude-renew-margin))))
+(defun romacs-agent--claude-renew-due (sign-in)
+  "Why SIGN-IN (`romacs-agent--claude-token') is not to be touched now, its
+renewal due (`romacs-agent--claude-renew-margin'), or nil: none, or a
+fresh one."
+  (when (and sign-in (<= (cdr sign-in) (+ (float-time) romacs-agent--claude-renew-margin)))
     "its sign-in is due to renew: its next session renews it"))
 
 (defun romacs-agent--claude-credentials-stamp (home)
@@ -688,7 +688,7 @@ newer.  The token goes to curl on its stdin, never on a command line."
 why not: no sign-in, one due to renew (`romacs-agent--claude-renew-due'),
 no answer."
   (if-let* ((sign-in (romacs-agent--claude-token home)))
-      (if-let* ((due (romacs-agent--claude-renew-due home)))
+      (if-let* ((due (romacs-agent--claude-renew-due sign-in)))
           (funcall callback nil due)
         (romacs-agent--claude-fetch-usage (car sign-in) callback))
     (funcall callback nil "not signed in")))
@@ -752,7 +752,8 @@ alone say what it offers.  Not while its sign-in is due to renew
    ((seq-some (lambda (word) (string-match-p "\\`--setting\\(?:s\\|-sources\\)\\(?:=\\|\\'\\)" word))
               (plist-get instance :arguments))
     nil)
-   ((romacs-agent--claude-renew-due (romacs-agent--home 'claude (plist-get instance :config-dir))))
+   ((romacs-agent--claude-renew-due
+     (romacs-agent--claude-token (romacs-agent--home 'claude (plist-get instance :config-dir)))))
    (t
     (list :argv (list (plist-get instance :program) "-p" "--output-format" "stream-json"
                       "--input-format" "stream-json" "--verbose" "--no-session-persistence"

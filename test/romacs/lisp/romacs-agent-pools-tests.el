@@ -707,7 +707,7 @@ a time, `allow' marks it allowed."
             (funcall keep expires)
             (romacs-agent--claude-usage home (lambda (report &optional why) (setq got (or report why))))
             (should-not runs)
-            (should (equal got (romacs-agent--claude-renew-due home))))
+            (should (equal got (romacs-agent--claude-renew-due (romacs-agent--claude-token home)))))
           ;; No sign-in: not known, nothing run.
           (delete-file (expand-file-name ".credentials.json" home))
           (setq runs nil got 'none)

@@ -3917,7 +3917,9 @@ or nil when its harness cannot say."
         (condition-case err
             (funcall usage (romacs-agent--home harness (plist-get instance :config-dir))
                      (lambda (report &optional why)
-                       (when report (romacs-agent-note-room name report))
+                       (when report
+                         (with-demoted-errors "romacs-agent: keeping usage: %S"
+                           (romacs-agent-note-room name report)))
                        (funcall answer (if report (list :report report) (list :error (or why "not known"))))))
           (error (funcall answer (list :error (error-message-string err)))))
       (funcall answer nil))))
@@ -3926,9 +3928,11 @@ or nil when its harness cannot say."
   "Ask INSTANCE's harness for its models (`romacs-agent--probe-models');
 ANSWER with its outcome, or nil when it cannot be asked now."
   (let ((answered nil))
-    (unless (or (romacs-agent--probe-models instance (lambda (outcome) (setq answered t) (funcall answer outcome)))
-                answered)
-      (funcall answer nil))))
+    (cond ((process-live-p (gethash (plist-get instance :name) romacs-agent--models-probes))
+           (funcall answer (list :error "being asked already")))
+          ((or (romacs-agent--probe-models instance (lambda (outcome) (setq answered t) (funcall answer outcome)))
+               answered))
+          (t (funcall answer nil)))))
 
 (defun romacs-agent--refresh-line (result)
   "RESULT, one account's of `romacs-agent-refresh', as a line."
@@ -3950,6 +3954,7 @@ ANSWER with its outcome, or nil when it cannot be asked now."
 
 (define-obsolete-function-alias 'romacs-agent-refresh-models #'romacs-agent-refresh "0.0.22")
 
+;;;###autoload
 (defun romacs-agent-refresh (&optional done)
   "Ask every enabled account, now, what Romacs otherwise learns only from
 its sessions: its usage, kept as its limit report, and its models, kept

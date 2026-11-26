@@ -210,8 +210,8 @@ executable there running the shell SCRIPT; BINDINGS, of `let*', see them."
           (should-not (plist-get codex :usage))
           (should (eq (car (plist-get codex :models)) :models))
           ;; Claude, its sign-in due to renew: neither asked, both say why.
-          (should (equal (plist-get claude :usage) (list :error (romacs-agent--claude-renew-due home))))
-          (should (equal (plist-get claude :models) (list :error (romacs-agent--claude-renew-due home))))
+          (should (equal (plist-get claude :usage) (list :error (romacs-agent--claude-renew-due (romacs-agent--claude-token home)))))
+          (should (equal (plist-get claude :models) (list :error (romacs-agent--claude-renew-due (romacs-agent--claude-token home)))))
           (should-not noted)
           (should (string-match-p "codex: no usage to ask; 2 models" (car said))))
       (delete-directory home t))))
